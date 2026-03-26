@@ -1,4 +1,6 @@
 # NosTale Packet Logger
+<img width="1912" height="1026" alt="artwork (3)" src="https://github.com/user-attachments/assets/974117f1-3f98-4cdf-9e35-12bfbe627125" />
+
 
 A packet logger for the MMORPG NosTale. Intercepts and displays sent and received network packets in real time through a GUI, and allows sending custom packets back to the game.
 
