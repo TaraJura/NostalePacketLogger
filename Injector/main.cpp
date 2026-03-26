@@ -10,19 +10,23 @@ int main()
     std::vector <DWORD> pidList = GetPIDList(targetProcessess);
     std::string dllPath;
     char currentDirectory[MAX_SIZE] = { 0 };
-    
+
     GetCurrentDirectoryA(MAX_SIZE, currentDirectory);
 
     dllPath = currentDirectory;
-    dllPath += "\\FishBot.dll";
+    dllPath += "\\PacketLogger.dll";
+
+    if (pidList.empty())
+    {
+        printf("[ERROR]: No NosTale process found. Make sure the game is running.\n");
+    }
 
     for (auto pid : pidList)
     {
         if (Inject(pid, dllPath.c_str()))
-            printf("[%d]: DLL Injected successfully.\n", pid);
-
+            printf("[%d]: PacketLogger.dll injected successfully.\n", pid);
         else
-            printf("[%d]: DLL Injection failed.\n", pid);
+            printf("[%d]: Injection failed.\n", pid);
     }
 
     printf("\n[INFO]: Injection finished.\n\n");
