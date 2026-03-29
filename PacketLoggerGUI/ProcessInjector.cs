@@ -22,27 +22,6 @@ namespace PacketLoggerGUI
     {
         private static readonly string[] TargetNames = { "NostaleClientX.exe", "NostaleX.dat", "CustomClient.exe" };
 
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, uint nSize, out int lpNumberOfBytesWritten);
-
-        [DllImport("kernel32.dll")]
-        private static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
-
-        [DllImport("kernel32.dll")]
-        private static extern IntPtr GetModuleHandle(string lpModuleName);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, out int lpThreadId);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool CloseHandle(IntPtr hObject);
-
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         private static extern bool SetWindowText(IntPtr hWnd, string lpString);
 
@@ -60,11 +39,6 @@ namespace PacketLoggerGUI
 
         [DllImport("user32.dll")]
         private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
-
-        private const uint PROCESS_ALL_ACCESS = 0x1F0FFF;
-        private const uint MEM_COMMIT = 0x1000;
-        private const uint MEM_RESERVE = 0x2000;
-        private const uint PAGE_READWRITE = 0x04;
 
         public static List<NosTaleProcess> FindNosTaleProcesses()
         {
@@ -150,40 +124,6 @@ namespace PacketLoggerGUI
                 }
                 return true;
             }, IntPtr.Zero);
-        }
-
-        public static bool Inject(int pid, string dllPath)
-        {
-            IntPtr hProc = OpenProcess(PROCESS_ALL_ACCESS, false, pid);
-            if (hProc == IntPtr.Zero)
-                return false;
-
-            try
-            {
-                byte[] dllBytes = Encoding.ASCII.GetBytes(dllPath + "\0");
-
-                IntPtr allocMem = VirtualAllocEx(hProc, IntPtr.Zero, (uint)dllBytes.Length, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-                if (allocMem == IntPtr.Zero)
-                    return false;
-
-                if (!WriteProcessMemory(hProc, allocMem, dllBytes, (uint)dllBytes.Length, out _))
-                    return false;
-
-                IntPtr loadLibAddr = GetProcAddress(GetModuleHandle("kernel32.dll"), "LoadLibraryA");
-                if (loadLibAddr == IntPtr.Zero)
-                    return false;
-
-                IntPtr hThread = CreateRemoteThread(hProc, IntPtr.Zero, 0, loadLibAddr, allocMem, 0, out _);
-                if (hThread == IntPtr.Zero)
-                    return false;
-
-                CloseHandle(hThread);
-                return true;
-            }
-            finally
-            {
-                CloseHandle(hProc);
-            }
         }
     }
 }

@@ -4,6 +4,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
+using PacketLoggerGUI.Bot;
 
 namespace PacketLoggerGUI
 {
@@ -38,6 +39,12 @@ namespace PacketLoggerGUI
         private List<NosTaleProcess> foundProcesses = new List<NosTaleProcess>();
         private FileSystemWatcher? cmdWatcher;
         private static readonly string CmdFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "NosTalePacketCmd.txt");
+
+        // Bot
+        private GameState? gameState;
+        private BotEngine? botEngine;
+        private Button botToggleButton;
+        private Label botStatusLabel;
 
         private class PacketEntry
         {
@@ -219,9 +226,29 @@ namespace PacketLoggerGUI
                 Text = "Packets: 0"
             };
 
+            botToggleButton = new Button
+            {
+                Text = "Start Bot",
+                Size = new Size(90, 28),
+                Location = new Point(630, 8),
+                BackColor = Color.FromArgb(0, 160, 0),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+            botToggleButton.Click += BotToggleButton_Click;
+
+            botStatusLabel = new Label
+            {
+                AutoSize = true,
+                Location = new Point(730, 14),
+                ForeColor = Color.FromArgb(150, 150, 150),
+                Text = "Bot: OFF"
+            };
+
             toolPanel.Controls.AddRange(new Control[] {
                 disconnectButton, clearButton, exportButton,
-                showRecvCheckBox, showSendCheckBox, autoScrollCheckBox, packetCountLabel
+                showRecvCheckBox, showSendCheckBox, autoScrollCheckBox, packetCountLabel,
+                botToggleButton, botStatusLabel
             });
 
             // Filter panel
@@ -531,6 +558,14 @@ namespace PacketLoggerGUI
         {
             this.Text = $"NosTale Packet Logger — PID {proc.Pid} — {proc.WindowTitle}";
 
+            // Init bot systems
+            gameState = new GameState();
+            gameState.OnLog += msg =>
+            {
+                if (this.IsHandleCreated)
+                    this.BeginInvoke(() => SetStatus(msg, Color.FromArgb(0, 122, 204)));
+            };
+
             // Hide process selector, show logger
             processPanel.Visible = false;
             toolPanel.Visible = true;
@@ -561,9 +596,15 @@ namespace PacketLoggerGUI
 
         private void DisconnectButton_Click(object? sender, EventArgs e)
         {
+            botEngine?.Stop();
+            botEngine = null;
+            gameState = null;
             StopCommandFileWatcher();
             pipeClient?.Dispose();
             pipeClient = null;
+            botToggleButton.Text = "Start Bot";
+            botToggleButton.BackColor = Color.FromArgb(0, 160, 0);
+            botStatusLabel.Text = "Bot: OFF";
             ShowProcessSelectorView();
             SetStatus("Disconnected", Color.FromArgb(200, 50, 50));
         }
@@ -572,6 +613,9 @@ namespace PacketLoggerGUI
 
         private void OnPacketReceived(object? sender, PacketReceivedEventArgs e)
         {
+            // Feed packet to game state model
+            gameState?.ProcessPacket(e.Direction, e.Packet.TrimEnd('\n', '\r'));
+
             var entry = new PacketEntry
             {
                 Time = e.Timestamp.ToString("HH:mm:ss.fff"),
@@ -761,6 +805,56 @@ namespace PacketLoggerGUI
             var item = packetListView.SelectedItems[0];
             sendTextBox.Text = item.SubItems[3].Text;
             sendTextBox.Focus();
+        }
+
+        // ===== BOT CONTROLS =====
+
+        private void BotToggleButton_Click(object? sender, EventArgs e)
+        {
+            if (botEngine != null && botEngine.IsRunning)
+            {
+                botEngine.Stop();
+                botToggleButton.Text = "Start Bot";
+                botToggleButton.BackColor = Color.FromArgb(0, 160, 0);
+                botStatusLabel.Text = "Bot: OFF";
+                botStatusLabel.ForeColor = Color.FromArgb(150, 150, 150);
+                return;
+            }
+
+            if (pipeClient == null || !pipeClient.IsConnected || gameState == null)
+            {
+                SetStatus("Not connected — cannot start bot", Color.FromArgb(200, 50, 50));
+                return;
+            }
+
+            var packetSender = new PacketSender(pipeClient);
+            botEngine = new BotEngine(gameState, packetSender);
+            botEngine.OnLog += msg =>
+            {
+                if (this.IsHandleCreated)
+                    this.BeginInvoke(() => SetStatus(msg, Color.FromArgb(0, 122, 204)));
+            };
+
+            // Update bot status label periodically
+            var timer = new System.Windows.Forms.Timer { Interval = 500 };
+            timer.Tick += (s2, e2) =>
+            {
+                if (botEngine == null || !botEngine.IsRunning)
+                {
+                    timer.Stop();
+                    timer.Dispose();
+                    return;
+                }
+                botStatusLabel.Text = $"Bot: {botEngine.State} | HP:{gameState.Self.HpPercent:F0}% | Pos:({gameState.Self.X},{gameState.Self.Y}) | Mobs:{gameState.Entities.Values.Count(x => x.IsMonster)}";
+                botStatusLabel.ForeColor = Color.FromArgb(0, 255, 100);
+            };
+
+            botEngine.Start();
+            timer.Start();
+            botToggleButton.Text = "Stop Bot";
+            botToggleButton.BackColor = Color.FromArgb(200, 50, 50);
+            botStatusLabel.Text = "Bot: Starting...";
+            botStatusLabel.ForeColor = Color.FromArgb(0, 255, 100);
         }
 
         // ===== COMMAND FILE WATCHER =====
