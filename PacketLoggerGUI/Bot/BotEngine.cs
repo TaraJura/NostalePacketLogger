@@ -20,31 +20,35 @@ namespace PacketLoggerGUI.Bot
     {
         private readonly GameState _game;
         private readonly PacketSender _sender;
+        private readonly CombatManager _combat;
         private CancellationTokenSource? _cts;
         private Task? _runTask;
+        private MapGrid? _mapGrid;
 
         public BotState State { get; private set; } = BotState.Idle;
         public bool IsRunning => _runTask != null && !_runTask.IsCompleted;
-        public Entity? CurrentTarget { get; private set; }
+        public CombatManager Combat => _combat;
 
         public event Action<string>? OnLog;
 
         // Config
-        public double AttackRange { get; set; } = 12.0;
-        public double LootRange { get; set; } = 20.0;
         public double HpRestPercent { get; set; } = 30.0;
         public double MpRestPercent { get; set; } = 10.0;
         public int LoopDelayMs { get; set; } = 300;
         public bool AutoLoot { get; set; } = true;
         public bool AutoRevive { get; set; } = true;
-        public int[] SkillRotation { get; set; } = { 0 }; // castId rotation (0 = basic attack)
-        private int _currentSkillIndex = 0;
+        public bool UsePathfinding { get; set; } = false; // disabled until we have map data
 
         public BotEngine(GameState game, PacketSender sender)
         {
             _game = game;
             _sender = sender;
+            _combat = new CombatManager(game, sender);
+            _combat.OnLog += msg => OnLog?.Invoke(msg);
+            _combat.EnsureBasicAttack();
         }
+
+        public void SetMapGrid(MapGrid grid) => _mapGrid = grid;
 
         public void Start()
         {
@@ -58,7 +62,6 @@ namespace PacketLoggerGUI.Bot
         {
             _cts?.Cancel();
             State = BotState.Idle;
-            CurrentTarget = null;
             Log("Bot stopped");
         }
 
@@ -75,7 +78,7 @@ namespace PacketLoggerGUI.Bot
                         continue;
                     }
 
-                    // Handle death
+                    // Dead — auto revive
                     if (_game.Self.IsDead || !_game.Self.IsAlive)
                     {
                         State = BotState.Dead;
@@ -93,7 +96,7 @@ namespace PacketLoggerGUI.Bot
                         continue;
                     }
 
-                    // Rest if HP/MP low
+                    // Rest if resources low
                     if (_game.Self.HpPercent < HpRestPercent || _game.Self.MpPercent < MpRestPercent)
                     {
                         State = BotState.Resting;
@@ -112,47 +115,69 @@ namespace PacketLoggerGUI.Bot
                         continue;
                     }
 
-                    // Find nearest alive monster
-                    var target = _game.NearestMonster;
-
+                    // Find target
+                    var target = _combat.FindTarget();
                     if (target == null)
                     {
                         State = BotState.Idle;
-                        CurrentTarget = null;
                         await Task.Delay(LoopDelayMs, token);
                         continue;
                     }
 
-                    CurrentTarget = target;
                     double dist = target.DistanceTo(_game.Self.X, _game.Self.Y);
+                    double attackRange = _combat.GetMaxSkillRange();
 
-                    if (dist > AttackRange)
+                    if (dist > attackRange)
                     {
                         // Walk toward target
                         State = BotState.Walking;
-                        _sender.Walk(target.X, target.Y, _game.Self.Speed);
-                        Log($"Walking to M{target.VNum} (id:{target.Id}) dist={dist:F0}");
-                        await Task.Delay(800, token);
+
+                        if (UsePathfinding && _mapGrid != null)
+                        {
+                            var path = Pathfinder.FindPathToRange(_mapGrid, _game.Self.X, _game.Self.Y, target.X, target.Y, attackRange - 1);
+                            if (path.Found)
+                            {
+                                var waypoints = path.GetWaypoints(3);
+                                foreach (var wp in waypoints)
+                                {
+                                    if (token.IsCancellationRequested) break;
+                                    _sender.Walk(wp.X, wp.Y, _game.Self.Speed);
+                                    await Task.Delay(600, token);
+                                }
+                            }
+                            else
+                            {
+                                // Fallback to direct walk
+                                _sender.Walk(target.X, target.Y, _game.Self.Speed);
+                                await Task.Delay(800, token);
+                            }
+                        }
+                        else
+                        {
+                            _sender.Walk(target.X, target.Y, _game.Self.Speed);
+                            Log($"Walking to M{target.VNum} dist={dist:F0}");
+                            await Task.Delay(800, token);
+                        }
                     }
                     else
                     {
-                        // Attack with skill rotation
+                        // In range — attack
                         State = BotState.Attacking;
-                        _sender.SelectTarget(target.Type, target.Id);
-                        await Task.Delay(100, token);
+                        bool attacked = _combat.Attack(target);
 
-                        int castId = SkillRotation[_currentSkillIndex % SkillRotation.Length];
-                        _sender.UseSkill(castId, target.Type, target.Id);
-                        _currentSkillIndex++;
+                        if (!attacked)
+                        {
+                            // No skills available, wait
+                            await Task.Delay(500, token);
+                            continue;
+                        }
 
-                        Log($"Attack M{target.VNum} skill={castId} HP={target.HpPercent}%");
                         await Task.Delay(1200, token);
 
-                        // Check if target died — loot
+                        // Loot if target died
                         if (AutoLoot && (target.IsDead || target.HpPercent <= 0))
                         {
-                            await Task.Delay(300, token);
-                            await TryLoot(token);
+                            await TryLoot(target, token);
                         }
                     }
                 }
@@ -166,12 +191,23 @@ namespace PacketLoggerGUI.Bot
             State = BotState.Idle;
         }
 
-        private async Task TryLoot(CancellationToken token)
+        private async Task TryLoot(Entity deadTarget, CancellationToken token)
         {
-            // Look for ground items near our position (items appear as type 2 with specific vnums after kills)
-            // For now just wait — ground item tracking requires more packet analysis
             State = BotState.Looting;
-            await Task.Delay(500, token);
+            // Walk to where the monster died and try to pick up items
+            _sender.Walk(deadTarget.X, deadTarget.Y, _game.Self.Speed);
+            await Task.Delay(800, token);
+
+            // Try picking up any ground items near the dead monster
+            var nearbyItems = _game.GroundItems.Values
+                .Where(i => Math.Abs(i.X - deadTarget.X) <= 3 && Math.Abs(i.Y - deadTarget.Y) <= 3)
+                .ToList();
+
+            foreach (var item in nearbyItems)
+            {
+                _sender.PickUp(item.EntityId);
+                await Task.Delay(300, token);
+            }
         }
 
         private void Log(string msg) => OnLog?.Invoke($"[Bot] {msg}");

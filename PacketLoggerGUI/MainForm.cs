@@ -703,20 +703,38 @@ namespace PacketLoggerGUI
             if (gameState == null) return;
 
             string botState = botEngine?.IsRunning == true ? botEngine.State.ToString() : "OFF";
-            string info = $"Bot State: {botState}\n\n";
-            info += $"Character ID: {gameState.Self.Id}\n";
-            info += $"Position: ({gameState.Self.X}, {gameState.Self.Y})\n";
-            info += $"Map: {gameState.MapId}\n";
-            info += $"HP: {gameState.Self.Hp} / {gameState.Self.HpMax} ({gameState.Self.HpPercent:F0}%)\n";
-            info += $"MP: {gameState.Self.Mp} / {gameState.Self.MpMax} ({gameState.Self.MpPercent:F0}%)\n";
-            info += $"XP: {gameState.Self.Xp}\n";
-            info += $"Speed: {gameState.Self.Speed}\n\n";
+            string info = $"=== Bot: {botState} ===\n\n";
+
+            info += $"--- Character ---\n";
+            info += $"ID: {gameState.Self.Id}\n";
+            info += $"Pos: ({gameState.Self.X}, {gameState.Self.Y})  Map: {gameState.MapId}\n";
+            info += $"HP: {gameState.Self.Hp}/{gameState.Self.HpMax} ({gameState.Self.HpPercent:F0}%)\n";
+            info += $"MP: {gameState.Self.Mp}/{gameState.Self.MpMax} ({gameState.Self.MpPercent:F0}%)\n";
+            info += $"Lv: {gameState.Self.Level}  Job Lv: {gameState.Self.JobLevel}\n";
+            info += $"XP: {gameState.Self.Xp}/{gameState.Self.XpMax}\n";
+            info += $"Speed: {gameState.Self.Speed}  Dead: {gameState.Self.IsDead}  Rest: {gameState.Self.IsResting}\n\n";
 
             var entities = gameState.Entities.Values.ToArray();
-            info += $"Entities: {entities.Length}\n";
-            info += $"  Monsters: {entities.Count(x => x.IsMonster)}\n";
-            info += $"  Players:  {entities.Count(x => x.IsPlayer)}\n";
-            info += $"  NPCs:     {entities.Count(x => x.IsNpc)}\n";
+            int aliveMonsters = entities.Count(x => x.IsMonster && x.IsAlive);
+            info += $"--- Map ---\n";
+            info += $"Monsters: {aliveMonsters} alive  |  Players: {entities.Count(x => x.IsPlayer)}  |  NPCs: {entities.Count(x => x.IsNpc)}\n";
+            info += $"Portals: {gameState.Portals.Count}\n";
+            foreach (var p in gameState.Portals.Values.Take(5))
+                info += $"  Portal ({p.X},{p.Y}) -> Map {p.DestMapId}\n";
+
+            if (botEngine?.Combat?.CurrentTarget is { } target)
+            {
+                info += $"\n--- Target ---\n";
+                info += $"M{target.VNum} (id:{target.Id}) HP:{target.HpPercent}%\n";
+                info += $"Pos: ({target.X},{target.Y}) Dist: {target.DistanceTo(gameState.Self.X, gameState.Self.Y):F0}\n";
+            }
+
+            if (botEngine?.Combat?.Skills.Count > 0)
+            {
+                info += $"\n--- Skills ---\n";
+                foreach (var s in botEngine.Combat.Skills)
+                    info += $"  [{s.CastId}] {(s.IsReady ? "READY" : "CD")} range:{s.Range}\n";
+            }
 
             botInfoLabel.Text = info;
 
