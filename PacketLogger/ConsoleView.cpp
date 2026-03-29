@@ -20,7 +20,8 @@ static std::string getCurrentTime()
 
 void Console::showHeader()
 {
-	logFile.open("packets.log", std::ios::out | std::ios::app);
+	// Log to a fixed path so it's easy to tail from any terminal
+	logFile.open("C:\\NosTalePacketLog.txt", std::ios::out | std::ios::trunc);
 
 	std::string text;
 	text += "======== NosTale Packet Logger ========\n\n";

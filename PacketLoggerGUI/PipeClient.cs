@@ -34,15 +34,18 @@ namespace PacketLoggerGUI
 
         public bool IsConnected => _connected;
 
-        public async Task ConnectAsync()
+        public async Task ConnectAsync(int timeoutMs = 10000)
         {
-            _cts = new CancellationTokenSource();
+            _cts = new CancellationTokenSource(timeoutMs);
 
             _pipePackets = new NamedPipeClientStream(".", "NosTalePacketLogger_packets", PipeDirection.In);
             _pipeCommands = new NamedPipeClientStream(".", "NosTalePacketLogger_commands", PipeDirection.Out);
 
             await _pipePackets.ConnectAsync(_cts.Token);
             await _pipeCommands.ConnectAsync(_cts.Token);
+
+            // Replace the timeout CTS with a fresh one for the read loop
+            _cts = new CancellationTokenSource();
 
             _connected = true;
             _readTask = Task.Run(() => ReadLoop(_cts.Token));

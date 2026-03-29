@@ -1,10 +1,39 @@
 #include <Windows.h>
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <sstream>
 #include <iomanip>
+#include <chrono>
 #include "Packetlogger.h"
 #include "PipeServer.h"
+
+// Prevent closing the debug console from killing the game process
+BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType)
+{
+    if (ctrlType == CTRL_CLOSE_EVENT || ctrlType == CTRL_C_EVENT)
+        return TRUE; // Block the close — don't terminate the game
+    return FALSE;
+}
+
+std::ofstream g_logFile;
+
+void LogToFile(const std::string& type, const std::string& packet)
+{
+    if (!g_logFile.is_open()) return;
+
+    auto now = std::chrono::system_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+    auto time = std::chrono::system_clock::to_time_t(now);
+    struct tm t;
+    localtime_s(&t, &time);
+
+    char timeBuf[32];
+    sprintf_s(timeBuf, "%02d:%02d:%02d.%03d",
+        t.tm_hour, t.tm_min, t.tm_sec, (int)ms.count());
+
+    g_logFile << timeBuf << " [" << type << "] " << packet << std::endl;
+}
 
 DWORD WINAPI MainThread(LPVOID param)
 {
@@ -12,9 +41,14 @@ DWORD WINAPI MainThread(LPVOID param)
     SafeQueue qSend;
 
     AllocConsole();
+    SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
     FILE* file = nullptr;
     freopen_s(&file, "CONOUT$", "w", stdout);
-    SetConsoleTitleA("NosTale Packet Logger [DLL]");
+    SetConsoleTitleA("NosTale Packet Logger [DLL] - DO NOT CLOSE (use GUI to disconnect)");
+
+    // Open live log file at C:\NosTalePacketLog.txt for easy access
+    g_logFile.open("C:\\NosTalePacketLog.txt", std::ios::out | std::ios::trunc);
+    std::cout << "[*] Live log: C:\\NosTalePacketLog.txt\n";
 
     std::cout << "[*] Waiting for GUI to connect...\n";
 
@@ -32,12 +66,10 @@ DWORD WINAPI MainThread(LPVOID param)
 
     Packetlogger::Initialize(&qRecv, &qSend);
 
-    // Debug: print found addresses
     std::cout << "[DEBUG] RecvHookAddy = 0x" << std::hex << Packetlogger::GetRecvAddy() << std::dec << "\n";
     std::cout << "[DEBUG] SendAddy     = 0x" << std::hex << Packetlogger::GetSendAddy() << std::dec << "\n";
     std::cout << "[DEBUG] SendHookReady = " << (Packetlogger::IsSendHookActive() ? "YES" : "NO") << "\n";
 
-    // Print first 10 bytes at SendAddy for analysis
     if (Packetlogger::GetSendAddy() != 0)
     {
         std::cout << "[DEBUG] Bytes at SendAddy: ";
@@ -59,7 +91,6 @@ DWORD WINAPI MainThread(LPVOID param)
 
     while (PipeServer::IsConnected())
     {
-        // Check for commands from GUI
         std::string command;
         while (PipeServer::Receive(command))
         {
@@ -67,10 +98,10 @@ DWORD WINAPI MainThread(LPVOID param)
             {
                 std::string packet = command.substr(5);
                 Packetlogger::SendPacket(packet.c_str());
-                // Log the manual send to GUI as a SEND packet
                 PipeServer::Send("SEND|" + packet);
                 PipeServer::Send("STATUS|Sent: " + packet);
                 std::cout << "[SENT] " << packet << "\n";
+                LogToFile("MANUAL_SEND", packet);
             }
             else if (command.substr(0, 4) == "QUIT")
             {
@@ -78,19 +109,19 @@ DWORD WINAPI MainThread(LPVOID param)
             }
         }
 
-        // Drain recv queue
         while (!qRecv.empty())
         {
             std::string packet = qRecv.front();
             PipeServer::Send("RECV|" + packet);
+            LogToFile("RECV", packet);
             qRecv.pop();
         }
 
-        // Drain send queue (from hook)
         while (!qSend.empty())
         {
             std::string packet = qSend.front();
             PipeServer::Send("SEND|" + packet);
+            LogToFile("SEND", packet);
             qSend.pop();
         }
 
@@ -104,6 +135,9 @@ cleanup:
     Packetlogger::UnhookSend();
     Packetlogger::UnhookRecv();
     PipeServer::Stop();
+
+    if (g_logFile.is_open())
+        g_logFile.close();
 
     if (file != nullptr)
         fclose(file);

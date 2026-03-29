@@ -9,11 +9,20 @@ namespace PacketLoggerGUI
 {
     public class MainForm : Form
     {
+        // Process selector controls
+        private Panel processPanel;
+        private ListBox processListBox;
+        private Button refreshButton;
+        private Button injectButton;
+
+        // Packet logger controls
+        private Panel toolPanel;
+        private Panel filterPanel;
         private ListView packetListView;
         private TextBox filterTextBox;
         private TextBox sendTextBox;
         private Button sendButton;
-        private Button connectButton;
+        private Button disconnectButton;
         private Button clearButton;
         private Button exportButton;
         private CheckBox showRecvCheckBox;
@@ -21,10 +30,12 @@ namespace PacketLoggerGUI
         private CheckBox autoScrollCheckBox;
         private Label statusLabel;
         private Label packetCountLabel;
+        private Panel sendPanel;
 
         private PipeClient? pipeClient;
         private List<PacketEntry> allPackets = new List<PacketEntry>();
         private object lockObj = new object();
+        private List<NosTaleProcess> foundProcesses = new List<NosTaleProcess>();
 
         private class PacketEntry
         {
@@ -37,6 +48,7 @@ namespace PacketLoggerGUI
         public MainForm()
         {
             InitializeComponent();
+            RefreshProcessList();
         }
 
         private void InitializeComponent()
@@ -49,31 +61,108 @@ namespace PacketLoggerGUI
             this.BackColor = Color.FromArgb(30, 30, 30);
             this.ForeColor = Color.White;
 
-            // Top toolbar panel
-            var toolPanel = new Panel
+            // === PROCESS SELECTOR PANEL (shown initially) ===
+            processPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.FromArgb(30, 30, 30),
+                Padding = new Padding(40)
+            };
+
+            var titleLabel = new Label
+            {
+                Text = "NosTale Packet Logger",
+                Font = new Font("Segoe UI", 20, FontStyle.Bold),
+                ForeColor = Color.FromArgb(0, 180, 255),
+                AutoSize = true,
+                Location = new Point(40, 30)
+            };
+
+            var subtitleLabel = new Label
+            {
+                Text = "Select a NosTale process to inject and start logging packets",
+                Font = new Font("Segoe UI", 10),
+                ForeColor = Color.Gray,
+                AutoSize = true,
+                Location = new Point(42, 65)
+            };
+
+            processListBox = new ListBox
+            {
+                Location = new Point(40, 100),
+                Size = new Size(600, 200),
+                BackColor = Color.FromArgb(40, 40, 40),
+                ForeColor = Color.White,
+                Font = new Font("Consolas", 11),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            processListBox.DoubleClick += (s, e) => InjectButton_Click(s, e);
+
+            refreshButton = new Button
+            {
+                Text = "Refresh",
+                Size = new Size(100, 35),
+                Location = new Point(40, 315),
+                BackColor = Color.FromArgb(60, 60, 60),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 10)
+            };
+            refreshButton.Click += (s, e) => RefreshProcessList();
+
+            injectButton = new Button
+            {
+                Text = "Inject && Connect",
+                Size = new Size(160, 35),
+                Location = new Point(150, 315),
+                BackColor = Color.FromArgb(0, 122, 204),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 10, FontStyle.Bold)
+            };
+            injectButton.Click += InjectButton_Click;
+
+            var hintLabel = new Label
+            {
+                Text = "Tip: Double-click a process to inject. PIDs are shown in the game window titles.",
+                Font = new Font("Segoe UI", 9),
+                ForeColor = Color.FromArgb(120, 120, 120),
+                AutoSize = true,
+                Location = new Point(42, 365)
+            };
+
+            processPanel.Controls.AddRange(new Control[] {
+                titleLabel, subtitleLabel, processListBox, refreshButton, injectButton, hintLabel
+            });
+
+            // === PACKET LOGGER CONTROLS (shown after injection) ===
+
+            // Top toolbar
+            toolPanel = new Panel
             {
                 Dock = DockStyle.Top,
                 Height = 45,
                 BackColor = Color.FromArgb(45, 45, 45),
-                Padding = new Padding(8, 8, 8, 8)
+                Padding = new Padding(8, 8, 8, 8),
+                Visible = false
             };
 
-            connectButton = new Button
+            disconnectButton = new Button
             {
-                Text = "Connect",
-                Size = new Size(90, 28),
+                Text = "Disconnect",
+                Size = new Size(100, 28),
                 Location = new Point(8, 8),
-                BackColor = Color.FromArgb(0, 122, 204),
+                BackColor = Color.FromArgb(180, 50, 50),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat
             };
-            connectButton.Click += ConnectButton_Click;
+            disconnectButton.Click += DisconnectButton_Click;
 
             clearButton = new Button
             {
                 Text = "Clear",
                 Size = new Size(70, 28),
-                Location = new Point(105, 8),
+                Location = new Point(115, 8),
                 BackColor = Color.FromArgb(60, 60, 60),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat
@@ -84,7 +173,7 @@ namespace PacketLoggerGUI
             {
                 Text = "Export",
                 Size = new Size(70, 28),
-                Location = new Point(182, 8),
+                Location = new Point(192, 8),
                 BackColor = Color.FromArgb(60, 60, 60),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat
@@ -96,7 +185,7 @@ namespace PacketLoggerGUI
                 Text = "RECV",
                 Checked = true,
                 AutoSize = true,
-                Location = new Point(270, 12),
+                Location = new Point(280, 12),
                 ForeColor = Color.Cyan
             };
             showRecvCheckBox.CheckedChanged += (s, e) => ApplyFilter();
@@ -106,7 +195,7 @@ namespace PacketLoggerGUI
                 Text = "SEND",
                 Checked = true,
                 AutoSize = true,
-                Location = new Point(340, 12),
+                Location = new Point(350, 12),
                 ForeColor = Color.Yellow
             };
             showSendCheckBox.CheckedChanged += (s, e) => ApplyFilter();
@@ -116,30 +205,31 @@ namespace PacketLoggerGUI
                 Text = "Auto-scroll",
                 Checked = true,
                 AutoSize = true,
-                Location = new Point(410, 12),
+                Location = new Point(420, 12),
                 ForeColor = Color.LightGray
             };
 
             packetCountLabel = new Label
             {
                 AutoSize = true,
-                Location = new Point(520, 14),
+                Location = new Point(530, 14),
                 ForeColor = Color.Gray,
                 Text = "Packets: 0"
             };
 
             toolPanel.Controls.AddRange(new Control[] {
-                connectButton, clearButton, exportButton,
+                disconnectButton, clearButton, exportButton,
                 showRecvCheckBox, showSendCheckBox, autoScrollCheckBox, packetCountLabel
             });
 
             // Filter panel
-            var filterPanel = new Panel
+            filterPanel = new Panel
             {
                 Dock = DockStyle.Top,
                 Height = 35,
                 BackColor = Color.FromArgb(40, 40, 40),
-                Padding = new Padding(8, 4, 8, 4)
+                Padding = new Padding(8, 4, 8, 4),
+                Visible = false
             };
 
             var filterLabel = new Label
@@ -173,7 +263,8 @@ namespace PacketLoggerGUI
                 ForeColor = Color.White,
                 Font = new Font("Consolas", 9),
                 GridLines = true,
-                VirtualMode = false
+                VirtualMode = false,
+                Visible = false
             };
 
             packetListView.Columns.Add("Time", 80);
@@ -202,7 +293,6 @@ namespace PacketLoggerGUI
 
             packetListView.ContextMenuStrip = contextMenu;
 
-            // Ctrl+C keyboard shortcut
             packetListView.KeyDown += (s, e) =>
             {
                 if (e.Control && e.KeyCode == Keys.C)
@@ -212,16 +302,16 @@ namespace PacketLoggerGUI
                 }
             };
 
-            // Double-click to send packet
             packetListView.DoubleClick += (s, e) => SendSelectedPacket();
 
-            // Send panel at bottom
-            var sendPanel = new Panel
+            // Send panel
+            sendPanel = new Panel
             {
                 Dock = DockStyle.Bottom,
                 Height = 45,
                 BackColor = Color.FromArgb(45, 45, 45),
-                Padding = new Padding(8, 8, 8, 8)
+                Padding = new Padding(8, 8, 8, 8),
+                Visible = false
             };
 
             var sendLabel = new Label
@@ -240,7 +330,7 @@ namespace PacketLoggerGUI
                 ForeColor = Color.White,
                 BorderStyle = BorderStyle.FixedSingle
             };
-            sendTextBox.PlaceholderText = "Type packet(s) to send — use ; to chain multiple (e.g. walk 60 95 1 10;ptctl 20 1 ID 60 95 ID 10)";
+            sendTextBox.PlaceholderText = "Type packet(s) to send — use ; to chain multiple";
             sendTextBox.KeyDown += (s, e) =>
             {
                 if (e.KeyCode == Keys.Enter)
@@ -268,67 +358,193 @@ namespace PacketLoggerGUI
             {
                 Dock = DockStyle.Bottom,
                 Height = 25,
-                BackColor = Color.FromArgb(0, 122, 204),
+                BackColor = Color.FromArgb(60, 60, 60),
                 ForeColor = Color.White,
-                Text = "  Disconnected - Click Connect after injecting the DLL",
+                Text = "  Select a process and click Inject && Connect",
                 TextAlign = ContentAlignment.MiddleLeft
             };
 
-            // Layout order matters (last added = on top for Dock)
+            // Add controls — order matters for docking
             this.Controls.Add(packetListView);
+            this.Controls.Add(processPanel);
             this.Controls.Add(filterPanel);
             this.Controls.Add(toolPanel);
             this.Controls.Add(sendPanel);
             this.Controls.Add(statusLabel);
 
-            // Handle resize for send panel
+            // Handle resize
             this.Resize += (s, e) =>
             {
+                // Process panel
+                processListBox.Width = this.ClientSize.Width - 80;
+                injectButton.Left = refreshButton.Right + 10;
+
+                // Packet logger
                 sendTextBox.Width = this.ClientSize.Width - 160;
                 sendButton.Left = sendTextBox.Right + 10;
                 filterTextBox.Width = this.ClientSize.Width - 80;
-                packetListView.Columns[3].Width = this.ClientSize.Width - 260;
+                if (packetListView.Columns.Count > 3)
+                    packetListView.Columns[3].Width = this.ClientSize.Width - 260;
             };
         }
 
-        private async void ConnectButton_Click(object? sender, EventArgs e)
+        // ===== PROCESS SELECTOR =====
+
+        private void RefreshProcessList()
         {
-            if (pipeClient != null && pipeClient.IsConnected)
+            processListBox.Items.Clear();
+            foundProcesses = ProcessInjector.FindNosTaleProcesses();
+
+            // Tag windows with PID
+            foreach (var proc in foundProcesses)
+                ProcessInjector.TagWindowWithPID(proc.Pid);
+
+            // Re-read titles after tagging
+            foundProcesses = ProcessInjector.FindNosTaleProcesses();
+
+            if (foundProcesses.Count == 0)
             {
-                pipeClient.SendQuit();
-                pipeClient.Dispose();
-                pipeClient = null;
-                connectButton.Text = "Connect";
-                SetStatus("Disconnected", Color.FromArgb(200, 50, 50));
+                processListBox.Items.Add("No NosTale processes found. Make sure the game is running.");
+                injectButton.Enabled = false;
+            }
+            else
+            {
+                foreach (var proc in foundProcesses)
+                    processListBox.Items.Add(proc.ToString());
+
+                processListBox.SelectedIndex = 0;
+                injectButton.Enabled = true;
+            }
+
+            SetStatus($"Found {foundProcesses.Count} NosTale process(es)", Color.FromArgb(60, 60, 60));
+        }
+
+        private async void InjectButton_Click(object? sender, EventArgs e)
+        {
+            if (processListBox.SelectedIndex < 0 || processListBox.SelectedIndex >= foundProcesses.Count)
+            {
+                SetStatus("Select a process first", Color.FromArgb(200, 150, 0));
                 return;
             }
 
-            connectButton.Text = "Connecting...";
-            connectButton.Enabled = false;
-            SetStatus("Waiting for DLL pipe...", Color.FromArgb(200, 150, 0));
+            var selected = foundProcesses[processListBox.SelectedIndex];
 
-            try
+            injectButton.Enabled = false;
+            refreshButton.Enabled = false;
+            SetStatus($"Injecting into PID {selected.Pid}...", Color.FromArgb(200, 150, 0));
+
+            // Find DLL path — look next to this exe
+            string exeDir = AppDomain.CurrentDomain.BaseDirectory;
+            string dllPath = Path.Combine(exeDir, "PacketLogger.dll");
+
+            // Also check Release folder (for dev)
+            if (!File.Exists(dllPath))
             {
-                pipeClient = new PipeClient();
-                pipeClient.PacketReceived += OnPacketReceived;
-                pipeClient.StatusReceived += OnStatusReceived;
-                pipeClient.Disconnected += OnDisconnected;
-
-                await pipeClient.ConnectAsync();
-
-                connectButton.Text = "Disconnect";
-                connectButton.Enabled = true;
-                SetStatus("Connected - Logging packets", Color.FromArgb(0, 150, 0));
+                string? solutionDir = Path.GetDirectoryName(exeDir.TrimEnd(Path.DirectorySeparatorChar));
+                while (solutionDir != null)
+                {
+                    string candidate = Path.Combine(solutionDir, "Release", "PacketLogger.dll");
+                    if (File.Exists(candidate))
+                    {
+                        dllPath = candidate;
+                        break;
+                    }
+                    solutionDir = Path.GetDirectoryName(solutionDir);
+                }
             }
-            catch (Exception ex)
+
+            if (!File.Exists(dllPath))
             {
-                connectButton.Text = "Connect";
-                connectButton.Enabled = true;
-                SetStatus("Connection failed: " + ex.Message, Color.FromArgb(200, 50, 50));
-                pipeClient?.Dispose();
-                pipeClient = null;
+                SetStatus("PacketLogger.dll not found! Place it next to the GUI exe or in Release/", Color.FromArgb(200, 50, 50));
+                injectButton.Enabled = true;
+                refreshButton.Enabled = true;
+                return;
             }
+
+            bool injected = ProcessInjector.Inject(selected.Pid, dllPath);
+
+            if (!injected)
+            {
+                SetStatus($"Injection failed for PID {selected.Pid}. Run as Administrator?", Color.FromArgb(200, 50, 50));
+                injectButton.Enabled = true;
+                refreshButton.Enabled = true;
+                return;
+            }
+
+            SetStatus($"Injected into PID {selected.Pid}. Waiting for DLL to initialize...", Color.FromArgb(200, 150, 0));
+
+            // Try connecting with retries — DLL needs time to start up and create pipes
+            const int maxRetries = 3;
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                await System.Threading.Tasks.Task.Delay(1000);
+                SetStatus($"Connecting to pipe (attempt {attempt}/{maxRetries})...", Color.FromArgb(200, 150, 0));
+
+                try
+                {
+                    pipeClient = new PipeClient();
+                    pipeClient.PacketReceived += OnPacketReceived;
+                    pipeClient.StatusReceived += OnStatusReceived;
+                    pipeClient.Disconnected += OnDisconnected;
+
+                    await pipeClient.ConnectAsync(5000);
+
+                    // Success — switch to packet logger view
+                    ShowPacketLoggerView(selected);
+                    return;
+                }
+                catch (Exception)
+                {
+                    pipeClient?.Dispose();
+                    pipeClient = null;
+                }
+            }
+
+            SetStatus($"Pipe connection failed after {maxRetries} attempts. Is the DLL console visible?", Color.FromArgb(200, 50, 50));
+            injectButton.Enabled = true;
+            refreshButton.Enabled = true;
         }
+
+        private void ShowPacketLoggerView(NosTaleProcess proc)
+        {
+            this.Text = $"NosTale Packet Logger — PID {proc.Pid} — {proc.WindowTitle}";
+
+            // Hide process selector, show logger
+            processPanel.Visible = false;
+            toolPanel.Visible = true;
+            filterPanel.Visible = true;
+            packetListView.Visible = true;
+            sendPanel.Visible = true;
+
+            SetStatus($"Connected to PID {proc.Pid} — Logging packets", Color.FromArgb(0, 150, 0));
+        }
+
+        private void ShowProcessSelectorView()
+        {
+            this.Text = "NosTale Packet Logger";
+
+            // Show process selector, hide logger
+            processPanel.Visible = true;
+            toolPanel.Visible = false;
+            filterPanel.Visible = false;
+            packetListView.Visible = false;
+            sendPanel.Visible = false;
+
+            injectButton.Enabled = true;
+            refreshButton.Enabled = true;
+
+            RefreshProcessList();
+        }
+
+        private void DisconnectButton_Click(object? sender, EventArgs e)
+        {
+            pipeClient?.Dispose();
+            pipeClient = null;
+            ShowProcessSelectorView();
+            SetStatus("Disconnected", Color.FromArgb(200, 50, 50));
+        }
+
+        // ===== PACKET HANDLING =====
 
         private void OnPacketReceived(object? sender, PacketReceivedEventArgs e)
         {
@@ -368,9 +584,8 @@ namespace PacketLoggerGUI
             {
                 this.BeginInvoke(() =>
                 {
-                    connectButton.Text = "Connect";
-                    connectButton.Enabled = true;
-                    SetStatus("Disconnected", Color.FromArgb(200, 50, 50));
+                    ShowProcessSelectorView();
+                    SetStatus("Disconnected — DLL pipe closed", Color.FromArgb(200, 50, 50));
                 });
             }
         }
@@ -442,8 +657,6 @@ namespace PacketLoggerGUI
             if (string.IsNullOrEmpty(text) || pipeClient == null || !pipeClient.IsConnected)
                 return;
 
-            // Support multi-packet: separate with ;
-            // e.g. "walk 60 95 1 10;ptctl 20 1 1249305 60 95 1249305 10"
             string[] packets = text.Split(';', StringSplitOptions.RemoveEmptyEntries);
             foreach (string packet in packets)
             {
@@ -506,7 +719,7 @@ namespace PacketLoggerGUI
                 return;
             if (pipeClient == null || !pipeClient.IsConnected)
             {
-                SetStatus("Not connected - cannot send", Color.FromArgb(200, 50, 50));
+                SetStatus("Not connected — cannot send", Color.FromArgb(200, 50, 50));
                 return;
             }
 

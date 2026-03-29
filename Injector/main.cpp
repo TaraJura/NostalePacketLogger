@@ -1,39 +1,171 @@
 #include <iostream>
+#include <string>
 #include "Utils.h"
 #include "Injector.h"
 
 #define MAX_SIZE 255
 
+struct ProcessInfo {
+    DWORD pid;
+    std::wstring exeName;
+    std::wstring windowTitle;
+};
+
+std::vector<ProcessInfo> GetNosTaleProcesses()
+{
+    std::vector<std::wstring> targetNames = { L"NostaleClientX.exe", L"NostaleX.dat", L"CustomClient.exe" };
+    std::vector<DWORD> pidList = GetPIDList(targetNames);
+    std::vector<ProcessInfo> result;
+
+    for (DWORD pid : pidList)
+    {
+        ProcessInfo info;
+        info.pid = pid;
+        info.windowTitle = L"(no window title)";
+
+        // Get exe name from snapshot
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        PROCESSENTRY32W entry;
+        entry.dwSize = sizeof(entry);
+        if (Process32FirstW(snap, &entry)) {
+            do {
+                if (entry.th32ProcessID == pid) {
+                    info.exeName = entry.szExeFile;
+                    break;
+                }
+            } while (Process32NextW(snap, &entry));
+        }
+        CloseHandle(snap);
+
+        // Get window title for this PID
+        struct EnumData {
+            DWORD pid;
+            std::wstring title;
+        } enumData = { pid, L"" };
+
+        EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL {
+            auto* data = reinterpret_cast<EnumData*>(lParam);
+            if (!IsWindowVisible(hwnd)) return TRUE;
+            DWORD windowPid;
+            GetWindowThreadProcessId(hwnd, &windowPid);
+            if (windowPid == data->pid) {
+                wchar_t title[256] = { 0 };
+                GetWindowTextW(hwnd, title, 256);
+                if (wcslen(title) > 0) {
+                    data->title = title;
+                    return FALSE; // stop enumerating
+                }
+            }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&enumData));
+
+        if (!enumData.title.empty())
+            info.windowTitle = enumData.title;
+
+        result.push_back(info);
+    }
+
+    return result;
+}
+
+void TagWindowsWithPID(const std::vector<ProcessInfo>& processes)
+{
+    for (const auto& proc : processes)
+    {
+        struct EnumData {
+            DWORD pid;
+        } data = { proc.pid };
+
+        EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL {
+            auto* d = reinterpret_cast<EnumData*>(lParam);
+            if (!IsWindowVisible(hwnd)) return TRUE;
+            DWORD windowPid;
+            GetWindowThreadProcessId(hwnd, &windowPid);
+            if (windowPid == d->pid) {
+                wchar_t title[256] = { 0 };
+                GetWindowTextW(hwnd, title, 256);
+                if (wcslen(title) > 0) {
+                    // Only tag if not already tagged with PID
+                    std::wstring current(title);
+                    wchar_t pidStr[32];
+                    swprintf_s(pidStr, L" - %lu", d->pid);
+                    if (current.find(pidStr) == std::wstring::npos) {
+                        std::wstring newTitle = current + pidStr;
+                        SetWindowTextW(hwnd, newTitle.c_str());
+                    }
+                    return FALSE;
+                }
+            }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&data));
+    }
+}
+
 int main()
 {
-    std::vector <std::wstring> targetProcessess = { L"NostaleClientX.exe", L"NostaleX.dat", L"CustomClient.exe" };
-    std::vector <DWORD> pidList = GetPIDList(targetProcessess);
-    std::string dllPath;
     char currentDirectory[MAX_SIZE] = { 0 };
-
     GetCurrentDirectoryA(MAX_SIZE, currentDirectory);
+    std::string dllPath = std::string(currentDirectory) + "\\PacketLogger.dll";
 
-    dllPath = currentDirectory;
-    dllPath += "\\PacketLogger.dll";
+    printf("========================================\n");
+    printf("     NosTale Packet Logger - Injector\n");
+    printf("========================================\n\n");
 
-    if (pidList.empty())
+    auto processes = GetNosTaleProcesses();
+
+    // Tag game windows with their PID so user can identify them
+    TagWindowsWithPID(processes);
+
+    if (processes.empty())
     {
-        printf("[ERROR]: No NosTale process found. Make sure the game is running.\n");
+        printf("[ERROR] No NosTale process found. Make sure the game is running.\n");
+        printf("\nPress Enter to exit...");
+        getchar();
+        return 1;
     }
 
-    for (auto pid : pidList)
+    printf("Found %d NosTale process(es):\n\n", (int)processes.size());
+
+    for (int i = 0; i < (int)processes.size(); i++)
     {
-        if (Inject(pid, dllPath.c_str()))
-            printf("[%d]: PacketLogger.dll injected successfully.\n", pid);
+        printf("  [%d] PID: %-6lu | %ls | %ls\n",
+            i + 1,
+            processes[i].pid,
+            processes[i].exeName.c_str(),
+            processes[i].windowTitle.c_str());
+    }
+
+    printf("\n  [0] Inject into ALL\n");
+    printf("\nSelect option: ");
+
+    int choice = -1;
+    scanf_s("%d", &choice);
+
+    if (choice == 0)
+    {
+        // Inject into all
+        for (auto& proc : processes)
+        {
+            if (Inject(proc.pid, dllPath.c_str()))
+                printf("[%lu] Injected successfully.\n", proc.pid);
+            else
+                printf("[%lu] Injection FAILED.\n", proc.pid);
+        }
+    }
+    else if (choice >= 1 && choice <= (int)processes.size())
+    {
+        auto& proc = processes[choice - 1];
+        if (Inject(proc.pid, dllPath.c_str()))
+            printf("[%lu] Injected successfully.\n", proc.pid);
         else
-            printf("[%d]: Injection failed.\n", pid);
+            printf("[%lu] Injection FAILED.\n", proc.pid);
     }
-
-    printf("\n[INFO]: Injection finished.\n\n");
-
-    for (int i = 5; i > 0; i--)
+    else
     {
-        printf("[EXIT]: Closing this window in %d seconds.\n", i);
-        Sleep(1000);
+        printf("[ERROR] Invalid selection.\n");
     }
+
+    printf("\nPress Enter to exit...");
+    getchar(); getchar(); // flush leftover newline from scanf
+    return 0;
 }
