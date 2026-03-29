@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>PacketLoggerGUI</AssemblyName>
     <RootNamespace>PacketLoggerGUI</RootNamespace>
+    <PlatformTarget>x86</PlatformTarget>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 

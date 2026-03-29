@@ -36,6 +36,8 @@ namespace PacketLoggerGUI
         private List<PacketEntry> allPackets = new List<PacketEntry>();
         private object lockObj = new object();
         private List<NosTaleProcess> foundProcesses = new List<NosTaleProcess>();
+        private FileSystemWatcher? cmdWatcher;
+        private static readonly string CmdFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "NosTalePacketCmd.txt");
 
         private class PacketEntry
         {
@@ -433,39 +435,59 @@ namespace PacketLoggerGUI
             refreshButton.Enabled = false;
             SetStatus($"Injecting into PID {selected.Pid}...", Color.FromArgb(200, 150, 0));
 
-            // Find DLL path — look next to this exe
+            // Find Injector.exe — look next to this exe, then in Release/
             string exeDir = AppDomain.CurrentDomain.BaseDirectory;
-            string dllPath = Path.Combine(exeDir, "PacketLogger.dll");
+            string injectorPath = Path.Combine(exeDir, "Injector.exe");
 
-            // Also check Release folder (for dev)
-            if (!File.Exists(dllPath))
+            if (!File.Exists(injectorPath))
             {
-                string? solutionDir = Path.GetDirectoryName(exeDir.TrimEnd(Path.DirectorySeparatorChar));
-                while (solutionDir != null)
+                string? searchDir = Path.GetDirectoryName(exeDir.TrimEnd(Path.DirectorySeparatorChar));
+                while (searchDir != null)
                 {
-                    string candidate = Path.Combine(solutionDir, "Release", "PacketLogger.dll");
+                    string candidate = Path.Combine(searchDir, "Release", "Injector.exe");
                     if (File.Exists(candidate))
                     {
-                        dllPath = candidate;
+                        injectorPath = candidate;
                         break;
                     }
-                    solutionDir = Path.GetDirectoryName(solutionDir);
+                    searchDir = Path.GetDirectoryName(searchDir);
                 }
             }
 
-            if (!File.Exists(dllPath))
+            if (!File.Exists(injectorPath))
             {
-                SetStatus("PacketLogger.dll not found! Place it next to the GUI exe or in Release/", Color.FromArgb(200, 50, 50));
+                SetStatus("Injector.exe not found! Place it next to the GUI exe or in Release/", Color.FromArgb(200, 50, 50));
                 injectButton.Enabled = true;
                 refreshButton.Enabled = true;
                 return;
             }
 
-            bool injected = ProcessInjector.Inject(selected.Pid, dllPath);
-
-            if (!injected)
+            // Launch the C++ Injector with --pid for reliable injection
+            try
             {
-                SetStatus($"Injection failed for PID {selected.Pid}. Run as Administrator?", Color.FromArgb(200, 50, 50));
+                var startInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = injectorPath,
+                    Arguments = $"--pid {selected.Pid}",
+                    UseShellExecute = true,
+                    Verb = "runas", // ensure admin
+                    WorkingDirectory = Path.GetDirectoryName(injectorPath) ?? exeDir
+                };
+
+                var proc = System.Diagnostics.Process.Start(startInfo);
+                proc?.WaitForExit(5000);
+
+                if (proc == null || proc.ExitCode != 0)
+                {
+                    SetStatus($"Injection failed for PID {selected.Pid} (Injector exit code: {proc?.ExitCode})", Color.FromArgb(200, 50, 50));
+                    injectButton.Enabled = true;
+                    refreshButton.Enabled = true;
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Failed to launch Injector: {ex.Message}", Color.FromArgb(200, 50, 50));
                 injectButton.Enabled = true;
                 refreshButton.Enabled = true;
                 return;
@@ -516,7 +538,8 @@ namespace PacketLoggerGUI
             packetListView.Visible = true;
             sendPanel.Visible = true;
 
-            SetStatus($"Connected to PID {proc.Pid} — Logging packets", Color.FromArgb(0, 150, 0));
+            StartCommandFileWatcher();
+            SetStatus($"Connected to PID {proc.Pid} — Logging packets | Cmd file: {CmdFilePath}", Color.FromArgb(0, 150, 0));
         }
 
         private void ShowProcessSelectorView()
@@ -538,6 +561,7 @@ namespace PacketLoggerGUI
 
         private void DisconnectButton_Click(object? sender, EventArgs e)
         {
+            StopCommandFileWatcher();
             pipeClient?.Dispose();
             pipeClient = null;
             ShowProcessSelectorView();
@@ -739,8 +763,78 @@ namespace PacketLoggerGUI
             sendTextBox.Focus();
         }
 
+        // ===== COMMAND FILE WATCHER =====
+        // Claude (or any tool) can write packets to C:\NosTalePacketCmd.txt
+        // One packet per line. The GUI reads them, sends them, and clears the file.
+
+        private void StartCommandFileWatcher()
+        {
+            try
+            {
+                // Clear any stale commands
+                if (File.Exists(CmdFilePath))
+                    File.WriteAllText(CmdFilePath, "");
+                else
+                    File.Create(CmdFilePath).Dispose();
+
+                cmdWatcher = new FileSystemWatcher
+                {
+                    Path = Path.GetDirectoryName(CmdFilePath)!,
+                    Filter = Path.GetFileName(CmdFilePath),
+                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size
+                };
+                cmdWatcher.Changed += OnCommandFileChanged;
+                cmdWatcher.EnableRaisingEvents = true;
+            }
+            catch { }
+        }
+
+        private void StopCommandFileWatcher()
+        {
+            if (cmdWatcher != null)
+            {
+                cmdWatcher.EnableRaisingEvents = false;
+                cmdWatcher.Dispose();
+                cmdWatcher = null;
+            }
+        }
+
+        private void OnCommandFileChanged(object sender, FileSystemEventArgs e)
+        {
+            try
+            {
+                // Small delay to let the writer finish
+                System.Threading.Thread.Sleep(100);
+
+                string[] lines = File.ReadAllLines(CmdFilePath);
+                if (lines.Length == 0) return;
+
+                // Clear the file immediately
+                File.WriteAllText(CmdFilePath, "");
+
+                if (pipeClient == null || !pipeClient.IsConnected) return;
+
+                foreach (string line in lines)
+                {
+                    string trimmed = line.Trim();
+                    if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith("#"))
+                        continue; // skip empty lines and comments
+
+                    pipeClient.SendPacket(trimmed);
+
+                    if (this.IsHandleCreated)
+                    {
+                        this.BeginInvoke(() =>
+                            SetStatus($"Cmd file sent: {trimmed}", Color.FromArgb(0, 150, 0)));
+                    }
+                }
+            }
+            catch { }
+        }
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            StopCommandFileWatcher();
             pipeClient?.Dispose();
             base.OnFormClosing(e);
         }

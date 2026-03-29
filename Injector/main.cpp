@@ -101,12 +101,36 @@ void TagWindowsWithPID(const std::vector<ProcessInfo>& processes)
     }
 }
 
-int main()
+int main(int argc, char* argv[])
 {
     char currentDirectory[MAX_SIZE] = { 0 };
     GetCurrentDirectoryA(MAX_SIZE, currentDirectory);
     std::string dllPath = std::string(currentDirectory) + "\\PacketLogger.dll";
 
+    // Silent mode: Injector.exe --pid <PID> [--dll <path>]
+    // Used by the GUI to inject without user interaction
+    for (int i = 1; i < argc; i++)
+    {
+        if (std::string(argv[i]) == "--pid" && i + 1 < argc)
+        {
+            DWORD pid = (DWORD)atoi(argv[i + 1]);
+            // Check for optional --dll argument
+            for (int j = i + 2; j < argc; j++)
+            {
+                if (std::string(argv[j]) == "--dll" && j + 1 < argc)
+                {
+                    dllPath = argv[j + 1];
+                    break;
+                }
+            }
+            if (Inject(pid, dllPath.c_str()))
+                return 0; // success
+            else
+                return 1; // failure
+        }
+    }
+
+    // Interactive mode (no arguments)
     printf("========================================\n");
     printf("     NosTale Packet Logger - Injector\n");
     printf("========================================\n\n");
@@ -143,7 +167,6 @@ int main()
 
     if (choice == 0)
     {
-        // Inject into all
         for (auto& proc : processes)
         {
             if (Inject(proc.pid, dllPath.c_str()))
@@ -166,6 +189,6 @@ int main()
     }
 
     printf("\nPress Enter to exit...");
-    getchar(); getchar(); // flush leftover newline from scanf
+    getchar(); getchar();
     return 0;
 }
