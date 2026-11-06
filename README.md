@@ -30,7 +30,7 @@ linux/scripts/dev-test-wine.sh 25
 linux/scripts/inject.sh
 linux/scripts/host.sh status
 linux/scripts/host.sh monitor
-linux/scripts/host.sh gui
+linux/scripts/gui.sh
 ```
 
 ## Quick start on Windows

@@ -131,7 +131,8 @@ linux/scripts/host.sh cast 866 --target-id 5180 # use a skill (experimental u_s)
 linux/scripts/host.sh send "rest 1 1 14881134" # sit/stand toggle
 linux/scripts/host.sh status
 linux/scripts/host.sh replay capture.log      # resend the SEND lines
-linux/scripts/host.sh gui                     # GTK4 window
+linux/scripts/gui.sh                          # GTK4 window (one-command launcher)
+linux/scripts/host.sh gui                     # same, through the host wrapper
 
 # reverse-engineering aids (loopback only)
 linux/scripts/host.sh scan 34 73              # find a coordinate pair in memory

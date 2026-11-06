@@ -64,6 +64,7 @@ linux/scripts/host.sh send "walk 19 146 0 10"  # raw packet
 linux/scripts/host.sh scan 34 73               # memory debug: pair
 linux/scripts/host.sh find 14881134            # memory debug: charId
 linux/scripts/host.sh read 0x07B96FA4 32       # memory debug: dump
+linux/scripts/gui.sh                           # GTK4 UI launcher
 linux/scripts/host.sh gui
 
 # Windows (from Windows, or WSL with the full MSBuild path)

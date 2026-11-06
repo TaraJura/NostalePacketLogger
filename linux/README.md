@@ -35,7 +35,7 @@ linux/
 ├── src/injector/            32-bit injector (Windows PIDs, works under Wine)
 ├── host/ntpl/               Python package (protocol, client, engine, cli, gui)
 ├── host/tests/              stdlib unittest suite
-├── scripts/                 inject.sh, host.sh, dev-test-wine.sh
+├── scripts/                 inject.sh, host.sh, gui.sh, dev-test-wine.sh
 └── test/fake_game.cpp       LoadLibraryA fixture for the Wine test
 ```
 
@@ -90,7 +90,8 @@ linux/scripts/inject.sh
 linux/scripts/host.sh status
 linux/scripts/host.sh monitor
 linux/scripts/host.sh monitor --engine
-linux/scripts/host.sh gui
+linux/scripts/gui.sh                     # GTK4 UI (one-command launcher)
+linux/scripts/host.sh gui                # same, via the host wrapper
 ```
 
 `scripts/inject.sh` uses `NTPL_WINEPREFIX` (default `$WINEPREFIX` or
