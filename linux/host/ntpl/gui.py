@@ -523,7 +523,7 @@ class Application(Gtk.Application):
         )
         self.target_mode.set_selected(0)
         self.target_mode.set_tooltip_text(
-            "Filter auto-attack by monster template (vnum)"
+            "Filter auto-attack and Retaliate by monster template (vnum)"
         )
         target_box.append(
             self._field_row(Gtk.Label(label="Attack"), self.target_mode)
@@ -579,9 +579,9 @@ class Application(Gtk.Application):
         spell_box.append(add_spell)
         spell_hint = Gtk.Label(
             label=(
-                "Rules are checked in order; the first matching rule wins. "
-                "No match falls back to Skill in Combat. HP/MP are your "
-                "current percentages."
+                "Requires Auto-attack. Rules are checked in order; the first "
+                "matching rule wins. No match falls back to Skill in Combat. "
+                "HP/MP are your current percentages."
             )
         )
         spell_hint.set_xalign(0)
