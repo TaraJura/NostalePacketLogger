@@ -1,0 +1,116 @@
+# Development
+
+## Layout
+
+```
+docs/                 architecture, hooks, IPC, platform guides, packet wiki
+linux/                the Linux port (MinGW DLL, injector, Python host, tests)
+windows/              original MSVC/C# implementation, unchanged
+CLAUDE.md             working context for Claude Code
+README.md             entry point
+```
+
+## Build matrix
+
+| Target | Command | Output |
+|---|---|---|
+| Linux DLL | `make -C linux dll` | `linux/build/PacketLogger.dll` |
+| Linux injector | `make -C linux injector` | `linux/build/Injector.exe` |
+| Fake game (test) | `make -C linux test-host` | `linux/build/FakeGame.exe` |
+| Everything | `make -C linux all test-host` | all three |
+| Windows | `msbuild windows/PacketLogger.sln /p:Configuration=Release /p:Platform=x86` | `windows/Release/...` |
+| Python host | no build; `pip install -e linux/host` optional | package `ntpl` |
+
+The MinGW compiler is `i686-w64-mingw32-g++`. Override with
+`make MINGW_CXX=...`.
+
+## Tests
+
+```bash
+make -C linux host-test        # 29 stdlib unittest cases
+make -C linux gui-test         # headless GTK4, needs xvfb
+make -C linux all test-host
+linux/scripts/dev-test-wine.sh 25
+```
+
+The unit tests cover the wire protocol, the TCP client (including split-line
+reassembly and peer close), and the engine's world-state handlers. The GUI test
+opens the real window under Xvfb against a fake server and checks the rows and
+status bar. The Wine script covers the x86 stubs (`HookStubTest.exe`), the DLL
+lifecycle and the command path with a fake game. Nothing in this repository can
+test the real detours against the real client.
+
+When adding a Python feature, add a test in `linux/host/tests/`. Keep the core
+(`protocol`, `client`, `engine`) free of third-party dependencies so the tests
+run on any Python 3.10+.
+
+## Conventions
+
+### C++ (DLL and injector)
+
+- C++17, `-fno-exceptions -fno-rtti`, no iostreams in the DLL.
+- Windows API only; the DLL must not depend on libwinpthread. Use
+  `CRITICAL_SECTION` or the existing `PacketQueue`, not `std::mutex`.
+- No allocation, logging, or socket calls inside a hook. The hook may only call
+  `PacketQueue::push`.
+- Bounded everything: queue slots, line length, socket timeouts.
+- Restore every byte you patch. `initialize()` must stay side-effect free.
+- Lowercase MinGW headers (`<windows.h>`).
+- Assembly goes in `hooks.S`, not inline `__asm`, so MinGW and clang both work.
+
+### Python
+
+- Standard library for `protocol`, `client`, `engine`, `cli`; PyGObject only in
+  `gui.py`, imported lazily by the CLI.
+- Type hints on public functions and dataclasses.
+- No GTK calls outside the main loop; the reader thread only fills a queue.
+- Parse packets tolerantly: a short or non-numeric packet is ignored, not fatal.
+- CLI exit codes: 0 success, 1 no result (e.g. no status), 2 connection or
+  usage failure.
+
+### Documentation
+
+- English, current state, no changelog prose. Fix a line that stopped being
+  true instead of adding a new one.
+- Packet facts go in `docs/protocol/`; implementation facts go in the guide for
+  that platform.
+- Mark anything not verified against the live client as such.
+
+## Adding a packet
+
+1. **Observe.** Run `ntpl monitor --log capture.log`, perform the action in the
+   game, find the new lines.
+2. **Document.** Add the opcode to the right file in `docs/protocol/` with
+   direction, fields, an example and the behaviour. If you do not know the
+   fields yet, put it in `unknown.md`.
+3. **Parse.** Add a handler to `ntpl.engine.Engine` only when the format is
+   known well enough to be useful. Handlers are tolerant by contract.
+4. **Test.** Add a case to `linux/host/tests/test_engine.py` with a real
+   captured line.
+5. **Use.** Read the field from `WorldState` in the CLI/GUI or in the next
+   automation step.
+
+## Updating signatures
+
+See [hooking.md](hooking.md#maintaining-the-signatures-after-a-client-patch).
+Keep the Linux and Windows pattern strings in sync until the Windows tree is
+retired.
+
+## Release checklist
+
+- [ ] `make -C linux clean all test-host` is warning-free.
+- [ ] `make -C linux host-test` passes.
+- [ ] `linux/scripts/dev-test-wine.sh` reports the expected `NOT-FOUND` status
+      and the `send failed` reply.
+- [ ] `git status` contains only intended files; `build/`, `__pycache__/`, logs
+      and capture files are ignored.
+- [ ] Docs updated if behaviour, paths, commands or env vars changed.
+- [ ] No credentials, session data or `usercache-*`/`webcache-*` content in any
+      file.
+
+## Git
+
+This repository has its own `.git` and remote
+(`github.com/TaraJura/NostalePacketLogger`). The home directory on this machine
+also contains a stray `~/.git`; do not commit to that one and do not run `gc` or
+`clean` in it. Commit from this directory only.

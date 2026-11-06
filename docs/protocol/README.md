@@ -1,6 +1,11 @@
 # NosTale Packet Protocol Wiki
 
-This is a living document built by observing live gameplay. Each packet type is documented with its format, fields, examples, and behavior.
+This is a living document built by observing live gameplay. Each packet type is
+documented with its format, fields, examples, and behavior.
+
+The packet semantics here are shared by the `windows/` and `linux/` builds. Only
+the transport differs: named pipes on Windows, TCP loopback in the Linux port.
+See [../ipc.md](../ipc.md).
 
 **How this was built**: The user plays the game while Claude reads the packet log (`C:\NosTalePacketLog.txt`) and documents what each packet does.
 

@@ -332,3 +332,11 @@ ASALocalRun/
 
 # Local History for Visual Studio
 .localhistory/
+
+# Linux port
+linux/build/
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
