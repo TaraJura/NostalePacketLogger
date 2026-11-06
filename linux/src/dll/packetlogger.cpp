@@ -192,11 +192,14 @@ void remove_hooks() {
         g_status.send_hooked = false;
     }
 
-    if (g_trampoline_mem != nullptr) {
-        VirtualFree(g_trampoline_mem, 0, MEM_RELEASE);
-        g_trampoline_mem = nullptr;
-        ntpl_send_trampoline = 0;
-    }
+    // Deliberately keep the trampoline allocated until the process exits.
+    // A game thread can be between the hook address and the trampoline when
+    // the original bytes are restored; freeing it here would send that thread
+    // into freed memory. 32 bytes is cheap, a crashed client is not.
+    //
+    // The DLL itself is also left loaded at shutdown (see dllmain.cpp): the
+    // stubs must stay mapped for the same reason.
+    (void)g_trampoline_mem;
 }
 
 void set_enabled(bool enabled) {

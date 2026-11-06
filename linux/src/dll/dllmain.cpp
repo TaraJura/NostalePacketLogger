@@ -5,6 +5,7 @@
 
 #include "config.h"
 #include "log.h"
+#include "memory.h"
 #include "packetlogger.h"
 #include "tcp_server.h"
 
@@ -81,6 +82,93 @@ void handle_command(const std::string& command) {
         return;
     }
 
+    // READ|0xADDR len -- dump up to 256 bytes. Used to inspect a structure
+    // found by SCAN without attaching a debugger to the game.
+    if (command.compare(0, 5, "READ|") == 0) {
+        unsigned long address = 0;
+        int length = 0;
+        if (std::sscanf(command.c_str() + 5, "%lx %d", &address, &length) != 2 ||
+            length <= 0 || length > 256) {
+            tcpserver::send_line("STATUS|usage: READ|0xADDR len(1-256)");
+            return;
+        }
+
+        unsigned char data[256] = {0};
+        SIZE_T got = 0;
+        if (!ReadProcessMemory(GetCurrentProcess(),
+                               reinterpret_cast<LPCVOID>(address), data,
+                               static_cast<SIZE_T>(length), &got) ||
+            got == 0) {
+            tcpserver::send_line("STATUS|READ failed");
+            return;
+        }
+
+        char hex[16] = {0};
+        std::snprintf(hex, sizeof(hex), "%08lX", address);
+        std::string line = "STATUS|READ 0x";
+        line += hex;
+        line += " ";
+        for (SIZE_T i = 0; i < got; ++i) {
+            std::snprintf(hex, sizeof(hex), "%02X", data[i]);
+            line += hex;
+            if ((i + 1) % 4 == 0 && i + 1 < got) {
+                line += " ";
+            }
+        }
+        tcpserver::send_line(line);
+        return;
+    }
+
+    // FIND|value -- find a 32-bit value (charId, pointer) in game memory.
+    if (command.compare(0, 5, "FIND|") == 0) {
+        unsigned long value = 0;
+        if (std::sscanf(command.c_str() + 5, "%lu", &value) != 1) {
+            tcpserver::send_line("STATUS|usage: FIND|value");
+            return;
+        }
+
+        std::string line = "STATUS|FIND " + std::to_string(value);
+        for (std::uintptr_t hit :
+             Memory::ScanValue(static_cast<std::uint32_t>(value), 20)) {
+            char address[32] = {0};
+            std::snprintf(address, sizeof(address), " 0x%08lX",
+                          static_cast<unsigned long>(hit));
+            line += address;
+        }
+        tcpserver::send_line(line);
+        return;
+    }
+
+    // SCAN|x y -- search the game's writable memory for a coordinate pair.
+    // The engine uses it to locate the player's position after sending a walk;
+    // it is a reverse-engineering aid, not something the game can see.
+    if (command.compare(0, 5, "SCAN|") == 0) {
+        int x = 0;
+        int y = 0;
+        if (std::sscanf(command.c_str() + 5, "%d %d", &x, &y) != 2) {
+            tcpserver::send_line("STATUS|usage: SCAN|x y");
+            return;
+        }
+
+        std::string line = "STATUS|SCAN " + std::to_string(x) + " " +
+                           std::to_string(y);
+        for (int width = 1; width <= 4; width *= 2) {
+            const std::vector<std::uintptr_t> hits =
+                Memory::ScanPair(x, y, width, 12);
+            line += " | ";
+            line += std::to_string(width);
+            line += ":";
+            for (std::uintptr_t hit : hits) {
+                char address[32] = {0};
+                std::snprintf(address, sizeof(address), " 0x%08lX",
+                              static_cast<unsigned long>(hit));
+                line += address;
+            }
+        }
+        tcpserver::send_line(line);
+        return;
+    }
+
     if (command.compare(0, 6, "STATUS") == 0) {
         tcpserver::send_line(status_line());
         return;
@@ -90,6 +178,7 @@ void handle_command(const std::string& command) {
 }
 
 DWORD WINAPI main_thread(LPVOID module) {
+    (void)module;
     ntpl::log_open();
     ntpl::logf("NosTale Packet Logger %s starting", ntpl::kVersion);
 
@@ -173,13 +262,22 @@ DWORD WINAPI main_thread(LPVOID module) {
     // time to leave it before the original bytes are restored.
     packetlogger::set_enabled(false);
     Sleep(100);
+
+    // Capture whatever was enqueued between the last drain and the disable.
+    drain(g_recv_queue, "RECV");
+    drain(g_send_queue, "SEND");
+
     packetlogger::remove_hooks();
 
     tcpserver::stop();
-    ntpl::logf("stopped");
+    ntpl::logf("stopped; module stays loaded until the game exits");
     ntpl::log_close();
 
-    FreeLibraryAndExitThread(static_cast<HMODULE>(module), 0);
+    // No FreeLibraryAndExitThread: unhooking while another game thread can
+    // still be inside a stub is the one race that actually crashes the
+    // client. The module and its trampoline stay mapped until the process
+    // exits; a fresh injection after QUIT needs a different DLL filename or a
+    // client restart.
     return 0;
 }
 
@@ -192,9 +290,12 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID reserved) {
         DisableThreadLibraryCalls(module);
         HANDLE thread =
             CreateThread(nullptr, 0, main_thread, module, 0, nullptr);
-        if (thread != nullptr) {
-            CloseHandle(thread);
+        if (thread == nullptr) {
+            // Let LoadLibraryA fail so the injector reports a real error
+            // instead of a loaded-but-inert DLL.
+            return FALSE;
         }
+        CloseHandle(thread);
     }
 
     return TRUE;
