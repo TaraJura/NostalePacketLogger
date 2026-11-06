@@ -22,6 +22,7 @@ Schema (version 1)::
       "loop": true,
       "monster_mode": "only",       # all | only | except
       "monster_vnums": [200, 206],
+      "attack_unknown": false,      # only mode: allow vnum 0
       "spell_rules": [
         {
           "enabled": true,
@@ -116,6 +117,7 @@ class BotConfig:
     loop: bool = True
     monster_mode: str = "all"
     monster_vnums: list[int] = field(default_factory=list)
+    attack_unknown: bool = False
     spell_rules: list[SpellRule] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -135,6 +137,7 @@ class BotConfig:
             "loop": self.loop,
             "monster_mode": self.monster_mode,
             "monster_vnums": sorted(set(self.monster_vnums)),
+            "attack_unknown": self.attack_unknown,
             "spell_rules": [rule.to_dict() for rule in self.spell_rules],
         }
 
@@ -181,6 +184,7 @@ class BotConfig:
             loop=_as_bool(data.get("loop"), True),
             monster_mode=mode if mode in MONSTER_MODES else "all",
             monster_vnums=sorted(set(vnums)),
+            attack_unknown=_as_bool(data.get("attack_unknown"), False),
             spell_rules=rules,
         )
 

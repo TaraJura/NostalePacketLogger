@@ -193,6 +193,10 @@ class Application(Gtk.Application):
         self.auto_attack_toggle = None
         self.loop_toggle = None
         self.pickup_toggle = None
+        self.recover_toggle = None
+        self.attack_unknown_toggle = None
+        self.recover_banner = None
+        self.unknown_warn_at = 0.0
         self.loot_range = None
 
         self.waypoints: list[tuple[int, int]] = []
@@ -233,8 +237,12 @@ class Application(Gtk.Application):
             active.present()
             return
 
-        self._build_ui()
+        # Install the provider before building widgets: a CSS class added to a
+        # toggle that was already active before the provider existed did not
+        # restyle until its state changed, which left Retaliate/Move first/Loop
+        # grey instead of green.
         self._install_css()
+        self._build_ui()
         self._start_client()
 
     def _build_ui(self) -> None:
@@ -375,6 +383,19 @@ class Application(Gtk.Application):
             row.append(widget)
         return row
 
+    def _bind_toggle_color(self, button: Gtk.ToggleButton) -> None:
+        """Paint an active toggle green and an inactive one red."""
+        button.connect("toggled", self._update_toggle_color)
+        self._update_toggle_color(button)
+
+    @staticmethod
+    def _update_toggle_color(button: Gtk.ToggleButton) -> None:
+        button.remove_css_class("ntpl-on")
+        button.remove_css_class("ntpl-off")
+        button.add_css_class(
+            "ntpl-on" if button.get_active() else "ntpl-off"
+        )
+
     def _build_map_page(self):
         page = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         page.set_margin_top(6)
@@ -437,6 +458,13 @@ class Application(Gtk.Application):
         self.char_info.set_max_width_chars(38)
         self.char_info.add_css_class("dim-label")
         char_box.append(self.char_info)
+        self.recover_banner = Gtk.Label()
+        self.recover_banner.add_css_class("recover-banner")
+        self.recover_banner.set_xalign(0)
+        self.recover_banner.set_wrap(True)
+        self.recover_banner.set_max_width_chars(38)
+        self.recover_banner.set_visible(False)
+        char_box.append(self.recover_banner)
         sidebar.append(self._frame("Character", char_box))
 
         # Path.
@@ -460,6 +488,7 @@ class Application(Gtk.Application):
         path_box.append(path_row)
         self.loop_toggle = Gtk.ToggleButton(label="Loop")
         self.loop_toggle.set_active(True)
+        self._bind_toggle_color(self.loop_toggle)
         path_box.append(self.loop_toggle)
         sidebar.append(self._frame("Path", path_box))
 
@@ -477,6 +506,12 @@ class Application(Gtk.Application):
             "Attack while following the path and keep walking between "
             "attacks; turn off to clear the area before moving on"
         )
+        for toggle in (
+            self.auto_attack_toggle,
+            self.retaliate_toggle,
+            self.move_first_toggle,
+        ):
+            self._bind_toggle_color(toggle)
         combat_box.append(
             self._field_row(
                 self.auto_attack_toggle,
@@ -528,6 +563,15 @@ class Application(Gtk.Application):
         target_box.append(
             self._field_row(Gtk.Label(label="Attack"), self.target_mode)
         )
+        self.attack_unknown_toggle = Gtk.CheckButton(
+            label="Also attack monsters with unknown vnum"
+        )
+        self.attack_unknown_toggle.set_tooltip_text(
+            "Monsters that spawned before the DLL was injected have no `in` "
+            "packet in the log, so their vnum cannot be matched. Enable this "
+            "to attack them anyway in 'Only selected' mode."
+        )
+        target_box.append(self.attack_unknown_toggle)
         self.target_search = Gtk.SearchEntry()
         self.target_search.set_placeholder_text("Search monster name or vnum")
         self.target_search.connect(
@@ -598,6 +642,7 @@ class Application(Gtk.Application):
         self.pickup_toggle.set_tooltip_text(
             "Pick up your own drops within the loot range"
         )
+        self._bind_toggle_color(self.pickup_toggle)
         self.loot_range = Gtk.SpinButton.new_with_range(1, 10, 1)
         self.loot_range.set_value(3)
         self.loot_range.set_tooltip_text("pickup radius in cells")
@@ -617,6 +662,7 @@ class Application(Gtk.Application):
         self.recover_toggle.set_tooltip_text(
             "Below the threshold, sit and wait for full HP"
         )
+        self._bind_toggle_color(self.recover_toggle)
         self.low_hp_pct = Gtk.SpinButton.new_with_range(5, 90, 5)
         self.low_hp_pct.set_value(30)
         recover_box.append(
@@ -686,6 +732,14 @@ class Application(Gtk.Application):
         provider.load_from_data(
             b".recv { color: #2aa198; } .send { color: #b58900; }"
             b".dim-label { opacity: 0.7; }"
+            b"button.ntpl-on { background-image: none;"
+            b" background-color: #2e7d32; color: #ffffff; }"
+            b"button.ntpl-on:hover { background-color: #388e3c; }"
+            b"button.ntpl-off { background-image: none;"
+            b" background-color: #b71c1c; color: #ffffff; }"
+            b"button.ntpl-off:hover { background-color: #d32f2f; }"
+            b".recover-banner { background-color: #b71c1c; color: #ffffff;"
+            b" padding: 4px 6px; border-radius: 4px; }"
         )
         display = Gdk.Display.get_default()
         if display is not None and hasattr(Gtk.StyleContext, "add_provider_for_display"):
@@ -737,8 +791,26 @@ class Application(Gtk.Application):
             return True
         vnum = self._monster_vnum(entity)
         if mode == "only":
+            if vnum == 0:
+                return bool(
+                    self.attack_unknown_toggle is not None
+                    and self.attack_unknown_toggle.get_active()
+                )
             return vnum in self.target_vnums
         return vnum not in self.target_vnums
+
+    def _unknown_monsters_in_range(self, radius: int) -> int:
+        position = self._player_cell()
+        if position is None:
+            return 0
+        px, py = position
+        count = 0
+        for entity in self.engine.world.entities.values():
+            if entity.kind != 3 or self._monster_vnum(entity) != 0:
+                continue
+            if max(abs(entity.x - px), abs(entity.y - py)) <= radius:
+                count += 1
+        return count
 
     def _update_target_info(self) -> None:
         if self.target_info is None:
@@ -1132,6 +1204,10 @@ class Application(Gtk.Application):
             ),
             monster_mode=self._current_monster_mode(),
             monster_vnums=sorted(v for v in self.target_vnums if v > 0),
+            attack_unknown=bool(
+                self.attack_unknown_toggle is not None
+                and self.attack_unknown_toggle.get_active()
+            ),
             spell_rules=self._collect_spell_rules(),
         )
 
@@ -1167,6 +1243,8 @@ class Application(Gtk.Application):
         )
         self.target_mode.set_selected(mode_index)
         self.target_vnums = {v for v in config.monster_vnums if v > 0}
+        if self.attack_unknown_toggle is not None:
+            self.attack_unknown_toggle.set_active(config.attack_unknown)
         if self.target_search is not None:
             self.target_search.set_text("")
         self._refresh_target_list()
@@ -1371,6 +1449,31 @@ class Application(Gtk.Application):
             parts.append("RECOVERING")
         self.char_info.set_text(" · ".join(parts))
 
+        if self.recover_banner is not None:
+            if self.recovering:
+                stats = world.stats
+                threshold = (
+                    self.low_hp_pct.get_value()
+                    if self.low_hp_pct is not None
+                    else 0
+                )
+                if stats.hp_max > 0:
+                    percent = 100.0 * stats.hp / stats.hp_max
+                    text = (
+                        f"RECOVERING — HP {percent:.0f}% is below "
+                        f"{threshold:.0f}%. Sitting until full; "
+                        "attacks and movement are paused."
+                    )
+                else:
+                    text = (
+                        "RECOVERING — sitting until HP is full; "
+                        "attacks and movement are paused."
+                    )
+                self.recover_banner.set_text(text)
+                self.recover_banner.set_visible(True)
+            else:
+                self.recover_banner.set_visible(False)
+
     def _draw_stats(self, _area, context, width: int, height: int) -> None:
         context.set_source_rgb(0.08, 0.08, 0.08)
         context.paint()
@@ -1564,18 +1667,39 @@ class Application(Gtk.Application):
         context.save()
         context.translate(ox, oy)
 
-        # A* path
+        # A* path: one connected polyline through cell centres, so diagonal
+        # 8-direction steps read as a smooth line instead of a staircase of
+        # separate squares.
         if self.path_cells:
-            context.set_source_rgba(0.0, 0.9, 0.9, 0.85)
-            size = max(1.0, scale * 0.45)
-            for x, y in self.path_cells:
-                context.rectangle(
-                    x * scale + (scale - size) / 2,
-                    y * scale + (scale - size) / 2,
-                    size,
-                    size,
+            points = list(self.path_cells)
+            own = self._player_cell()
+            if own is not None:
+                points.insert(0, own)
+            context.set_source_rgba(0.0, 0.9, 0.9, 0.9)
+            context.set_line_cap(cairo.LINE_CAP_ROUND)
+            context.set_line_join(cairo.LINE_JOIN_ROUND)
+            context.set_line_width(max(1.5, scale * 0.3))
+            if len(points) >= 2:
+                context.move_to(
+                    points[0][0] * scale + scale / 2,
+                    points[0][1] * scale + scale / 2,
                 )
-            context.fill()
+                for x, y in points[1:]:
+                    context.line_to(
+                        x * scale + scale / 2,
+                        y * scale + scale / 2,
+                    )
+                context.stroke()
+            else:
+                x, y = points[0]
+                context.arc(
+                    x * scale + scale / 2,
+                    y * scale + scale / 2,
+                    max(2.0, scale * 0.5),
+                    0,
+                    2 * math.pi,
+                )
+                context.fill()
 
         # waypoints
         context.set_source_rgba(1.0, 0.85, 0.1, 1.0)
@@ -2147,6 +2271,7 @@ class Application(Gtk.Application):
         self.pickup_ignored.clear()
         self.recovering = False
         self.recover_rest_at = 0.0
+        self.unknown_warn_at = 0.0
         if self.bot_timer is None:
             self.bot_timer = GLib.timeout_add(BOT_INTERVAL_MS, self._bot_tick)
         self._set_status("bot started")
@@ -2365,6 +2490,22 @@ class Application(Gtk.Application):
             if monster is None:
                 monster = self._nearest_monster(radius)
 
+            if (
+                monster is None
+                and self._current_monster_mode() == "only"
+                and not (
+                    self.attack_unknown_toggle is not None
+                    and self.attack_unknown_toggle.get_active()
+                )
+            ):
+                unknown = self._unknown_monsters_in_range(radius)
+                if unknown and now >= self.unknown_warn_at:
+                    self._set_status(
+                        f"{unknown} monster(s) in range have unknown vnum; "
+                        "enable 'Also attack monsters with unknown vnum'"
+                    )
+                    self.unknown_warn_at = now + 15.0
+
             selected = self._select_spell_rule(now, monster, char_id)
             rule_index, rule = (
                 selected if selected is not None else (None, None)
@@ -2432,19 +2573,23 @@ class Application(Gtk.Application):
         if self._client_move(target[0], target[1]):
             self.pending_target = target
             self.pending_since = now
-            # A whole leg takes ~1 s per cell. Give the client enough time to
-            # finish it instead of sending a new MOVE on every 200 ms tick.
-            distance = 0
+            # A whole leg takes ~0.45 s per cell. Diagonal legs cover
+            # sqrt(2) cells of travel, so pace and time out by Euclidean
+            # distance, not by the Chebyshev cell count.
+            cells = 0
+            travel = 0.0
             if current is not None:
-                distance = max(abs(target[0] - current[0]),
-                               abs(target[1] - current[1]))
+                dx = target[0] - current[0]
+                dy = target[1] - current[1]
+                cells = max(abs(dx), abs(dy))
+                travel = math.hypot(dx, dy)
             timeout = min(
                 60.0,
-                max(self.walk_timeout, distance * self.walk_timeout_per_cell),
+                max(self.walk_timeout, travel * self.walk_timeout_per_cell),
             )
-            self.pending_distance = distance
+            self.pending_distance = travel
             self.pending_until = now + timeout
-            self._set_status(f"walking to {target} ({distance} cells)")
+            self._set_status(f"walking to {target} ({cells} cells)")
         return True
 
     def do_shutdown(self) -> None:

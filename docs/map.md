@@ -59,8 +59,8 @@ automatically scores every grid by the live entity positions
 | `load_nstc(path)` | parse the archive into `{map_id: MapGrid}` |
 | `MapGrid.at(x, y)` | terrain byte or `None` |
 | `MapGrid.is_walkable(x, y)` | `at() == 0x00` |
-| `MapGrid.neighbours(x, y)` | walkable 4-direction neighbours |
-| `astar(grid, start, goal)` | shortest walkable path, goal included |
+| `MapGrid.neighbours(x, y)` | walkable 8-direction neighbours; diagonals require both orthogonal cells to be walkable |
+| `astar(grid, start, goal)` | shortest 8-direction path (diagonal cost sqrt 2), goal included |
 | `find_map_for_positions(grids, points)` | rank maps for live coordinates |
 | `terrain_rgb(value)` | palette colour |
 
@@ -154,12 +154,17 @@ grouped by function:
   `c_map` field — the first is a type.
 - **Character** — live HP and MP bars with current/max/missing values, plus
   map/position/char id. HP and MP are fed by the server's `stat` packets.
+  While recovering, a red **RECOVERING** banner states the HP percentage and
+  that attacks/movement are paused; all toggle buttons are green when active
+  and red when off.
 - **Path** — path summary, Start, Stop, Clear path, Loop.
 - **Combat** — Auto-attack, Retaliate, Skill, Range, Cooldown and the skill
   template.
 - **Targets** — monster filter: all monsters, only the selected templates, or
   all except the selected ones. Search the client's monster table by name or
-  vnum, or add a vnum manually.
+  vnum, or add a vnum manually. **Also attack monsters with unknown vnum**
+  covers monsters that spawned before the DLL was injected and therefore
+  have no `in` packet.
 - **Spells** — ordered conditional cast rules (spell vnum, My HP/MP above or
   below a %, cooldown, monster/self target). The first matching rule wins;
   otherwise the **Skill** in Combat is the fallback.
@@ -189,6 +194,10 @@ in the window header.
 | Targets | all / only selected / all except selected monster templates (`vnum`); Retaliate respects the same filter |
 | Spell rule | spell vnum + My HP/MP below/above threshold + cooldown + Monster/Self target; first matching rule wins |
 | Save/Load config | export/import the toggles, numbers, target list and spell rules as JSON |
+
+The A* path is drawn as one continuous cyan polyline through cell centres.
+Diagonal steps make it read as a direct line instead of a staircase, and
+corner cutting is rejected so the line never crosses a blocked corner.
 
 Hovering a map marker shows a tooltip: **You** with char id, position and map;
 a **Player** with name, char id, position and distance; a **Monster/NPC** with
@@ -238,12 +247,14 @@ honest source.
    is used (`0` = basic attack). Monster casts send `ncif 3 <id>` plus the
    skill template; self casts use target type 1 and the char id.
 5. **Walk** a multi-cell leg (three cells from the A* path, plus the final
-   cell) by calling the client's own MoveTo: the GUI sends `MOVE|x y` to the
-   DLL. The client pathfinds, animates and sends its own `walk` packet with
+   cell on the 8-direction path, plus the final cell) by calling the client's
+   own MoveTo: the GUI sends `MOVE|x y` to the DLL. The client pathfinds,
+   animates and sends its own `walk` packet with
    the leg destination; the server accepts it as a normal player move. Because
    that packet arrives at the **start** of the animation, the bot waits
-   `0.45 s` per cell (minimum 0.35 s) before sending the next leg, so the
-   character walks continuously instead of stopping after every single cell.
+   `0.45 s` per Euclidean cell of travel (minimum 0.35 s) before sending the
+   next leg, so diagonal legs are paced correctly and the character walks
+   continuously instead of stopping after every single cell.
    On a timeout it skips the leg (blocked path) and stops after three
    consecutive rejections.
 6. Repeat/loop; Stop ends the timer.
@@ -303,7 +314,7 @@ never sees the `at` packet.
 ## Tests
 
 ```bash
-make -C linux host-test   # 76 cases incl. synthetic NOS, A*, checksum, config
+make -C linux host-test   # 78 cases incl. synthetic NOS, 8-way A*, checksum, config
 make -C linux gui-test    # GUI + map surface + tooltips + unknown-position guard
 make -C linux bot-test    # 4 fake-server smokes: combat, rules, rejection, recovery
 ```

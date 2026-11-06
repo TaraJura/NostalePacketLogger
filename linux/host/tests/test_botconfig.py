@@ -17,6 +17,7 @@ class BotConfigTests(unittest.TestCase):
             auto_attack=True,
             monster_mode="only",
             monster_vnums=[206, 200, 206],
+            attack_unknown=True,
             spell_rules=[
                 SpellRule(
                     spell=10,
@@ -37,6 +38,7 @@ class BotConfigTests(unittest.TestCase):
         self.assertEqual(loaded.monster_vnums, [200, 206])
         self.assertEqual(loaded.spell_rules[0].spell, 10)
         self.assertEqual(loaded.spell_rules[0].target, "self")
+        self.assertTrue(loaded.attack_unknown)
 
     def test_invalid_values_are_clamped_without_crashing(self):
         config = BotConfig.from_dict(

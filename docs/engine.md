@@ -196,7 +196,8 @@ for message in client.messages():
 
 `mapdata.py` parses the client's `NStcData.NOS` into `MapGrid` objects
 (width, height, one terrain byte per cell). `0x00` is walkable; `astar()` gives
-a 4-direction path over walkable cells; `find_map_for_positions()` ranks maps
+an 8-direction path over walkable cells (diagonal cost sqrt 2, no corner
+cutting); `find_map_for_positions()` ranks maps
 against live entity coordinates (the 2026-11-06 session identified map **20**,
 230x260, with 100 % of 173,503 `mv` samples on walkable cells).
 

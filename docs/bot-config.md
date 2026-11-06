@@ -13,7 +13,7 @@ The mode dropdown selects how the target list is interpreted:
 | Mode | Behaviour |
 |---|---|
 | All monsters | attack every monster in range (default) |
-| Only selected | attack only monsters whose template vnum is selected |
+| Only selected | attack only monsters whose template vnum is selected (or, with the unknown option, monsters whose vnum is unknown) |
 | All except selected | attack every monster except the selected templates |
 
 The list under the dropdown is searchable by monster name or vnum (max 60
@@ -28,8 +28,21 @@ attached because `spawnlog.py` backfills the vnum from the DLL log; see
 
 Retaliate applies the same filter: a monster that is hitting you is ignored if
 it is excluded. In "only selected" mode an entity whose vnum cannot be
-resolved is skipped; in "all except selected" it is allowed because it cannot
-be on the exclusion list.
+resolved is skipped by default; in "all except selected" it is allowed because
+it cannot be on the exclusion list.
+
+**Also attack monsters with unknown vnum** handles the remaining gap: a
+monster that was already alive when the DLL was injected has no `in` packet in
+the log, so neither the live stream nor the log backfill knows its template.
+The bot shows a status warning when such monsters are in range and no allowed
+target was found; enable the checkbox to attack them anyway. This is also
+saved as `attack_unknown` in the JSON configuration.
+
+The UI makes toggle state explicit: active toggles (Loop, Auto-attack,
+Retaliate, Move first, Pickup, Auto-recover) are **green**, inactive ones are
+**red**. While Auto-recover is active and HP is below the threshold, a red
+**RECOVERING** banner explains that attacks and movement are paused; the
+recovery check runs before targeting and spell rules.
 
 ## Spells — conditional cast rules
 
@@ -100,6 +113,7 @@ Example:
   "loop": true,
   "monster_mode": "only",
   "monster_vnums": [200, 206],
+  "attack_unknown": false,
   "spell_rules": [
     {
       "enabled": true,

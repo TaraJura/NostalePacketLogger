@@ -28,6 +28,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import GLib
 
 from ntpl.botconfig import SpellRule
+from ntpl.engine import Entity
 from ntpl.gui import Application
 
 
@@ -166,6 +167,15 @@ def main() -> int:
                 == "u_s 20 1 14881134"
             )
 
+            unknown = Entity(9999, 3)  # vnum 0: spawned before injection
+            app.target_mode.set_selected(1)  # only selected
+            app.target_vnums = {200}
+            app.attack_unknown_toggle.set_active(False)
+            unknown_off = not app._monster_allowed(unknown)
+            app.attack_unknown_toggle.set_active(True)
+            unknown_on = app._monster_allowed(unknown)
+            unknown_ok = unknown_off and unknown_on
+
             saved = app._save_config_to(temp_path)
             app.attack_range.set_value(5)
             app.target_vnums = set()
@@ -188,13 +198,15 @@ def main() -> int:
                 and no_basic
                 and condition_ok
                 and self_target_ok
+                and unknown_ok
                 and config_ok
             )
             result["detail"] = (
                 f"target={has_target} spell={has_spell} "
                 f"ignored_other={ignored_other} no_basic={no_basic} "
                 f"conditions={condition_ok} self={self_target_ok} "
-                f"config={config_ok} lines={lines[-10:]}"
+                f"unknown={unknown_ok} config={config_ok} "
+                f"lines={lines[-10:]}"
             )
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"check exception: {exc!r}"

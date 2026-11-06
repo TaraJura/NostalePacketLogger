@@ -24,9 +24,10 @@ This module is read-only and never touches the game process.
 
 from __future__ import annotations
 
+import heapq
+import math
 import struct
 import zlib
-from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -76,10 +77,24 @@ class MapGrid:
         return self.at(x, y) == WALKABLE
 
     def neighbours(self, x: int, y: int):
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        """Walkable 8-direction neighbours, without cutting blocked corners.
+
+        Diagonals are only allowed when both orthogonal cells are walkable:
+        the client cannot squeeze between two blocked cells, and allowing it
+        would make the drawn path pass through a wall corner.
+        """
+        for dx, dy in (
+            (1, 0), (-1, 0), (0, 1), (0, -1),
+            (1, 1), (1, -1), (-1, 1), (-1, -1),
+        ):
             nx, ny = x + dx, y + dy
-            if self.is_walkable(nx, ny):
-                yield nx, ny
+            if not self.is_walkable(nx, ny):
+                continue
+            if dx and dy and not (
+                self.is_walkable(x + dx, y) and self.is_walkable(x, y + dy)
+            ):
+                continue
+            yield nx, ny
 
     def walkable_count(self) -> int:
         return self.cells.count(WALKABLE)
@@ -162,33 +177,67 @@ def find_map_for_positions(
     return ranked[:limit]
 
 
+_SQRT2 = math.sqrt(2.0)
+
+
+def _octile(ax: int, ay: int, bx: int, by: int) -> float:
+    """Admissible 8-direction heuristic: straight + diagonal remainder."""
+    dx = abs(ax - bx)
+    dy = abs(ay - by)
+    return max(dx, dy) + (_SQRT2 - 1.0) * min(dx, dy)
+
+
 def astar(
     grid: MapGrid,
     start: tuple[int, int],
     goal: tuple[int, int],
 ) -> list[tuple[int, int]] | None:
-    """Shortest 4-direction path over walkable cells, excluding `start`.
+    """Shortest 8-direction path over walkable cells, excluding `start`.
 
-    Returns the cells to walk through (goal included), or None when no path
-    exists or either endpoint is not walkable.
+    Diagonal steps cost sqrt(2) and are only taken when both orthogonal cells
+    are walkable (no corner cutting). Returns the cells to walk through (goal
+    included), or None when no path exists or either endpoint is not walkable.
     """
     if not grid.is_walkable(*start) or not grid.is_walkable(*goal):
         return None
     if start == goal:
         return []
 
-    frontier = deque([start])
+    frontier: list[tuple[float, float, int, tuple[int, int]]] = [
+        (_octile(start[0], start[1], *goal), 0.0, 0, start)
+    ]
+    g_score: dict[tuple[int, int], float] = {start: 0.0}
     came_from: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
+    counter = 1
 
     while frontier:
-        current = frontier.popleft()
+        _estimate, g, _counter, current = heapq.heappop(frontier)
+        if g > g_score.get(current, math.inf):
+            continue
         if current == goal:
             break
         for neighbour in grid.neighbours(*current):
-            if neighbour in came_from:
+            step = (
+                _SQRT2
+                if neighbour[0] != current[0] and neighbour[1] != current[1]
+                else 1.0
+            )
+            tentative = g + step
+            if tentative + 1e-9 >= g_score.get(neighbour, math.inf):
                 continue
+            g_score[neighbour] = tentative
             came_from[neighbour] = current
-            frontier.append(neighbour)
+            heapq.heappush(
+                frontier,
+                (
+                    tentative
+                    + _octile(neighbour[0], neighbour[1], *goal),
+                    tentative,
+                    counter,
+                    neighbour,
+                ),
+            )
+            counter += 1
 
     if goal not in came_from:
         return None

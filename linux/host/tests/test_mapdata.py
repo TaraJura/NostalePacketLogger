@@ -72,6 +72,27 @@ class AstarTests(unittest.TestCase):
                 cells.append(1 if (x == 2 and y not in (1, 3)) else 0)
         return MapGrid(1, 5, 5, bytes(cells))
 
+    def test_open_ground_uses_diagonals(self):
+        grid = MapGrid(3, 5, 5, bytes(25))
+        path = astar(grid, (0, 0), (4, 4))
+        self.assertEqual(len(path), 4)
+        previous = (0, 0)
+        for cell in path:
+            self.assertLessEqual(
+                max(abs(cell[0] - previous[0]), abs(cell[1] - previous[1])),
+                1,
+            )
+            previous = cell
+
+    def test_does_not_cut_blocked_corner(self):
+        # (1,0) and (0,1) are blocked; the diagonal (0,0) -> (1,1) must not
+        # squeeze between them.
+        cells = bytearray(9)
+        cells[1] = 1  # (1, 0)
+        cells[3] = 1  # (0, 1)
+        grid = MapGrid(4, 3, 3, bytes(cells))
+        self.assertIsNone(astar(grid, (0, 0), (1, 1)))
+
     def test_path_around_wall(self):
         path = astar(self.grid(), (0, 0), (4, 4))
         self.assertIsNotNone(path)

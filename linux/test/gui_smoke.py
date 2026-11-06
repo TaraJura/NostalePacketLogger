@@ -148,11 +148,34 @@ def main() -> int:
                 and app.stats_area is not None
             )
 
+            toggle_off = app.auto_attack_toggle.has_css_class("ntpl-off")
+            app.auto_attack_toggle.set_active(True)
+            toggle_on = app.auto_attack_toggle.has_css_class("ntpl-on")
+            app.auto_attack_toggle.set_active(False)
+            toggle_ok = toggle_off and toggle_on
+
+            saved_hp, saved_hp_max = stats.hp, stats.hp_max
+            stats.hp, stats.hp_max = 10, 100
+            app.recovering = True
+            app._update_char_info()
+            banner_ok = (
+                app.recover_banner.get_visible()
+                and "RECOVERING" in app.recover_banner.get_text()
+            )
+            app.recovering = False
+            app._update_char_info()
+            banner_ok = (
+                banner_ok and not app.recover_banner.get_visible()
+            )
+            stats.hp, stats.hp_max = saved_hp, saved_hp_max
+            app._update_char_info()
+
             result["detail"] = (
                 f"rows={rows} status={status!r} map={app.map_grid.map_id if app.map_grid else None} "
                 f"surface={app.map_surface is not None} guard={guard} facing={facing} "
                 f"hp={stats.hp}/{stats.hp_max} stats_area={app.stats_area is not None} "
                 f"switched={switched} tooltips={tooltips_ok} "
+                f"toggle={toggle_ok} banner={banner_ok} "
                 f"size={app.map_area.get_width()}x{app.map_area.get_height()} "
                 f"entities={len(app.engine.world.entities)} "
                 f"tips={own_tip!r}/{player_tip!r}/{monster_tip!r}/"
@@ -166,6 +189,8 @@ def main() -> int:
                 and facing == (1, 0)
                 and stats_ok
                 and tooltips_ok
+                and toggle_ok
+                and banner_ok
             )
         except Exception as exc:  # noqa: BLE001 - report, do not crash GTK
             result["detail"] = f"exception: {exc!r}"
