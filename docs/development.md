@@ -28,25 +28,28 @@ The MinGW compiler is `i686-w64-mingw32-g++`. Override with
 ## Tests
 
 ```bash
-make -C linux host-test        # 59 stdlib unittest cases
+make -C linux host-test        # 78 stdlib unittest cases
 make -C linux gui-test         # headless GTK4, needs xvfb
-make -C linux bot-test         # path loop + auto-attack against a fake server
+make -C linux bot-test         # 4 smokes: combat, rules/config, rejection, recovery
 make -C linux all test-host
 linux/scripts/dev-test-wine.sh 25
 ```
 
 The unit tests cover the wire protocol, the TCP client (including split-line
-reassembly and peer close), the engine's world-state handlers, and the map
-parser/A* (a synthetic NOS archive, bad headers, walls, unreachable targets,
-ranking; the local archive test is skipped when the game is absent). The GUI
-test opens the real window under Xvfb against a fake server and checks the rows,
-the status bar and the map surface. The bot test drives the same window with
-auto-attack on and a one-cell path, and asserts the `get`/`ncif`/`u_s`/`MOVE`
-sequence (Retaliate picks the monster that hit us) and that the fake client's
-own `walk` confirms the move. A second test makes the server silent and asserts
-the bot stops after three rejected moves. A third starts the character at
-20/100 HP and asserts it sits, waits for full HP and then stands.
-The Wine script covers the x86 stubs
+reassembly and peer close), the engine's world-state handlers, the map
+parser/A* (synthetic NOS, bad headers, walls, unreachable targets, ranking,
+8-direction diagonals and no corner cutting), bot-config validation/clamping,
+spawn-log parsing and the monster/skill text tables. The GUI test opens the
+real window under Xvfb and checks rows, status, map switch, tooltips, toggle
+colors and the recovery banner. The bot smokes cover combat + path movement,
+target filters + spell rules + config save/load, rejected walks and recovery.
+The combat smoke asserts the `get`/`ncif`/`u_s`/`MOVE` sequence (Retaliate
+picks the monster that hit us) and that the fake client's own `walk` confirms
+the move. The rules smoke filters two monsters by vnum, checks that HP 40 %
+triggers a spell rule (`u_s 7 3 500`), and round-trips the JSON configuration.
+The reject smoke makes the server silent and asserts the bot stops after three
+rejected moves. The recovery smoke starts at 20/100 HP and asserts the bot
+sits, waits for full HP and then stands. The Wine script covers the x86 stubs
 (`HookStubTest.exe`), the DLL lifecycle and the command path with a fake game.
 
 Nothing in this repository can test the real detours against the real client;

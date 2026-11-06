@@ -201,28 +201,51 @@ cutting); `find_map_for_positions()` ranks maps
 against live entity coordinates (the 2026-11-06 session identified map **20**,
 230x260, with 100 % of 173,503 `mv` samples on walkable cells).
 
-The GUI's **Map / Bot** tab renders the grid, overlays entities and the own
-character, accepts waypoints by click, draws the A* path, and runs the bot:
+The GUI's **Map / Bot** tab renders the whole current map (automatically
+switched from `c_map`/`at`), overlays entities with hover tooltips, accepts
+waypoints by click, and draws the 8-direction path as a continuous polyline.
+The sidebar also owns the bot configuration:
+
+- `monsternames.py` — `vnum → monster name` and skill descriptions from
+  `NSlangData_<lang>.NOS`;
+- `spawnlog.py` — entity vnum/player-name backfill from the DLL session log
+  for creatures that spawned before the host connected;
+- `botconfig.py` — validated JSON export/import of targets, spell rules and
+  combat settings.
+
+The bot loop:
 
 - stand up with `rest` when sitting;
 - recover below the configured HP % (sit, wait for full, stand);
 - pick up your own/unowned drops in the loot radius (`get 1 <charId>
   <dropId>`);
-- auto-attack, preferring the monster that most recently hit you (Retaliate),
-  otherwise the nearest one in range (`ncif` + a configurable `u_s` template;
-  skill 0 is the normal attack);
-- walk one path cell at a time via the DLL's `MOVE|x y`, which runs the
-  client's own pathfinding and animation; confirmation is the client's own
-  `walk` packet / `world.position`.
+- evaluate ordered spell rules (my HP/MP below/above thresholds, per-rule
+  cooldown, monster/self target), then auto-attack the nearest allowed monster
+  (Retaliate first) using `ncif` + a configurable `u_s` template; skill 0 is
+  the normal attack;
+- walk three-cell legs via the DLL's `MOVE|x y`, which runs the client's own
+  pathfinding and animation; confirmation is the client's own `walk` packet /
+  `world.position`.
 
-See [map.md](map.md) for the data format, controls and limits.
+The Targets filter applies to both Retaliate and nearest-target selection. See
+[map.md](map.md) for the data format and limits, and
+[bot-config.md](bot-config.md) for the filter, spell-rule and JSON semantics.
 
 ## GUI
 
 `python3 -m ntpl gui` (or `linux/scripts/gui.sh`) opens the GTK4 window:
 a packet table with RECV/SEND colours, a filter, a Follow toggle, a raw send
-entry, and the Map/Bot tab. The reader thread only fills a queue; GLib drains
-it on the main loop, so no GTK call ever runs off the main thread.
+entry, and the Map/Bot tab. Options:
+
+- `--map-data PATH` — `NStcData.NOS` archive (or `NTPL_NSTC`);
+- `--log PATH` — DLL packet log used to backfill entity vnums/player names
+  (or `NTPL_LOG`; default is discovered inside the Wine prefix).
+
+The Map/Bot tab shows the whole map (auto-switch from `c_map`/`at`), 8-direction
+A* path, live entities with hover tooltips, green/red toggles, a recovery
+banner, and the Targets/Spells/Configuration sections. The reader thread only
+fills a queue; GLib drains it on the main loop, so no GTK call ever runs off
+the main thread.
 
 ## Design rules
 

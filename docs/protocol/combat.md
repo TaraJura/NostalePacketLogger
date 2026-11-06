@@ -47,6 +47,19 @@ server also sends `cancel 0 <skill> -1` when a cast skill is not usable.
 `<skill> <targetType> <targetId>` is the verified prefix; later fields are
 still unknown.
 
+Target types observed or used by the bot:
+
+| targetType | targetId | Meaning |
+|---|---|---|
+| 3 | monster `entityId` | monster/normal attack or offensive spell |
+| 1 | own `charId` | self-target spell/buff (protocol-consistent shape; one benign live cast still recommended) |
+
+The GUI's ordered **Spells** rules use this format: monster rules send
+`ncif 3 <entityId>` then `u_s <spell> 3 <entityId>`; self rules send
+`u_s <spell> 1 <charId>`. The first enabled rule whose My HP/MP condition is
+true (and whose per-rule cooldown is over) wins; otherwise the Combat Skill
+is used. See [../bot-config.md](../bot-config.md).
+
 `ntpl cast` defaults to `u_s <skillVnum> <targetType> <targetId>`:
 
 ```bash
@@ -55,9 +68,11 @@ linux/scripts/host.sh cast 10 --target-id 5161 --target-type 3  # other skill
 linux/scripts/host.sh cast --packet "u_s 0 3 5160"
 ```
 
-The character must be **standing** (sitting blocks actions), the target must be
-in range, and the server confirms a successful cast with an `su` packet. The
-client does not echo its own `u_s` reliably, so `su` is the confirmation.
+The character must be **standing** (sitting and recovery block actions), the
+target must be in range, and the server confirms a successful cast with an
+`su` packet. The client does not echo its own `u_s` reliably in the packet
+stream, so `su` is the confirmation; the skill hook does capture the client's
+own builder.
 
 ---
 
@@ -81,6 +96,8 @@ use `--no-select` to skip it. The client string is in the binary at VA
 4. If enemy dies → `out` RECV (entity despawned)
 5. Loot drops → `in` RECV (drop entity spawned) or `drop` RECV
 
-Verified so far: the server sends `su` for every hit (live examples above),
-and the engine parses attacker/target/skill. The injected `u_s` path still
-needs one live cast to lock the exact field order.
+Verified live: the server sends `su` for every hit; the engine parses
+attacker/target/skill; `u_s 0 3 <id>` is the normal attack and produced
+`su ... 866/868 ...`; skill 10 produced `su ... 876 ...`. The injected `u_s`
+path is therefore confirmed. Self-target `u_s <spell> 1 <charId>` remains to
+be verified with one benign live cast.

@@ -4,6 +4,13 @@ This document records what was actually verified against the running NosTale
 client, the bugs the live test exposed, and the game mechanics learned. The
 addresses and PIDs are session-specific and change after a client restart.
 
+> The first sections describe the morning/afternoon session (through the skill
+> hook fix). The same client stayed up and the work continued well past 17:00;
+> see [Later same-day work](#later-same-day-work-16001750) at the end for map
+> switching, monster names, target filters, spell rules, config export/import,
+> 8-direction pathing and the final UI state. Test counts in the older
+> paragraphs are snapshot values; the current count is **78**.
+
 ## Environment
 
 | What | Value |
@@ -243,7 +250,10 @@ live position `(25,117)` shows the character on open ground.
 
 ### Map / bot UI and the loop
 
-The GTK4 window gained a **Map / Bot** tab (`docs/assets/gui-map.png`):
+The GTK4 window gained a **Map / Bot** tab (`docs/assets/gui-map.png`). This
+was the **initial** control set; the later section lists the current UI (the
+map/scale/char-id controls were removed, and Targets/Spells/Configuration were
+added):
 
 - map id, `Load`, `Auto-detect` (rank by live entities), scale;
 - left click adds a waypoint, right click removes the last; the A* path is
@@ -305,7 +315,7 @@ skill packet.
   as well as other cast skills.
 - The file log is `~/games/gameforge/prefix/drive_c/NosTalePacketLog.txt`.
 - The TCP server is `127.0.0.1:47821`.
-- The host test count is now 59; `make bot-test` also runs the
+- The host test count was 59 at that point (78 now; see the later section); `make bot-test` also runs the
   rejected-move regression test. The DLL in the client is `PacketLogger8.dll`
   (hooks ACTIVE, `MOVE`/`POS` available).
 
@@ -314,9 +324,9 @@ skill packet.
 ```bash
 # build and unit tests
 make -C linux all test-host
-make -C linux host-test        # 48 cases
+make -C linux host-test        # 78 cases
 make -C linux gui-test         # headless GTK4 + map surface
-make -C linux bot-test         # path loop + auto-attack, fake server
+make -C linux bot-test         # 4 smokes: combat, rules/config, rejection, recovery
 
 # with the game running
 export WINEPREFIX=/home/novakj/games/gameforge/prefix
@@ -353,6 +363,124 @@ linux/scripts/host.sh cast 0 --target-id 5160    # normal attack (u_s 0 3 id)
 5. Run the Map/Bot tab against the live client with auto-attack enabled and
    tune the range/cooldown from what the server accepts.
 6. Reconcile the protocol wiki with more live captures.
+
+## Later same-day work (16:00–17:50)
+
+The live client stayed up after the skill-hook fix. The GUI was restarted
+many times as features landed; every restart reconnects to the DLL and reloads
+the session log.
+
+### Map switching
+
+Live capture around a portal crossing:
+
+```
+16:28:42.110 [RECV] c_map 0 20 0
+16:28:42.110 [RECV] mapout
+16:28:42.115 [RECV] at 14881134 85 6 8 2 0 13 1 -1 0 0
+16:28:42.132 [RECV] c_map 0 85 1
+```
+
+`c_map` is `<type> <mapId> <state>`; the **second** field is the map id.
+Reading the first field set `WorldState.map_id` to 0 after `at`, so the UI
+never switched maps. The engine now reads the second field, clears
+entities/drops on `c_map`/`mapout`, and the GUI switches immediately on
+`c_map`/`at` (the 2 s tick remains a fallback). The GUI regression test
+replays the live 20→85→20 sequence.
+
+### Auto-attack and Move first
+
+- Normal attack is `ncif 3 <id>` + `u_s 0 3 <id>`; the server reports the
+  basic skill 866/868 in `su`. Skill 866 is not castable (`cancel 0 866 -1`).
+- **Move first** (default on) now keeps auto-attack enabled: the bot attacks
+  when the cooldown is ready and resumes walking after the attack animation.
+  With it off the bot holds position and clears nearby monsters before moving.
+- No path is a valid stationary combat/pickup/recovery mode.
+
+### Monster and skill names
+
+`NSlangData_UK.NOS` is a text archive (`count`, then per entry: number, name
+length, name, isDat, size, data). `_code_uk_monster.txt` is nibble-coded and
+decrypts to `zts<vnum>e<TAB><name>` records: **2,795** names. Examples from the
+live session:
+
+| vnum | name | live entity observed |
+|---|---|---|
+| 200 | Mountain Turtle | 5032 |
+| 201 | Rock Turtle | 5068 |
+| 206 | Angry Queen Bee | 5122 |
+| 208 | Weak Spider | 5148 |
+| 217 | Small Wasp | (wasps near the player) |
+| 218 | Wasp | |
+| 219 | Large Wasp | |
+| 223 | Small Wiggler | 5161/5162/5163/5164 |
+
+`_code_uk_Skill.txt` uses the same record shape and supplies the spell
+description shown in the spell-rule editor. `monsternames.py` implements the
+archive reader, nibble codec and both tables.
+
+The `in 3 <vnum> <entityId> ...` packet carries the template vnum first and
+the per-session entity id second. `ncif`/`u_s`/`su` use the entity id.
+
+### Tooltips and spawn-log backfill
+
+Map tooltips describe the own marker, players, NPCs/pets, monsters (name,
+entity id, vnum, position, distance, “attacking you”) and drops (item vnum,
+amount, drop id, owner). `spawnlog.py` scans the DLL log's `[RECV] in ...`
+lines at GUI startup so entities that spawned **before the GUI connected**
+still get their vnum/name. A monster that was alive before the **DLL was
+injected** has no `in` line at all; it will show `#entityId` until it respawns
+or re-enters view. The Targets section has an explicit **Also attack monsters
+with unknown vnum** option for that case, and the status bar warns when such
+monsters are in range.
+
+### Targets, spell rules and configuration
+
+- Targets: All / Only selected / All except selected by monster template
+  vnum; search by name or vnum, manual vnum entry, and the unknown-vnum
+  option. The filter applies to Retaliate too.
+- Spells: ordered rules with spell vnum, **My HP %** or **My MP %**,
+  below/above threshold, per-rule cooldown, and Monster/Self target. First
+  matching rule wins; otherwise the Combat **Skill** is used. Requires
+  Auto-attack. Recovery runs first.
+- Configuration: **Save config… / Load config…** export/import all bot
+  settings as validated JSON (`botconfig.py`). Loading stops the bot;
+  waypoints/path are session state and are not saved. Full schema and caveats
+  in [bot-config.md](bot-config.md).
+
+### Pathing
+
+The original path was 4-direction BFS, so every route had 90° corners. It is
+now **8-direction A\***: diagonal cost √2, octile heuristic, and a diagonal is
+only allowed when both orthogonal cells are walkable. The overlay is a
+continuous cyan polyline through cell centres. Diagonal legs are paced and
+timed out by Euclidean travel distance. Tests cover an open-ground diagonal
+shortcut and the no-corner-cutting rule.
+
+### UI state
+
+- Toggle buttons are **green when active** and **red when inactive** (Loop,
+  Auto-attack, Retaliate, Move first, Pickup, Auto-recover).
+- A red **RECOVERING** banner shows the HP percentage and that attacks and
+  movement are paused. The banner is what explained a live report of “only
+  selected is not working”: the character was at 24 % HP, below the 30 %
+  recovery threshold, so the bot was sitting.
+- The sidebar width is capped so a wide child cannot steal half the window
+  and shrink the map.
+
+### Verification and state
+
+- **78 host tests**, `make gui-test` (map switch, tooltips, toggle classes,
+  recovery banner), and **4 bot smokes** (combat, target filter + spell rules
+  + config round-trip, rejected walks, recovery) pass.
+- Headless rules smoke: two monsters (vnum 201 nearer, vnum 200 farther),
+  allow only 200, HP 40 %, rule spell 7 below 50 % → `ncif 3 500` +
+  `u_s 7 3 500`, no traffic to 501, no basic attack; save/load restores it.
+- Live path/auto-attack/pickup/map-switch captures above; GUI restarted with
+  the final build and connected (`recv/send/skill ACTIVE`, drops 0).
+- Remaining caveats: self-target spells use `u_s <spell> 1 <charId>` (protocol
+  shape, needs one benign live cast); diagonal MoveTo is handled by the
+  client's own pathfinder and should be watched on the first live run.
 
 ## Safety
 

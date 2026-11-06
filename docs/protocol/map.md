@@ -40,17 +40,28 @@ Character position after map load. Tells the client where the character is on th
 
 **Format**: `at <charId> <mapId> <x> <y> <direction> <unknown> <unknown> <unknown> <unknown> <unknown> <unknown>`
 
-*TODO: Capture examples*
+Live examples:
+
+```
+at 14881134 20 14 87 2 0 11 1 -1 0 0   — logged in on map 20 at (14, 87)
+at 14881134 85 6 8 2 0 13 1 -1 0 0    — portal crossing: map 85 at (6, 8)
+at 14881134 20 18 190 2 0 11 1 -1 0 0 — back on map 20 at (18, 190)
+```
+
+The engine uses the second, third and fourth fields for `map_id`, `x` and
+`y`, learns `self_id` from the first, clears entities/drops when the map id
+changes, and the GUI selects the new map immediately.
 
 ---
 
 ## Map IDs (Known)
 
-*TODO: Build this list by visiting different maps*
+Only ids observed in packets are listed; more are added by visiting maps.
 
 | Map ID | Name | Notes |
 |--------|------|-------|
-| | | |
+| 20 | Western Krem | live starting map; 230x260, 37.3 % walkable |
+| 85 | — | visited through a portal on 2026-11-06; 70x104 |
 
 ---
 

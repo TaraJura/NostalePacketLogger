@@ -289,9 +289,10 @@ never sees the `at` packet.
 - Pickup only considers drops owned by your char id or unowned (`owner_id` 0);
   another player's drops are skipped. The default loot radius is 3 cells; the
   bot does not walk to distant drops by itself yet.
-- The exact `u_s` field order is still unverified beyond the verified
-  `u_s <skill> <targetType> <targetId>` prefix. The template is editable;
-  capture one live cast (`su 1 <charId> ...` in the log) and adjust it.
+- The verified `u_s` prefix is `<skill> <targetType> <targetId>`; later
+  fields are unknown. `u_s 0 3 <id>` is the normal attack and skill 10 cast
+  produced `su ... 876` live. Self-target rules use `u_s <spell> 1 <charId>`;
+  that shape still needs one benign live cast. The template is editable.
 - Auto-attack targets `kind == 3` only, within **Range**. Skill **0** is the
   normal attack; the server reports the basic skill (866/868) in `su`. Skill
   866 itself is not castable and gets `cancel 0 866 -1`.
@@ -345,3 +346,18 @@ no basic attack, and that save/load restores the config. See
 - Live pickup is verified: a drop `drop 5193 13979116 49 169 1 0 14881134`
   produced `MANUAL_SEND get 1 14881134 13979116` and the server confirmed with
   `RECV get 1 14881134 13979116 0` (2026-11-06 ~15:57).
+- Map switching is live-verified from the portal capture 20 ↔ 85:
+  `c_map 0 20 0` → `mapout` → `at ... 85 ...` → `c_map 0 85 1`, and back.
+  The GUI follows the second `c_map` field immediately.
+- Monster names are mapped live: e.g. entity 5032/vnum 200 (Mountain Turtle),
+  5068/201 (Rock Turtle), 5122/206 (Angry Queen Bee), 5161/223 (Small
+  Wiggler). Tooltips show the name, entity id and vnum.
+- Pathing is now 8-direction A* with diagonal steps and a continuous polyline.
+  The headless tests cover the diagonal shortcut and corner-cut rejection;
+  the client's MoveTo still performs the actual movement, so watch the first
+  live diagonal run.
+- Target filters, spell rules, JSON config and the recovery banner/toggle
+  colours are covered by the headless GUI/rules smokes. The live client
+  confirmed the reason “only selected” can look idle: recovery was sitting at
+  24 % HP, and pre-injection wasps had no vnum in the log (the unknown-vnum
+  option now covers them).

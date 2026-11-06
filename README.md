@@ -20,9 +20,9 @@ shared: the transport differs, the game's packets do not.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 59 Python unit tests
+make -C linux host-test                      # 78 Python unit tests
 make -C linux gui-test                       # headless GTK4 + map smoke (xvfb)
-make -C linux bot-test                       # fake server: path loop + auto-attack
+make -C linux bot-test                       # 4 fake-server bot smokes
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path
 linux/scripts/dev-test-wine.sh 25
@@ -48,8 +48,10 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 - [docs/engine.md](docs/engine.md) — the Python host API, state model, CLI
   commands and action confirmations
-- [docs/map.md](docs/map.md) — `NStcData` maps, walkability, A*, the Map/Bot
-  tab, path loop and auto-attack
+- [docs/map.md](docs/map.md) — `NStcData` maps, walkability, 8-direction A*,
+  the Map/Bot tab, path loop, auto-attack and tooltips
+- [docs/bot-config.md](docs/bot-config.md) — monster target filters,
+  conditional spell rules and JSON export/import
 - [docs/handoff-2026-11-06.md](docs/handoff-2026-11-06.md) — current state and
   the exact post-reboot reinjection + auto-attack test procedure
 - [docs/live-session-2026-11-06.md](docs/live-session-2026-11-06.md) — what was
@@ -65,9 +67,9 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 59 unit tests pass, the GTK4 window and the map/bot
-loop pass their headless smoke tests, and the real injector has been run
-against the **live NosTale client** under Wine 11:
+The Linux port builds, its 78 unit tests pass, the GTK4 window and four bot
+smoke tests pass, and the real injector has been run against the **live
+NosTale client** under Wine 11:
 
 - both hooks `ACTIVE` (`recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`),
   `drops recv=0`;
@@ -78,7 +80,10 @@ against the **live NosTale client** under Wine 11:
   local position. Injecting a raw `walk` (checksum `1 if (x+y)%3 == 1`) moves
   only the server, and the correction teleports the client;
 - the live GUI bot walked `(26,133)→(23,130)` as six client `[SEND] walk`
-  packets, with no injected walks, probes or teleports.
+  packets, with no injected walks, probes or teleports;
+- auto-attack is `ncif 3 <id>` + `u_s 0 3 <id>`; the server answers with
+  `su ... 866/868 ...`, and pickup/ground drops are confirmed with `get`;
+- the skill hook captures the client's own `u_s` packets (`skill=ACTIVE`).
 
 `linux/scripts/host.sh walk X Y` uses `MOVE` and waits for the client's own
 `walk` packet. The character must be **standing**: sitting blocks movement and
@@ -87,12 +92,18 @@ tile/entity); the bot stops after three rejected steps.
 
 The client's own map grids are parsed from `NostaleData/NStcData.NOS`; the live
 map is **20** (230x260) and every observed entity position is on walkable cells.
-The GTK4 **Map / Bot** tab renders the map, takes click waypoints, computes an
-A* path, and can loop it while auto-attacking nearby monsters (Retaliate picks
-the one hitting you), picking up your drops, and sitting to recover below a
-configurable HP %. The sidebar shows live HP/MP bars with the missing amount. `map` commands
-inspect/render the grids; `make bot-test` exercises the loop against a fake
-server. See [docs/map.md](docs/map.md).
+The GTK4 **Map / Bot** tab renders the map (automatic map switch on `c_map`),
+takes click waypoints, computes an **8-direction A\*** path (diagonals, no
+corner cutting, continuous polyline), and can loop it while auto-attacking
+monsters (Retaliate picks the one hitting you), picking up drops, and sitting
+to recover below a configurable HP %. It shows live HP/MP bars plus a red
+recovery banner, green/red active toggles, hover tooltips with monster names
+from the client's language archive, and an explicit unknown-vnum option for
+monsters that spawned before injection. Targets can be filtered by monster
+vnum; ordered spell rules cast by HP/MP conditions; the whole bot configuration
+is saved/loaded as JSON. `map` commands inspect/render the grids; `make
+bot-test` exercises the loop, rules, rejection and recovery against a fake
+server. See [docs/map.md](docs/map.md) and [docs/bot-config.md](docs/bot-config.md).
 
 Gameforge's terms of service prohibit automation. This is a tool for the
 account owner's own client; using it on a live account is their decision and

@@ -29,18 +29,20 @@ the host differ, the game's packets do not.
   passes a headless smoke test, and the DLL has been verified against the
   **live NosTale client** under Wine 11: both hooks ACTIVE, drops 0,
   sit/stand via `rest`, and natural movement through the client's own MoveTo
-  (`MOVE|x y` + `POS`). The live GUI bot walked a six-cell A* path as client
-  walk packets, with no injected walks or teleport corrections. Spell support
-  (`su` parsing, `ntpl cast`) is in; the exact `u_s` field order still needs
-  one live cast. See [live-session-2026-11-06.md](live-session-2026-11-06.md).
+  (`MOVE|x y` + `POS`). The live GUI bot walked a six-cell path as client walk
+  packets, with no injected walks or teleport corrections. Spell support is
+  live-verified: `u_s 0 3 <id>` is the normal attack (`su ... 866/868 ...`),
+  the skill hook captures the client's own `u_s`, and pickup
+  (`get 1 <charId> <dropId>` → server `get`) works. See
+  [live-session-2026-11-06.md](live-session-2026-11-06.md).
 - **Map / bot** — `NStcData.NOS` parser (779 grids); the live map is **20**
   (230x260) and 100 % of the observed entity positions are on walkable cells.
-  The GTK4 Map/Bot tab renders the grid, draws A* paths, runs a path loop and
-  can auto-attack nearby monsters (Retaliate prioritises the one hitting you),
-  pick up your drops, and sit to recover below a configurable HP %. The UI has
-  live HP/MP bars, a structured sidebar, monster target filters and conditional
-  spell rules; the whole configuration can be saved/loaded as JSON.
-  `make gui-test` and `make bot-test` pass (4 bot smokes); live auto-attack
-  (`u_s 0 3 <id>` → `su ... 866 ...`) and pickup (`get 1 <charId> <dropId>` →
-  server `get`) were verified. See [map.md](map.md) and
+  The GTK4 Map/Bot tab renders the whole map (auto-switches from `c_map`),
+  draws **8-direction A\*** paths as a continuous polyline, runs a path loop
+  and can auto-attack monsters (Retaliate prioritises the one hitting you),
+  pick up drops, and sit to recover below a configurable HP %. The UI has live
+  HP/MP bars with a recovery banner, green/red toggles, map tooltips with
+  monster names, monster target filters and conditional spell rules; the whole
+  configuration can be saved/loaded as JSON. `make gui-test` and `make
+  bot-test` pass (4 bot smokes). See [map.md](map.md) and
   [bot-config.md](bot-config.md).

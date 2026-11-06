@@ -23,6 +23,12 @@ in 2 2557 2230354 104 24 2 96 100 0 0 3 4165102 1 0 2379 Graham ...
 
 in 2 1488 2230353 105 24 2 100 109 0 0 3 4165102 1 0 -1 Panda-Leuchtii<3 ...
     — Pet vnum 1488 at (105, 24), named "Panda-Leuchtii<3"
+
+in 3 206 5122 132 182 2 100 100 0 0 0 -1 0 0 -1 - 0 -1 0 0 0 0 0 0 0 0 0 0 0 1 0
+    — Monster vnum 206 (entity 5122) at (132, 182); live name "Angry Queen Bee"
+
+in 3 223 5164 103 169 2 100 100 0 0 0 -1 1 0 -1 - 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0
+    — Monster vnum 223 (entity 5164) at (103, 169); live name "Small Wiggler"
 ```
 
 **Notes**:
@@ -30,6 +36,16 @@ in 2 1488 2230353 105 24 2 100 109 0 0 3 4165102 1 0 -1 Panda-Leuchtii<3 ...
 - Equipment slots for players are dot-separated vnum lists
 - HP/MP are percentages (0-100)
 - `vnum` = virtual number, the template ID of the NPC/monster/item
+- **Monster packets carry the template vnum first and the per-session
+  `entityId` second.** `ncif`, `u_s` and `su` use the `entityId`; the map
+  tooltip and target filter need the vnum. The engine stores both.
+- The client derives the displayed monster name from the vnum; the host reads
+  `NSlangData_<lang>.NOS` → `_code_<lang>_monster.txt` (`zts<vnum>e<TAB><name>`)
+  via `monsternames.py`. The skill table uses the same `zts<id>e` records.
+- A monster that was already alive when the DLL was injected has no `in`
+  packet in the log, so its vnum is unknown until it respawns/re-enters view.
+  `spawnlog.py` recovers the ones whose `in` was logged before the GUI
+  connected; the Targets UI has an explicit unknown-vnum option.
 
 ---
 
@@ -39,7 +55,15 @@ An entity has despawned / left the visible area.
 
 **Format**: `out <entityType> <entityId>`
 
-*TODO: Capture examples*
+Live examples:
+
+```
+18:09:16.274 [RECV] out 2 3297053
+18:09:33.431 [RECV] out 1 14879942
+```
+
+The engine removes `entityId` from `WorldState.entities`; it does not use the
+vnum.
 
 ---
 

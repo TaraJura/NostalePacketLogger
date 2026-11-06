@@ -55,7 +55,7 @@ make -C linux all test-host
 make -C linux check                 # file(1) on the three PE32 outputs
 make -C linux host-test             # 78 stdlib unittest cases
 make -C linux gui-test              # headless GTK4 + map surface smoke
-make -C linux bot-test              # fake server: path loop + auto-attack
+make -C linux bot-test              # 4 smokes: combat, rules/config, rejection, recovery
 make -C linux clean
 
 # End-to-end without the game (temporary Wine prefix, deletes itself)
@@ -120,9 +120,10 @@ PYTHONPATH=linux/host python3 -m ntpl status
 - **Combat:** the server sends `su <attackerType> <attackerId> <targetType>
   <targetId> <skillVnum> ...` for every hit; the engine records the first five
   fields. `ntpl cast <skill> --target-id <id>` sends `ncif` then a default
-  `u_s <skill> <targetType> <targetId>` and waits for `su`. The exact `u_s`
-  field order is not verified yet; use `--packet` to send a literal packet
-  captured from the live client.
+  `u_s <skill> <targetType> <targetId>` and waits for `su`. The prefix is
+  live-verified (`u_s 0 3 <id>` is the normal attack; skill 10 cast produced
+  `su ... 876`); later fields are unknown. Use `--packet` for a literal
+  captured packet when experimenting.
 - **Map/bot:** `mapdata.py` reads `NostaleData/NStcData.NOS` (16-byte header,
   count, id/offset index, zlib blocks; `width:int16`, `height:int16`,
   `width*height` terrain bytes; `0x00` walkable). The live map id is **20**,
@@ -191,16 +192,20 @@ First packet-driven game actions are confirmed on the live client:
    sends its own `walk` packets. `POS` reads its local position.
 4. The engine parses the resulting `tp`/`rest`/`cond`/`stat` stream.
 5. The `NStcData.NOS` map parser identified map **20** (230x260); the Map/Bot
-   tab renders it, draws A* paths and runs the loop/auto-attack. The bot smoke
-   test sends `ncif`/`u_s`/`walk` and passes.
+   tab renders it, draws 8-direction A* paths and runs the loop/auto-attack.
+   The bot smokes send `ncif`/`u_s`/`MOVE` and pass.
 
 Next:
 
-1. Fully done: live path loop and auto-attack verified; normal attack is
-   `u_s 0 <type> <id>` (the server reports skill 866/868 in `su`).
-2. Capture the client's own `walk`/`u_s` SEND packets (the current send hook
-   sees `rest`/`sortopen`/`pulse` but not the game's movement or skills).
+1. Fully done: live path loop, auto-attack, pickup, map switching and the
+   skill hook; normal attack is `u_s 0 3 <id>` (the server reports skill
+   866/868 in `su`).
+2. ~~Capture the client's own `walk`/`u_s` SEND packets~~ — done: the send
+   hook sees `walk`, and the skill hook captures `u_s` at `0x72D5B2`.
 3. Map switching is live-verified for the `c_map` 20↔85 portal capture; more
-   maps will confirm the parser and A* on other grids.
+   maps will confirm the parser and 8-direction A* on other grids.
+4. Verify one benign self-target spell shape (`u_s <spell> 1 <charId>`) live.
+5. Unknown-vnum monsters that existed before DLL injection remain the main
+   target-filter gap; the UI has an explicit option and docs describe relog.
 4. Reconcile `docs/protocol/` with more live captures, then extend the loop
    with path validation and combat state.

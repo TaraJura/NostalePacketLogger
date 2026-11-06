@@ -156,10 +156,13 @@ sitting, the server ignores movement. The sit/stand toggle is
 
 The GUI has a second tab, **Map / Bot**. It reads the client's own
 `NostaleData/NStcData.NOS` (path configurable with `--map-data`), draws the
-selected grid with walkable cells, overlays the live entities, accepts
-waypoints by clicking, computes an A* path, and can loop that path while
-auto-attacking nearby monsters. See [map.md](map.md) for the map format and the
-bot loop.
+whole selected grid (auto-switch from `c_map`), overlays live entities with
+hover tooltips, accepts waypoints by clicking, computes an **8-direction A\***
+path, and can loop it while auto-attacking monsters. The sidebar has live
+HP/MP bars, green/red toggles, a red recovery banner, target filters,
+conditional spell rules and JSON save/load. `--log PATH` (or `NTPL_LOG`)
+selects the DLL log used to backfill vnums for entities that spawned before
+the GUI attached. See [map.md](map.md) and [bot-config.md](bot-config.md).
 
 Inside `monitor`, stdin accepts:
 
@@ -217,8 +220,10 @@ If `C:\` is not writable, the DLL falls back to
 | Variable | Read by | Default |
 |---|---|---|
 | `NTPL_PORT` | DLL and host | `47821` |
-| `NTPL_LOG` | DLL | `C:\NosTalePacketLog.txt` |
+| `NTPL_LOG` | DLL and GUI (spawn-log backfill) | `C:\NosTalePacketLog.txt` |
 | `NTPL_QUIET` | DLL | unset; `1` disables the file log |
+| `NTPL_NSTC` | host | `~/Desktop/nostake/Nostale/NostaleData/NStcData.NOS` |
+| `NTPL_NSLANG` | host | `NSlangData_UK.NOS` next to `NStcData.NOS` (then any `NSlangData_*.NOS`) |
 | `NTPL_WINE` | scripts | `wine` from `PATH` |
 | `NTPL_WINEPREFIX` | `inject.sh` | `$WINEPREFIX`, then `~/.wine-nostale` |
 
@@ -229,24 +234,25 @@ both.
 ## Tests
 
 ```bash
-make host-test          # 59 stdlib unit tests: protocol, engine, map, checksum
+make host-test          # 78 stdlib unit tests: protocol, engine, map, config
 
 make gui-test           # headless GTK4 window + map surface against a fake stream
-make bot-test           # fake server: combat, pickup, MOVE, recovery, rejection
+make bot-test           # 4 fake-server smokes: combat, rules, rejection, recovery
 make all test-host
 ./scripts/dev-test-wine.sh 25
 ```
 
 `gui-test` uses `xvfb-run` to open the real window with a fake server on
-loopback, then checks that both packets became table rows, that the STATUS line
-reached the status bar and that map 20 loaded with a Cairo surface. Install
-`xvfb` if it is missing.
+loopback. It checks the packet rows and STATUS line, the map surface, the live
+map switch (the 20→85→20 `c_map` sequence), map tooltips (including a vnum
+backfilled from the DLL log), green/red toggle classes, the recovery banner,
+and the unknown-position path guard. Install `xvfb` if it is missing.
 
-`bot-test` drives the real GTK window against a fake server that sends an `at`
-and an `mv`; it starts the bot on a two-cell path with auto-attack on and
-asserts that the host sent `ncif`, `u_s` and one confirmed `walk` per cell. It
-needs `xvfb` too, but no game and no map archive (the map grid is optional in
-the smoke test).
+`bot-test` drives the real GTK window against fake servers. The four smokes
+cover auto-attack + path movement (`ncif`, `u_s`, `MOVE`), target filtering +
+conditional spell rules + JSON config round-trip, three rejected walks, and
+the sit/wait-for-full-HP recovery loop. They need `xvfb`, but no game.
+`bot-test` uses the real map archive when it is installed.
 
 `dev-test-wine.sh` is the end-to-end test that does not need NosTale:
 
@@ -290,8 +296,16 @@ The recommended setup is still a dedicated prefix.
   renders it; `map render` produced `docs/assets/map20.png`.
 - The GUI map and the bot pass the headless tests (`make gui-test`,
   `make bot-test`) and have now been run against the live client: the bot
-  completed the six-cell path above. The live auto-attack still needs a real
-  skill vnum/`u_s` confirmation.
+  completed the six-cell path above.
+- Live auto-attack was verified with `u_s 0 3 <id>`; the server answered
+  `su ... 866/868 ...`. Pickup (`get 1 <charId> <dropId>`) and drop tracking
+  are verified. The skill hook captures the client's own `u_s` packets.
+- Map switching uses the **second** `c_map` field (`c_map <type> <mapId>
+  <state>`) plus `at`; the GUI switches immediately and drops stale entities.
+  Live captures cover map 20 ↔ 85.
+- Monster names come from `NSlangData_UK.NOS` / `_code_uk_monster.txt`; the
+  map tooltips use them. `spawnlog.py` backfills entity vnums and player names
+  for spawns that happened before the host connected.
 
 ## Honest status
 
@@ -303,10 +317,12 @@ The recommended setup is still a dedicated prefix.
   known EDX and verifies the packet pointer, the original-call replay and the
   send trampoline.
 - GTK4 4.22 and PyGObject 3.56 are installed; the real window passes the
-  headless Xvfb smoke test (`make gui-test`), and the Map/Bot tab loads map 20
-  with a Cairo surface in it. It has not been opened against the real game.
-- The map parser, A* and the bot loop pass their tests; the loop has only been
-  run against a fake server so far. The live run is the next step.
+  headless Xvfb smoke test (`make gui-test`) and has been run against the live
+  game with the Map/Bot tab, map switching, tooltips and the bot.
+- The map parser, A* and the bot loop pass their tests and have been run live:
+  the bot completed client-animated paths, auto-attacked, picked up drops and
+  switched maps. The only live-unverified protocol shape is the self-target
+  spell variant (`u_s <spell> 1 <charId>`).
 - The `SCAN`/`FIND`/`READ` commands are new reverse-engineering aids. `FIND`
   located the charId record, but the live position comes from the server's
   `tp`/`mv`, not from those addresses.

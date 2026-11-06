@@ -41,37 +41,45 @@ Next:
 The handlers are deliberately tolerant. Next:
 
 - Add inventory (`inv`, `ivn`) and shop (`shop`) parsing.
-- Track cooldowns and target selection (`ncif`, `u_s`).
-- Add a `events` stream (entity appeared, entity died, map changed) so the
+- ~~Track target selection (`ncif`, `u_s`)~~ — done; the last target/skill are
+  in `WorldState`, and the bot has its own spell/attack cooldowns.
+- Add an `events` stream (entity appeared, entity died, map changed) so the
   future agent can react instead of polling.
 - Persist a session: packets + derived events + timestamps.
 
-## Phase 3.5 — Map, path and auto-attack (implemented, live test pending)
+## Phase 3.5 — Map, path, combat and configuration (implemented and run live)
 
 The client's `NStcData.NOS` is parsed into per-map walkability grids (779 maps;
 one byte per cell; `0x00` walkable). The live map is **20** (230x260) and 100 %
 of the observed `mv` positions are on walkable cells.
 
 - `ntpl map info/render/best` inspect the grids from the CLI.
-- The GTK4 **Map / Bot** tab renders the grid, overlays live entities, takes
-  click waypoints, computes an A* path, and can **loop** it.
-- Auto-attack targets the nearest monster in range (`ncif` + a configurable
-  `u_s` template) on a cooldown.
-- The bot stands first (`rest`), walks one cell at a time and waits for the
-  server's `tp`/`mv` before the next.
+- The GTK4 **Map / Bot** tab renders the whole map, switches it automatically
+  from `c_map`/`at`, overlays live entities with hover tooltips, takes click
+  waypoints and draws an **8-direction A\*** path as a continuous polyline.
+- Auto-attack targets the nearest allowed monster (`ncif` + `u_s 0 3 <id>` for
+  the normal attack) on a cooldown; Retaliate prioritises the attacker.
+- The bot stands first (`rest`), walks three-cell legs through the client's
+  own MoveTo and waits for the client `walk`/`world.position` before the next.
+- Recovery sits below a configurable HP %, waits for full and resumes.
+- Targets can be filtered by monster vnum (all/only/except, plus unknown-vnum
+  handling); ordered spell rules cast by my HP/MP thresholds; the whole bot
+  configuration is JSON save/load.
+- Monster names come from the client's `NSlangData_UK.NOS`; the spawn log
+  backfills vnums for entities that predate the host connection.
 
-`make gui-test` and `make bot-test` pass headlessly. The loop has **not** been
-run against the live client yet; the live run and the exact `u_s` field order
-are the next steps. See [map.md](map.md).
+`make gui-test` and the four `make bot-test` smokes pass. The live run verified
+`MOVE`, auto-attack (`u_s 0 3 <id>` → `su ... 866/868 ...`), pickup and map
+switching. See [map.md](map.md) and [bot-config.md](bot-config.md).
 
 ## Phase 4 — Autonomous agent
 
 The first reversible loop is now possible and runs live: `MOVE|x y` calls the
 client's own MoveTo, so the character pathfinds and animates normally; `POS`
 reads its local position; `rest` controls sit/stand; the Map/Bot tab runs a
-confirmed path loop with auto-attack. It is not autonomous yet: a move is
-confirmed before the next one, some tiles are rejected, and the `u_s` skill
-layout is still unverified.
+confirmed path loop with auto-attack, recovery, target filters and conditional
+spell rules. It is not autonomous yet: some tiles are rejected and the
+self-target spell shape still needs one benign live cast.
 
 When it starts:
 
@@ -91,12 +99,11 @@ When it starts:
    pathfinding/animation → wait for the client's own `walk` → next cell, A*
    over walkable map cells, path loop, auto-attack. Still to do: a
    rejected-tile cache from live attempts and a rate limit.
-4. **Run the loop live** — movement passed on 2026-11-06 (a six-cell path as
-   client `walk` packets). Still to do: enable auto-attack on a real target and
-   lock the `u_s` field order from a live cast.
-5. ~~Capture the client's own `walk` SEND packets~~ — done; the send hook sees
-   them and the checksum is `1 if (x+y)%3 == 1`. The skill packets still need
-   the same treatment.
+4. ~~Run the loop live~~ — movement, auto-attack and pickup passed on
+   2026-11-06; `u_s 0 3 <id>` is the verified normal attack. A self-target
+   spell (`u_s <spell> 1 <charId>`) still needs one live confirmation.
+5. ~~Capture the client's own `walk`/`u_s` SEND packets~~ — done; the send hook
+   sees `walk` and the skill hook captures `u_s` (checksum `1 if (x+y)%3 == 1`).
 6. **Reconcile the protocol wiki** with the live session (`rest`, `tp`, `cond`,
    `stat`) and extend the engine handlers.
 7. **Decide the fate of the Windows tree**: keep it as the reference, or port

@@ -138,20 +138,37 @@ command reference.
 The client's `NostaleData/NStcData.NOS` contains one walkability grid per map
 (779 grids; one byte per cell; `0x00` is open ground). `mapdata.py` parses the
 archive, renders the terrain palette, ranks maps against live entity positions
-and runs A* over walkable cells.
+and runs **8-direction A\*** over walkable cells (diagonal cost √2, no corner
+cutting). The path is drawn as a continuous cyan polyline. The map switches
+automatically from `c_map`/`at` (the map id is the second `c_map` field).
 
-The GTK4 **Map / Bot** tab shows the selected grid, the live entities and the
-own character, lets the user click waypoints, and draws the A* path. The bot
-runs on the GLib main loop:
+Supporting data modules:
 
-1. stand up if the `rest` state is sitting;
-2. auto-attack the nearest monster in range (`ncif` + configurable `u_s`);
-3. walk the next path cell through the DLL's `MOVE|x y` command, which calls
-   the client's own MoveTo/pathfinding, so the client animates and sends its own
-   `walk` packet; confirm from `world.position`.
+- `monsternames.py` — reads `NSlangData_<lang>.NOS`, decodes the client's
+  nibble text codec, and provides `vnum → monster name` and the skill
+  description table.
+- `spawnlog.py` — backfills entity vnums and player names from the DLL's
+  `[RECV] in ...` log lines for entities that spawned before the GUI attached.
+- `botconfig.py` — the JSON bot configuration (target filters, spell rules,
+  combat settings), with validation/clamping and atomic save.
+
+The GTK4 **Map / Bot** tab shows the selected grid, live entities with hover
+tooltips, and the own character, lets the user click waypoints, and draws the
+path. The sidebar groups Character (HP/MP bars + recovery banner), Path,
+Combat (green/red toggles), Targets, Spells, Loot, Recovery and Configuration.
+The bot runs on the GLib main loop:
+
+1. recover: below the HP threshold, sit and wait for full HP;
+2. stand up if the `rest` state is sitting;
+3. pick up own/unowned drops in range;
+4. evaluate ordered spell rules (my HP/MP conditions) and the target filter,
+   then cast or auto-attack (`ncif` + configurable `u_s`); Retaliate first;
+5. walk the next multi-cell leg through the DLL's `MOVE|x y` command, which
+   calls the client's own MoveTo/pathfinding, so the client animates and sends
+   its own `walk` packet; confirm from `world.position`.
 
 Everything still goes through the same `PacketClient`; the map is only a view
-and a path source. See [map.md](map.md).
+and a path source. See [map.md](map.md) and [bot-config.md](bot-config.md).
 
 ## Threading model
 

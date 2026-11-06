@@ -14,7 +14,7 @@ non-native piece. Everything outside the game is native Linux:
 | Host library / CLI | Python 3.10+, standard library only | no dependencies, easy to extend into the engine |
 | GUI | GTK4 via PyGObject | the native Linux toolkit, already present on Ubuntu |
 | State model | `ntpl.engine.WorldState` | packets become a world, not just a list |
-| Map / bot | `ntpl.mapdata` + GTK4 Map/Bot tab | client map grids, A* paths, path loop, auto-attack |
+| Map / bot | `ntpl.mapdata` + GTK4 Map/Bot tab | client map grids, 8-direction A* paths, target filters, spell rules, auto-attack, JSON config |
 
 See `../docs/architecture.md`, `../docs/engine.md`, `../docs/map.md`,
 `../docs/ipc.md`, `../docs/hooking.md`, `../docs/linux.md` and
@@ -64,9 +64,9 @@ uses lowercase includes for that reason.
 
 ```bash
 make -C linux all test-host
-make -C linux host-test          # protocol, TCP client, engine, mapdata
-make -C linux gui-test           # headless GTK4 window + map surface
-make -C linux bot-test           # path loop + auto-attack, fake server
+make -C linux host-test          # 78 cases: protocol, client, engine, mapdata, config, names
+make -C linux gui-test           # headless GTK4: map switch, tooltips, toggles, banner
+make -C linux bot-test           # 4 smokes: combat, rules/config, rejection, recovery
 ./linux/scripts/dev-test-wine.sh 25
 ```
 
@@ -107,8 +107,11 @@ linux/scripts/host.sh gui                # same, via the host wrapper
 ```
 
 The GUI's **Map / Bot** tab loads the client's own map archive, draws the
-walkable grid and the live entities, and runs a click-drawn A* path in a loop
-with auto-attack. See `../docs/map.md`.
+whole walkable grid and the live entities with name tooltips, switches the map
+immediately on `c_map`, and runs a click-drawn **8-direction A\*** path in a
+loop with auto-attack, target filters, spell rules and recovery. The sidebar
+has green/red toggles, a red recovery banner and JSON save/load. See
+`../docs/map.md` and `../docs/bot-config.md`.
 
 `scripts/inject.sh` uses `NTPL_WINEPREFIX` (default `$WINEPREFIX` or
 `~/.wine-nostale`) and `NTPL_WINE` (default `wine` from `PATH`). The DLL listens
@@ -127,8 +130,10 @@ tail -f "$WINEPREFIX/drive_c/NosTalePacketLog.txt"
 | Variable | Read by | Meaning |
 |---|---|---|
 | `NTPL_PORT` | DLL + host | TCP port, default `47821` |
-| `NTPL_LOG` | DLL | log path, default `C:\NosTalePacketLog.txt` |
+| `NTPL_LOG` | DLL + GUI | log path, default `C:\NosTalePacketLog.txt`; the GUI backfills spawns from it |
 | `NTPL_QUIET` | DLL | `1` disables the file log |
+| `NTPL_NSTC` | host | `NStcData.NOS` path |
+| `NTPL_NSLANG` | host | `NSlangData_*.NOS` language archive |
 | `NTPL_WINE` | scripts | wine binary |
 | `NTPL_WINEPREFIX` | `inject.sh` | prefix to inject into |
 | `NTPL_TEST_PREFIX` | test script | reuse a prefix instead of a temp one |
@@ -139,7 +144,9 @@ tail -f "$WINEPREFIX/drive_c/NosTalePacketLog.txt"
   `recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`, both hooks `ACTIVE`,
   drops 0. `rest` toggles sit/stand; `MOVE|x y` calls the client's own MoveTo
   and walks naturally, `POS` reads its position. The GUI bot walked a six-cell
-  A* path live as client walk packets. See
+  path live as client walk packets; auto-attack (`u_s 0 3 <id>` → `su ...
+  866/868 ...`), pickup and map switching are also live-verified. The skill
+  hook captures the client's own `u_s`. See
   `../docs/live-session-2026-11-06.md`. If a patch breaks the signatures or
   MoveTo prologue, `host.sh status`/`MOVE` report it; see `../docs/hooking.md`.
 - The real injector has been exercised end-to-end under Wine against both a
