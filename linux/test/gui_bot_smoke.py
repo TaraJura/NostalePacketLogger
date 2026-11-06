@@ -26,6 +26,7 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import GLib
 
+from ntpl.engine import walk_checksum
 from ntpl.gui import Application
 
 
@@ -70,17 +71,27 @@ class FakeServer:
                 line, buffer = buffer.split(b"\n", 1)
                 text = line.decode("utf-8", "replace")
                 self.received.append(text)
-                if text.startswith("SEND|walk "):
+                if text == "POS":
+                    try:
+                        self.connection.sendall(
+                            b"STATUS|POS 25 117 14881134\n"
+                        )
+                    except OSError:
+                        return
+                elif text.startswith("MOVE|"):
                     parts = text.split()
-                    if len(parts) >= 3:
+                    if len(parts) >= 2:
                         try:
-                            x, y = int(parts[1]), int(parts[2])
+                            x, y = int(parts[0][5:]), int(parts[1])
                         except ValueError:
                             continue
+                        # The real client's MoveTo sends its own walk packet;
+                        # simulate exactly that to the host.
                         time.sleep(0.05)
                         try:
                             self.connection.sendall(
-                                f"RECV|tp 1 14881134 {x} {y} 0\n".encode()
+                                f"SEND|walk {x} {y} {walk_checksum(x, y)} 10\n"
+                                .encode()
                             )
                         except OSError:
                             return
@@ -101,16 +112,18 @@ class FakeServer:
 
 def main() -> int:
     server = FakeServer().start()
-    app = Application("127.0.0.1", server.port)
+    app = Application("127.0.0.1", server.port, unique=False)
     result = {"ok": False, "detail": "not checked"}
 
     def start_bot() -> bool:
         try:
-            app.path_cells = [(25, 118), (25, 119)]
+            app.path_cells = [(26, 119)]
             app.loop_toggle.set_active(False)
             app.auto_attack_toggle.set_active(True)
             app.skill_entry.set_text("866")
             app.attack_cooldown.set_value(10)
+            app.attack_walk_delay = 0.1
+            app.walk_timeout = 0.5
             app._start_bot()
             GLib.timeout_add(2500, check)
         except Exception as exc:  # noqa: BLE001 - report, do not crash GTK
@@ -126,11 +139,36 @@ def main() -> int:
                 line.startswith("SEND|u_s") and "866" in line and "500" in line
                 for line in lines
             )
-            has_walk = any(line.startswith("SEND|walk 25 118") for line in lines)
-            result["ok"] = has_ncif and has_skill and has_walk
+            has_move = any(line == "MOVE|26 119" for line in lines)
+            # Movement must go through the client's own MoveTo, not through
+            # an injected walk packet (that only teleports after a server tp).
+            no_injected_walk = not any(
+                line.startswith("SEND|walk ") for line in lines
+            )
+            skill_index = next(
+                (i for i, line in enumerate(lines) if line.startswith("SEND|u_s")),
+                None,
+            )
+            move_index = next(
+                (i for i, line in enumerate(lines) if line == "MOVE|26 119"),
+                None,
+            )
+            ordered = (
+                skill_index is not None
+                and move_index is not None
+                and skill_index < move_index
+            )
+            result["ok"] = (
+                has_ncif
+                and has_skill
+                and has_move
+                and no_injected_walk
+                and ordered
+            )
             result["detail"] = (
-                f"ncif={has_ncif} skill={has_skill} walk={has_walk} "
-                f"lines={lines[-10:]}"
+                f"ncif={has_ncif} skill={has_skill} move={has_move} "
+                f"no_injected_walk={no_injected_walk} "
+                f"skill_before_move={ordered} lines={lines[-10:]}"
             )
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"check exception: {exc!r}"

@@ -23,11 +23,13 @@
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `walk` sent, but no `tp`/`mv` | character is sitting | `send "rest 1 1 <charId>"` once, then walk |
-| `walk` sent while standing, still no `tp` | target tile blocked/occupied, or the client is settling | try another adjacent tile; confirm one move before the next; `ntpl walk` waits for `tp`/`mv` |
+| `MOVE` sent, but the character does not move | character is sitting, or the target is blocked | `send "rest 1 1 <charId>"` once; try another adjacent tile |
+| Character teleports instead of walking | a raw `walk` packet was injected; the client did not animate it | use `MOVE` / `ntpl walk`, which calls the client's own MoveTo |
+| `MOVE` returns `client build mismatch` | the client build moved the MoveTo function | re-derive the address (see `docs/protocol/movement.md`); raw packets still work |
+| `POS` returns "not readable" | the client build moved the player object | re-derive `0x792468` and the +4/+6/+0x24 layout |
 | `cast` sent, but no `su` | character sitting, target out of range, or the `u_s` field order is wrong | stand, move into range, and use `--packet "u_s …"` with a layout captured from the live client |
 | `rest` toggles twice | two identical packets were sent | send `rest 1 1 <charId>` once per state change |
-| Client looks stuck after many walks | injected walks can desync the client | stop sending; relog/restart the client; the server position is in the `tp` stream |
+| Client looks stuck after many injected walks | injected walks can desync the client | use `MOVE`; if already desynced, relog/restart the client |
 | Spell vnum unknown | the client's hotbar mapping is not documented | cast once manually and read `su 1 <charId> ...` from the log |
 
 ## UI

@@ -12,8 +12,8 @@ Windows.
 - Windows: injector + named pipes + WinForms GUI.
 - Linux: MinGW injector + DLL + TCP loopback + Python CLI + GTK4 GUI.
 - **Live 2026-11-06:** both hooks ACTIVE in the real client, `rest` toggled
-  sit/stand, and `walk 25 117` moved the server's authoritative position to
-  `(25,117)` (`tp 1 14881134 25 117 0`).
+  sit/stand, and the GUI bot walked a six-cell A* path through the client's
+  own MoveTo (`MOVE|x y`), with its normal animation and no injected walks.
 
 ## Phase 2 — Protocol wiki (in progress)
 
@@ -66,11 +66,12 @@ are the next steps. See [map.md](map.md).
 
 ## Phase 4 — Autonomous agent
 
-The first reversible loop is now possible: `ntpl walk X Y` sends a walk and
-waits for the server's `tp`/`mv` confirmation, `rest` controls sit/stand, and
-the Map/Bot tab runs a confirmed path loop with auto-attack. It is not
-autonomous yet: a move must be confirmed before the next one, some tiles are
-rejected, and the client's own walk SEND packets are not captured.
+The first reversible loop is now possible and runs live: `MOVE|x y` calls the
+client's own MoveTo, so the character pathfinds and animates normally; `POS`
+reads its local position; `rest` controls sit/stand; the Map/Bot tab runs a
+confirmed path loop with auto-attack. It is not autonomous yet: a move is
+confirmed before the next one, some tiles are rejected, and the `u_s` skill
+layout is still unverified.
 
 When it starts:
 
@@ -86,15 +87,16 @@ When it starts:
 1. ~~Install NosTale and run the injector against the real client~~ — done
    2026-11-06.
 2. ~~Verify the signatures~~ — both hooks ACTIVE on the live client.
-3. **Closed movement loop** — implemented and smoke-tested: `walk` → wait for
-   `tp`/`mv` → next cell, A* over walkable map cells, path loop, auto-attack.
-   Still to do: a rejected-tile cache from live attempts and a rate limit.
-4. **Run the loop against the live client**: stand the character, load map 20,
-   draw a short path, enable auto-attack, and watch the `SEND`/`tp` stream; lock
-   the `u_s` field order from a real cast.
-5. **Capture the client's own `walk` SEND packets** (the current send hook sees
-   `rest`/`sortopen`/`pulse` but not walks) to learn the exact checksum/path
-   behaviour.
+3. **Closed movement loop** — implemented and run live: `MOVE|x y` → client
+   pathfinding/animation → wait for the client's own `walk` → next cell, A*
+   over walkable map cells, path loop, auto-attack. Still to do: a
+   rejected-tile cache from live attempts and a rate limit.
+4. **Run the loop live** — movement passed on 2026-11-06 (a six-cell path as
+   client `walk` packets). Still to do: enable auto-attack on a real target and
+   lock the `u_s` field order from a live cast.
+5. ~~Capture the client's own `walk` SEND packets~~ — done; the send hook sees
+   them and the checksum is `1 if (x+y)%3 == 1`. The skill packets still need
+   the same treatment.
 6. **Reconcile the protocol wiki** with the live session (`rest`, `tp`, `cond`,
    `stat`) and extend the engine handlers.
 7. **Decide the fate of the Windows tree**: keep it as the reference, or port
@@ -106,6 +108,7 @@ When it starts:
 |---|---|
 | Client patch breaks the signatures | non-fatal `NOT-FOUND`; documented re-derivation |
 | Wine differs from Windows in hook behaviour | test on the real client first; keep the Windows tree as reference |
+| Client patch moves `MoveTo`/player object | validate the prologue and pointer; `MOVE` reports a build mismatch instead of crashing |
 | Sending from the worker thread is not thread-safe in the game | keep manual sends infrequent; document the symptom |
 | Double free of the Delphi string | instrument if it ever appears; see `docs/hooking.md` |
 | Account ban for automation | owner's decision; no evasion features |

@@ -30,7 +30,7 @@ from ntpl.protocol import Kind, Packet
 
 client = PacketClient(host="127.0.0.1", port=47821)
 client.connect(retries=30, delay=0.2)      # ~6 s of retries
-client.send_packet("walk 25 117 0 10")     # host -> DLL, framed as SEND|
+client.send_packet("walk 25 117 1 10")     # host -> DLL, framed as SEND|
 for message in client.messages():          # background reader + queue
     if message.kind in (Kind.RECV, Kind.SEND):
         print(Packet.from_message(message))
@@ -62,11 +62,12 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 |---|---|
 | `map_id` | current map id from `c_map`/`at` |
 | `x`, `y` | own position from `walk`/`at`; `position` property |
+| `facing` | last movement direction `(dx, dy)`, each -1/0/1; drives the GUI arrow; `None` until the first walk |
 | `entities` | `dict[int, Entity]` keyed by **entityId** (never vnum) |
 | `stats` | `CharacterStats(hp, hp_max, mp, mp_max)` from `stat` |
 | `chat` | last 200 `(type, id, message)` tuples from `say` |
 | `resting` | `True` sitting, `False` standing, `None` unknown; from `rest` |
-| `self_id` | own char id from the `rest` response |
+| `self_id` | own char id from `at`, `cond` (the live client sends it only for the local player), `rest`, or a matched `tp` |
 | `target_id` | last `ncif` target |
 | `last_skill` | skill vnum from the last `su` |
 | `combat` | last 100 combat events (`attacker`, `target`, `skill`, raw args) |
@@ -109,25 +110,35 @@ A handler takes `(WorldState, Packet)` and may raise `ValueError`/`IndexError`;
 
 ## Confirmations
 
-The client does not reliably echo its own actions, so the engine confirms from
-the **server's** packets:
+Movement is client-authoritative. The host asks the DLL to run the **client's
+own MoveTo function**; the client pathfinds, animates and sends its own `walk`
+packets, and the engine sees those SEND packets. Packet injection alone cannot
+animate a walk:
 
-| Action | Send | Confirmation |
+| Action | Host/DLL command | Confirmation |
 |---|---|---|
-| move | `walk <x> <y> <checksum> <speed>` | `tp`/`mv` for a player at the target |
+| move | `MOVE|x y` (client pathfinding) | client's own `walk` SEND, i.e. `world.position` reaches the target; a server `tp`/`mv` also counts |
+| position | `POS` | `STATUS\|POS x y charId` |
+| raw move | `SEND\|walk x y checksum speed` | probe `walk -1 -1 0 10` → server `tp`; the client may visibly teleport |
 | sit/stand | `rest 1 1 <charId>` (toggles) | `rest <type> <charId> <state>` (0 stand, 1 sit) |
 | target | `ncif <type> <id>` | no direct reply; used before `u_s` |
 | skill | `u_s …` (exact order unverified) | `su <attacker> <target> <skill> …` |
 
-`ntpl walk` and `ntpl cast` wait for the confirmation; `ntpl send` only fires
-the packet.
+The raw `walk` checksum is `walk_checksum(x, y)` = `1 if (x + y) % 3 == 1 else
+0`; the client's own builder uses exactly this. The client's MoveTo sends a
+correct packet automatically. `Engine` mirrors `tp`/`mv` for `self_id` into
+`world.x/y`, learns `self_id` from `at`/`cond`/`rest`, and updates `facing`
+from the client's `walk` SEND deltas.
+
+The GUI bot and `ntpl walk` use `MOVE`; the bot's status advances when
+`world.position` reaches the target. `ntpl send` still fires a raw packet.
 
 ## CLI commands
 
 | Command | What it does |
 |---|---|
 | `monitor [--engine] [--filter] [--log]` | live stream; `/send`, `/filter`, `/status`, `/engine`, `/quit` |
-| `walk X Y [--speed] [--timeout]` | send a walk, wait for the server's `tp`/`mv` |
+| `walk X Y [--speed] [--timeout]` | `MOVE` through the client, wait for its own `walk` packet |
 | `cast <skill> [--target-id] [--target-type] [--stand ID] [--packet]` | send `ncif` + `u_s`, wait for `su` |
 | `send <packet…>` | raw packet; exits 1 if the DLL reports a failed send |
 | `status` | hook addresses, hook state, drop counters |
@@ -190,7 +201,9 @@ character, accepts waypoints by click, draws the A* path, and runs the bot:
 - stand up with `rest` when sitting;
 - auto-attack the nearest monster in range (`ncif` + a configurable `u_s`
   template);
-- walk one path cell at a time and wait for the server's `tp`/`mv`.
+- walk one path cell at a time via the DLL's `MOVE|x y`, which runs the
+  client's own pathfinding and animation; confirmation is the client's own
+  `walk` packet / `world.position`.
 
 See [map.md](map.md) for the data format, controls and limits.
 

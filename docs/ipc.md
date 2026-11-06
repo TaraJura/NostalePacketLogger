@@ -30,7 +30,9 @@ more `|` characters.
 | `RECV|<packet>` | DLL → host | packet received from the game server, already decrypted by the game |
 | `SEND|<packet>` | both | DLL → host: the game sent this packet. Host → DLL: inject this packet into the game |
 | `STATUS|<text>` | both | human-readable state, hook addresses, drop counters, errors |
-| `QUIT|` | host → DLL | unhook, stop the server and unload the DLL |
+| `MOVE|<x> <y>` | host → DLL | run the client's own MoveTo/pathfinding, so it walks visibly |
+| `POS` | host → DLL | reply `STATUS|POS <x> <y> <charId>` from the local player object |
+| `QUIT|` | host → DLL | unhook and stop the server; the module stays mapped until the game exits |
 
 The `SEND` overloading is inherited from the original two-pipe design and is
 kept so the packet log and the GUI behaviour stay familiar. Direction is
@@ -50,7 +52,10 @@ decided by which side you are, not by the message.
 4. Packets flow. `RECV` and `SEND` are separate queues, so ordering **across**
    directions is not guaranteed; ordering within one direction is FIFO.
 5. `QUIT` makes the DLL disable capture, wait 100 ms for in-flight hooks,
-   restore the original bytes, stop the socket and unload itself.
+   restore the original bytes and stop the socket. The module and its
+   trampoline stay mapped until the game exits (a game thread may still be in a
+   stub during unhook). A fresh injection after `QUIT` needs a new DLL filename
+   or a client restart.
 
 ### Status text
 
@@ -62,6 +67,22 @@ build reported, so a host can parse it or just display it:
   the signature was not found
 - `hooks recv=ACTIVE|FAILED|NOT-FOUND send=...`
 - `drops recv=<n> send=<n>`
+
+### Movement commands
+
+`MOVE|<x> <y>` calls the client's own pathfinding/MoveTo function
+(`0x565E88` in build 2026-11-03) with `x | (y << 16)`; the client computes a
+path, animates it and sends its own `walk` packets. This is deliberately not a
+packet injection: an injected `walk` moves only the server and the client
+teleports when the correction arrives.
+
+`POS` reads the local player object (`[[0x792468]]`): int16 x at +4, int16 y
+at +6, uint32 char id at +0x24. The reply is
+`STATUS|POS <x> <y> <charId>`.
+
+Both commands validate the expected client-build prologue/pointers and return
+`STATUS|MOVE: client build mismatch` or `STATUS|POS: ... not readable` instead
+of crashing after a client patch.
 
 `FAILED` means the signature was found but the byte patch failed; `NOT-FOUND`
 means the client build does not match the signatures. Both are non-fatal: the

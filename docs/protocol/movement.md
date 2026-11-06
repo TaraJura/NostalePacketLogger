@@ -10,33 +10,66 @@ Move character to a position on the current map.
 |-------|------|-------------|
 | x | int | Target X coordinate |
 | y | int | Target Y coordinate |
-| checksum | int | Movement validation (0 or 1 seen, exact algorithm unknown) |
+| checksum | int | `1` when `(x + y) % 3 == 1`, else `0` |
 | speed | int | Movement speed (10 = normal walking speed) |
+
+**Checksum**: the client's own walk builder computes
+`((x + y) % 3 == 1) ? 1 : 0` before formatting the packet. The server
+validates it. This was confirmed live on 2026-11-06: `walk 19 138 1 10` moved
+the character, while `walk 19 138 0 10` did not.
 
 **Examples**:
 ```
-walk 19 147 1 10    — move to (19, 147) at normal speed
-walk 20 146 0 10    — move to (20, 146) at normal speed
+walk 22 123 1 10    (22 + 123 = 145; 145 % 3 == 1 -> checksum 1)
+walk 20 139 0 10    (20 + 139 = 159; 159 % 3 == 0 -> checksum 0)
 ```
+(Use `walk_checksum(x, y)` rather than hand-computing.)
 
 **Notes**:
-- The game client sends this when the player clicks to move
-- The checksum field alternates between 0 and 1 — needs more investigation
-- Speed 10 appears to be the default walking speed
-- Sending this packet via injection DOES move the character (confirmed working)
+- The game client sends this when the player clicks to move.
+- Speed 10 appears to be the default walking speed.
+- Injecting this packet with the right checksum moves the **server's**
+  position, but the client does not animate the move. The server then sends a
+  `tp` correction, which the client renders as a teleport. Packet-only walking
+  is therefore not a substitute for the client's own movement.
+- The character must be **standing**. While sitting (`rest` state 1) the server
+  ignores movement. Toggle with `rest 1 1 <charId>` first.
+- Accepted walks are **not** echoed to the client. Only a rejected or
+  out-of-sync walk produces `tp <type> <id> <x> <y>`. If you need the server
+  position with raw packets, an impossible probe (`walk -1 -1 0 10`) makes it
+  answer with `tp` at the authoritative position.
+
+### Client-side walking (what the bot uses)
+
+The client's own pathfinding entry point is at VA `0x565E88` in this build:
+
+```
+__fastcall bool MoveTo(PlayerObject *this /*EAX*/,
+                       uint32_t packedXY /*EDX*/,
+                       int flags /*ECX*/,
+                       int run /*stack*/)
+```
+
+`packedXY` is `x | (y << 16)`. The player object is `[[0x792468]]`; its int16
+x is at +4, y at +6, and char id at +0x24. `MOVE|x y` in the DLL calls this
+function, so the client computes a path, animates the movement and sends its
+own `walk` packet with the correct checksum. `POS` reads the local position.
+This is what makes the character actually walk instead of teleporting.
+
+The DLL validates the function prologue before calling it; a client patch
+returns `MOVE: client build mismatch` instead of crashing.
 
 **Live verification (2026-11-06, Wine, charId 14881134):**
 
-- The character must be **standing**. While sitting (`rest` state 1) the server
-  ignores movement. Toggle with `rest 1 1 <charId>` first.
-- Injecting `walk 25 117 0 10` made the server answer
-  `tp 1 14881134 25 117 0`; the authoritative position moved from
-  `(25,118)` to `(25,117)`. The server may repeat the `tp` while it settles.
-- The client does **not** reliably send `mv` for its own movement back to
-  itself, so `tp` is the confirmation to wait for.
-- Some targets are ignored (blocked tile, or the client/server is still
-  settling); confirm each move by waiting for the matching `tp`/`mv` before
-  sending the next one. `ntpl walk X Y` does that.
+- Checksum: `walk 19 138 1 10` was accepted, `walk 19 138 0 10` was ignored.
+- Raw probe method: a six-cell A* path `(21,141)→(18,138)` moved the server
+  position, but each server `tp` snapped the client (teleporting).
+- Client MoveTo method: `MOVE|25 133` made the client emit its own
+  `walk 25 133 0 10`; the GUI bot then walked `(26,133)→(23,130)` as six
+  client `[SEND] walk` packets, at ~1 s per cell, with no injected walks, no
+  probes and no `tp` corrections. The character animated normally.
+- The client's own `walk` SEND packets are captured by the send hook; the
+  server does not echo their accepted moves.
 
 ---
 

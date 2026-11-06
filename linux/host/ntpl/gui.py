@@ -41,6 +41,21 @@ DRAIN_INTERVAL_MS = 50
 BOT_INTERVAL_MS = 200
 DEFAULT_MAP_ID = 20
 DEFAULT_SCALE = 3
+# The server ignores a walk sent during the skill animation. The bot attacks,
+# then waits this long before it sends the next path step.
+ATTACK_WALK_DELAY = 1.5
+# A walk timed out this many times in a row: the server is rejecting the
+# position (wrong self position, sitting, or an unsettled client). Stop instead
+# of walking further away from the real character.
+MAX_REJECTED_WALKS = 3
+RECONNECT_DELAY = 1.0
+# Movement goes through the client's own MoveTo function in the DLL:
+#   MOVE|x y  -> pathfinding + local animation + the client's own walk packets
+#   POS       -> local player x, y, char id
+# Injecting `walk` packets moves only the server; the client then snaps when a
+# correction arrives. MOVE avoids that.
+MOVE_PREFIX = "MOVE|"
+POS_COMMAND = "POS"
 
 
 class PacketRow(GObject.Object):
@@ -87,10 +102,22 @@ def _column(title: str, attribute: str, expand: bool = False, width: int | None 
 
 
 class Application(Gtk.Application):
-    def __init__(self, host: str, port: int | None, map_data: str | None = None) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int | None,
+        map_data: str | None = None,
+        unique: bool = True,
+    ) -> None:
         super().__init__(
             application_id="cz.tarajura.ntpl",
-            flags=Gio.ApplicationFlags.DEFAULT_FLAGS,
+            # Tests must not attach to a GUI that is already running for the
+            # same user; NON_UNIQUE gives each test process its own app.
+            flags=(
+                Gio.ApplicationFlags.DEFAULT_FLAGS
+                if unique
+                else Gio.ApplicationFlags.NON_UNIQUE
+            ),
         )
         self.host = host
         self.port = port
@@ -143,8 +170,13 @@ class Application(Gtk.Application):
         self.pending_until = 0.0
         self.stand_sent_until = 0.0
         self.attack_cooldown_until = 0.0
+        self.walk_not_before = 0.0
+        self.rejected_walks = 0
+        self.attack_walk_delay = ATTACK_WALK_DELAY
+        self.walk_timeout = 3.0
         self.bot_running = False
         self.bot_timer = None
+        self._closing = False
 
     # -- UI -------------------------------------------------------------
 
@@ -508,28 +540,43 @@ class Application(Gtk.Application):
             )
             context.fill()
 
-        # own character
+        # own character: a bigger dot plus a facing arrow. The arrow is drawn
+        # first so the dot covers its base.
         own = self._player_cell()
         if own is not None:
             x, y = own
+            cx = x * scale + scale / 2
+            cy = y * scale + scale / 2
+
+            facing = self.engine.world.facing
+            if facing is not None and facing != (0, 0):
+                fx, fy = facing
+                length = math.hypot(fx, fy)
+                ux, uy = fx / length, fy / length
+                arrow_len = max(12.0, scale * 2.8)
+                half_width = max(4.0, scale * 0.7)
+                tip = (cx + ux * arrow_len, cy + uy * arrow_len)
+                base = (cx + ux * arrow_len * 0.35, cy + uy * arrow_len * 0.35)
+                left = (base[0] - uy * half_width, base[1] + ux * half_width)
+                right = (base[0] + uy * half_width, base[1] - ux * half_width)
+
+                context.move_to(*tip)
+                context.line_to(*left)
+                context.line_to(*right)
+                context.close_path()
+                context.set_source_rgba(1.0, 0.1, 0.1, 1.0)
+                context.fill_preserve()
+                context.set_source_rgba(1.0, 1.0, 1.0, 1.0)
+                context.set_line_width(max(1.5, scale * 0.28))
+                context.stroke()
+
+            radius = max(5.0, scale * 1.05)
             context.set_source_rgba(1.0, 0.1, 0.1, 1.0)
-            context.arc(
-                x * scale + scale / 2,
-                y * scale + scale / 2,
-                max(3.0, scale * 0.7),
-                0,
-                2 * math.pi,
-            )
+            context.arc(cx, cy, radius, 0, 2 * math.pi)
             context.fill()
             context.set_source_rgba(1.0, 1.0, 1.0, 1.0)
-            context.set_line_width(1.5)
-            context.arc(
-                x * scale + scale / 2,
-                y * scale + scale / 2,
-                max(4.0, scale * 0.9),
-                0,
-                2 * math.pi,
-            )
+            context.set_line_width(max(1.5, scale * 0.25))
+            context.arc(cx, cy, radius + max(1.5, scale * 0.3), 0, 2 * math.pi)
             context.stroke()
 
     def _on_map_click(self, gesture, _n_press, x, y) -> None:
@@ -586,8 +633,18 @@ class Application(Gtk.Application):
             return
 
         current = self._player_cell()
-        if current is None or not self.map_grid.is_walkable(*current):
-            current = self.waypoints[0]
+        if current is None:
+            self.path_cells = []
+            if self.map_area is not None:
+                self.map_area.queue_draw()
+            self._set_status("own position unknown; wait for at/tp or move once")
+            return
+        if not self.map_grid.is_walkable(*current):
+            self.path_cells = []
+            if self.map_area is not None:
+                self.map_area.queue_draw()
+            self._set_status(f"own position {current} is not walkable")
+            return
 
         path: list[tuple[int, int]] = []
         for waypoint in self.waypoints:
@@ -613,21 +670,29 @@ class Application(Gtk.Application):
         self.client = PacketClient(self.host, self.port)
 
         def worker() -> None:
-            try:
-                self.client.connect(retries=50, delay=0.2)
-            except ConnectionLost as exc:
-                GLib.idle_add(self._set_status, f"not connected: {exc}")
-                return
+            while not self._closing:
+                try:
+                    self.client.connect(retries=10, delay=0.2)
+                except ConnectionLost as exc:
+                    GLib.idle_add(self._set_status, f"not connected: {exc}")
+                    time.sleep(RECONNECT_DELAY)
+                    continue
 
-            GLib.idle_add(self._on_connected)
+                GLib.idle_add(self._on_connected)
 
-            try:
-                while True:
-                    message = self.client.recv(timeout=0.5)
-                    if message is not None:
-                        self.inbox.put(message)
-            except (ConnectionLost, ProtocolError, OSError) as exc:
-                GLib.idle_add(self._set_status, f"disconnected: {exc}")
+                try:
+                    while not self._closing:
+                        message = self.client.recv(timeout=0.5)
+                        if message is not None:
+                            self.inbox.put(message)
+                except (ConnectionLost, ProtocolError, OSError) as exc:
+                    GLib.idle_add(self._set_status, f"disconnected: {exc}")
+
+                if not self._closing:
+                    # The DLL accepts one host at a time and replaces the old
+                    # one, so another CLI/monitor can kick the GUI off. Reconnect
+                    # instead of leaving the window dead.
+                    time.sleep(RECONNECT_DELAY)
 
         threading.Thread(target=worker, name="ntpl-gui-reader", daemon=True).start()
         GLib.timeout_add(DRAIN_INTERVAL_MS, self._drain)
@@ -641,13 +706,34 @@ class Application(Gtk.Application):
 
             if message.kind is Kind.STATUS:
                 self.status_received = True
-                self._set_status(message.payload)
+                if message.payload.startswith("POS "):
+                    parts = message.payload.split()
+                    if len(parts) >= 4:
+                        try:
+                            x, y, char_id = (
+                                int(parts[1]),
+                                int(parts[2]),
+                                int(parts[3]),
+                            )
+                        except ValueError:
+                            self._set_status(message.payload)
+                        else:
+                            self.engine.world.x = x
+                            self.engine.world.y = y
+                            self.engine.world.self_id = char_id
+                            self._learn_char_id(char_id)
+                            self._set_status(f"position {x},{y} (char {char_id})")
+                            if self.map_area is not None:
+                                self.map_area.queue_draw()
+                else:
+                    self._set_status(message.payload)
             elif message.kind is Kind.QUIT:
                 self._set_status("disconnected")
             else:
                 packet = Packet.from_message(message)
                 self.engine.feed(packet)
                 self._track_packet(packet)
+                self._learn_char_id(self.engine.world.self_id)
                 self._append(packet)
                 if self.map_area is not None:
                     self.map_area.queue_draw()
@@ -662,10 +748,23 @@ class Application(Gtk.Application):
             if values and values[0] == 1:
                 self.last_move = (values[0], values[1], values[2], values[3])
                 self.last_move_time = time.monotonic()
+                # The server answers an injected walk with
+                # `tp 1 <charId> <x> <y>`; match it to the pending target to
+                # learn our own char id even before the first `rest`.
+                if (
+                    packet.opcode == "tp"
+                    and self.pending_target is not None
+                    and (values[2], values[3]) == self.pending_target
+                ):
+                    self._learn_char_id(values[1])
         elif packet.opcode == "rest":
             values = packet.ints(3)
             if values and values[0] == 1:
-                self.char_id = values[1]
+                self._learn_char_id(values[1])
+        elif packet.opcode == "at":
+            values = packet.ints(1)
+            if values:
+                self._learn_char_id(values[0])
 
     # -- callbacks ------------------------------------------------------
 
@@ -710,6 +809,19 @@ class Application(Gtk.Application):
     def _on_connected(self) -> None:
         if not self.status_received:
             self._set_status(f"connected to {self.host}:{self.client.port}")
+        # The GUI can attach after login, so there may be no `at` packet.
+        # Ask the DLL for the client's own local position instead of sending a
+        # probe walk (which would make the server teleport the character).
+        self._request_position()
+
+    def _request_position(self) -> bool:
+        if self.client is None or not self.client.connected:
+            return False
+        try:
+            self.client.send_raw(POS_COMMAND)
+        except (ConnectionLost, ValueError):
+            return False
+        return True
 
     def _set_status(self, text: str) -> None:
         if self.status is not None:
@@ -722,7 +834,14 @@ class Application(Gtk.Application):
             text = self.char_entry.get_text().strip()
             if text.isdigit():
                 return int(text)
-        return self.char_id
+        return self.char_id or self.engine.world.self_id
+
+    def _learn_char_id(self, char_id: int | None) -> None:
+        if char_id is None or char_id <= 0:
+            return
+        self.char_id = char_id
+        if self.char_entry is not None and not self.char_entry.get_text().strip():
+            self.char_entry.set_text(str(char_id))
 
     def _send(self, text: str) -> bool:
         if self.client is None or not self.client.connected:
@@ -736,17 +855,36 @@ class Application(Gtk.Application):
             return False
         return True
 
+    def _client_move(self, x: int, y: int) -> bool:
+        """Walk through the game's own MoveTo function (not packet injection)."""
+        if self.client is None or not self.client.connected:
+            self._set_status("not connected")
+            return False
+        try:
+            self.client.send_raw(f"{MOVE_PREFIX}{x} {y}")
+        except (ConnectionLost, ValueError) as exc:
+            self._set_status(f"move failed: {exc}")
+            self._stop_bot()
+            return False
+        return True
+
     def _start_bot(self) -> None:
         if self.bot_running:
             return
         if not self.path_cells:
             self._set_status("add waypoints first (click the map)")
             return
+        if self._player_cell() is None:
+            self._request_position()
+            self._set_status("locating character; press Start again")
+            return
         self.bot_running = True
         self.path_index = 0
         self.pending_target = None
         self.stand_sent_until = 0.0
         self.attack_cooldown_until = 0.0
+        self.walk_not_before = 0.0
+        self.rejected_walks = 0
         if self.bot_timer is None:
             self.bot_timer = GLib.timeout_add(BOT_INTERVAL_MS, self._bot_tick)
         self._set_status("bot started")
@@ -808,7 +946,10 @@ class Application(Gtk.Application):
         world = self.engine.world
 
         if self.pending_target is not None:
-            confirmed = (
+            # The client's own MoveTo sends a `walk` SEND packet; the engine
+            # updates world.position from it. A server `tp`/`mv` is accepted
+            # too, in case the server corrects the client.
+            confirmed = world.position == self.pending_target or (
                 self.last_move_time >= self.pending_since
                 and self.last_move is not None
                 and self.last_move[0] == 1
@@ -817,9 +958,20 @@ class Application(Gtk.Application):
             if confirmed:
                 self._set_status(f"arrived at {self.pending_target}")
                 self.pending_target = None
+                self.rejected_walks = 0
                 self._advance_path()
             elif now > self.pending_until:
-                self._set_status(f"walk to {self.pending_target} not confirmed; skipping")
+                self.rejected_walks += 1
+                if self.rejected_walks >= MAX_REJECTED_WALKS:
+                    self._stop_bot()
+                    self._set_status(
+                        f"{self.rejected_walks} walks rejected; stopped "
+                        "(check standing and own position)"
+                    )
+                    return False
+                self._set_status(
+                    f"walk to {self.pending_target} not confirmed; skipping"
+                )
                 self.pending_target = None
                 self._advance_path()
             return True
@@ -843,6 +995,9 @@ class Application(Gtk.Application):
                 self._send(packet)
                 cooldown = float(self.attack_cooldown.get_value())
                 self.attack_cooldown_until = now + cooldown
+                # Do not walk inside the skill animation: the server drops
+                # the walk and the bot would skip the whole path.
+                self.walk_not_before = now + self.attack_walk_delay
                 self._set_status(f"attack {monster.entity_id}: {packet}")
                 return True
 
@@ -859,15 +1014,19 @@ class Application(Gtk.Application):
                 self._stop_bot()
                 return False
 
+        if now < self.walk_not_before:
+            return True
+
         target = self.path_cells[self.path_index]
-        if self._send(f"walk {target[0]} {target[1]} 0 10"):
+        if self._client_move(target[0], target[1]):
             self.pending_target = target
             self.pending_since = now
-            self.pending_until = now + 3.0
+            self.pending_until = now + self.walk_timeout
             self._set_status(f"walking to {target}")
         return True
 
     def do_shutdown(self) -> None:
+        self._closing = True
         self._stop_bot()
         if self.client is not None:
             self.client.close()

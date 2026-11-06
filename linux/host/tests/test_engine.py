@@ -1,6 +1,6 @@
 import unittest
 
-from ntpl.engine import Engine
+from ntpl.engine import Engine, walk_checksum
 from ntpl.protocol import Kind, Packet
 
 
@@ -15,6 +15,45 @@ class EngineTests(unittest.TestCase):
     def test_walk_sets_position(self):
         world = self.engine.feed(packet(Kind.SEND, "walk 19 146 0 10"))
         self.assertEqual(world.position, (19, 146))
+
+    def test_walk_probe_does_not_move_world(self):
+        world = self.engine.feed(packet(Kind.SEND, "walk 19 146 0 10"))
+        world = self.engine.feed(packet(Kind.SEND, "walk -1 -1 0 10"))
+        self.assertEqual(world.position, (19, 146))
+
+    def test_walk_sets_facing(self):
+        self.engine.feed(packet(Kind.SEND, "walk 19 147 0 10"))
+        world = self.engine.feed(packet(Kind.SEND, "walk 19 146 0 10"))
+        self.assertEqual(world.facing, (0, -1))  # up
+        self.engine.feed(packet(Kind.SEND, "walk 20 146 0 10"))
+        self.assertEqual(world.facing, (1, 0))   # right
+        self.engine.feed(packet(Kind.SEND, "walk 20 147 0 10"))
+        self.assertEqual(world.facing, (0, 1))   # down
+        self.engine.feed(packet(Kind.SEND, "walk 19 147 0 10"))
+        self.assertEqual(world.facing, (-1, 0))  # left
+
+    def test_walk_diagonal_facing(self):
+        self.engine.feed(packet(Kind.SEND, "walk 10 10 0 10"))
+        world = self.engine.feed(packet(Kind.SEND, "walk 11 11 0 10"))
+        self.assertEqual(world.facing, (1, 1))
+
+    def test_probe_keeps_facing(self):
+        self.engine.feed(packet(Kind.SEND, "walk 10 10 0 10"))
+        world = self.engine.feed(packet(Kind.SEND, "walk 11 10 0 10"))
+        world = self.engine.feed(packet(Kind.SEND, "walk -1 -1 0 10"))
+        self.assertEqual(world.facing, (1, 0))
+        self.assertEqual(world.position, (11, 10))
+
+    def test_walk_checksum_matches_client_builder(self):
+        # (x + y) % 3 == 1 -> 1, else 0. Verified live: (19,138) with 1 moved
+        # the character; the same target with 0 did not.
+        self.assertEqual(walk_checksum(22, 123), 1)
+        self.assertEqual(walk_checksum(25, 117), 1)
+        self.assertEqual(walk_checksum(19, 138), 1)
+        self.assertEqual(walk_checksum(20, 140), 1)
+        self.assertEqual(walk_checksum(20, 139), 0)
+        self.assertEqual(walk_checksum(20, 138), 0)
+        self.assertEqual(walk_checksum(25, 118), 0)
 
     def test_map_change_clears_entities(self):
         self.engine.feed(packet(Kind.RECV, "in 3 500 42 10 20 2 0"))
@@ -31,6 +70,7 @@ class EngineTests(unittest.TestCase):
         )
         self.assertEqual(world.map_id, 1)
         self.assertEqual(world.position, (105, 23))
+        self.assertEqual(world.self_id, 4165102)
 
     def test_player_spawn_uses_char_id_name_and_position(self):
         # Documented format: in 1 <name> - <charId> <x> <y> ...
@@ -97,9 +137,21 @@ class EngineTests(unittest.TestCase):
     def test_condition_sets_speed_without_creating_ghost(self):
         world = self.engine.feed(packet(Kind.RECV, "cond 1 14881134 0 0 10"))
         self.assertNotIn(14881134, world.entities)
+        # The live client sends cond only for the local player.
+        self.assertEqual(world.self_id, 14881134)
         self.engine.feed(packet(Kind.RECV, "tp 1 14881134 10 10 0"))
         world = self.engine.feed(packet(Kind.RECV, "cond 1 14881134 0 0 10"))
         self.assertEqual(world.entities[14881134].speed, 10)
+
+    def test_teleport_for_self_updates_world_position(self):
+        self.engine.feed(packet(Kind.RECV, "cond 1 14881134 0 0 10"))
+        world = self.engine.feed(packet(Kind.RECV, "tp 1 14881134 25 117 0"))
+        self.assertEqual(world.position, (25, 117))
+
+    def test_move_for_self_updates_world_position(self):
+        self.engine.feed(packet(Kind.RECV, "cond 1 14881134 0 0 10"))
+        world = self.engine.feed(packet(Kind.RECV, "mv 1 14881134 26 118 10"))
+        self.assertEqual(world.position, (26, 118))
 
     def test_skill_used_event(self):
         # Real packet observed in the live log.

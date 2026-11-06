@@ -28,6 +28,7 @@ linux/
 ├── src/dll/                 injected 32-bit DLL
 │   ├── hooks.S              x86 detours (replaces MSVC inline asm)
 │   ├── packetlogger.*       signatures, hook install/remove, packet injection
+│   ├── clientmove.*         MOVE/POS: client MoveTo call and local position
 │   ├── packet_queue.h       fixed-capacity multi-producer ring
 │   ├── tcp_server.*         loopback server
 │   ├── memory.*             pattern scan, VirtualProtect patching
@@ -136,14 +137,15 @@ tail -f "$WINEPREFIX/drive_c/NosTalePacketLog.txt"
 
 - The three signatures match the **live client** (verified 2026-11-06):
   `recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`, both hooks `ACTIVE`,
-  drops 0. A `walk` moved the server's authoritative position and `rest`
-  toggled sit/stand. See `../docs/live-session-2026-11-06.md`. If a patch
-  breaks them, `host.sh status` reports `NOT-FOUND`; see
-  `../docs/hooking.md`.
+  drops 0. `rest` toggles sit/stand; `MOVE|x y` calls the client's own MoveTo
+  and walks naturally, `POS` reads its position. The GUI bot walked a six-cell
+  A* path live as client walk packets. See
+  `../docs/live-session-2026-11-06.md`. If a patch breaks the signatures or
+  MoveTo prologue, `host.sh status`/`MOVE` report it; see `../docs/hooking.md`.
 - The real injector has been exercised end-to-end under Wine against both a
   fake target and the live client (PID 1216).
 - The map parser identified the live map (20, 230x260) with every observed
   position on a walkable cell. The map UI and the bot loop pass their headless
-  tests; the loop has not yet been run against the live client.
+  tests and the live six-cell path run.
 - Gameforge's terms of service prohibit automation; using this on a live account
   is the account owner's decision and risk.

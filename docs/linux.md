@@ -130,7 +130,7 @@ linux/scripts/host.sh monitor --engine        # also maintain WorldState
 linux/scripts/host.sh monitor --filter walk   # only packets containing "walk"
 linux/scripts/host.sh monitor --log capture.log
 linux/scripts/host.sh send walk 19 146 0 10   # inject one packet
-linux/scripts/host.sh walk 25 117             # send a walk, wait for server tp/mv
+linux/scripts/host.sh walk 25 117             # client MoveTo; natural walk
 linux/scripts/host.sh cast 866 --target-id 5180 # use a skill (experimental u_s)
 linux/scripts/host.sh send "rest 1 1 14881134" # sit/stand toggle
 linux/scripts/host.sh status
@@ -147,8 +147,9 @@ linux/scripts/host.sh find 14881134           # find a charId
 linux/scripts/host.sh read 0x07B96FA4 32      # dump memory
 ```
 
-`ntpl walk X Y` sends `walk X Y 0 <speed>` and waits for the server's
-`tp`/`mv` at that position. The character must be **standing** first: while
+`ntpl walk X Y` sends `MOVE|X Y` to the DLL, which calls the client's own
+MoveTo: the client pathfinds, animates and sends its own `walk` packet, and the
+command waits for that. The character must be **standing** first: while
 sitting, the server ignores movement. The sit/stand toggle is
 `send "rest 1 1 <charId>"`; the server's authoritative state comes back as
 `rest <type> <charId> <state>` (0 = standing, 1 = sitting).
@@ -228,9 +229,10 @@ both.
 ## Tests
 
 ```bash
-make host-test          # 48 stdlib unit tests: protocol, engine, map, TCP client
+make host-test          # 55 stdlib unit tests: protocol, engine, map, checksum
+
 make gui-test           # headless GTK4 window + map surface against a fake stream
-make bot-test           # fake server: path loop, auto-attack, walk confirmations
+make bot-test           # fake server: auto-attack, MOVE, rejection
 make all test-host
 ./scripts/dev-test-wine.sh 25
 ```
@@ -274,19 +276,22 @@ The recommended setup is still a dedicated prefix.
   `recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`, `drops recv=0`.
 - The character was sitting. `rest 1 1 14881134` toggled it; the server
   answered `rest 1 14881134 0` (standing).
-- `walk 25 117 0 10` made the server answer `tp 1 14881134 25 117 0`; the
-  authoritative position moved from `(25,118)` to `(25,117)`. This is the
-  first confirmed packet-driven movement.
-- The client does not echo its own `mv`; `tp` is the confirmation. Some targets
-  are ignored (blocked tile, or the client/server still settling), so confirm
-  each move before sending the next one.
+- The early injected walks only moved the server: the client did not animate
+  them and snapped when a `tp` correction arrived. Raw injected walks need the
+  checksum `1 if (x + y) % 3 == 1 else 0`, but that still does not animate.
+- The DLL now calls the client's own MoveTo (`0x565E88`) for `MOVE|x y`; the
+  client pathfinds, animates and sends its own `walk`. `POS` reads the local
+  position/char id. The live GUI bot walked `(26,133)→(23,130)` as six client
+  `[SEND] walk` packets, with no injected walks, probes or teleports.
 - The character must be standing; sitting (`rest` state 1) blocks movement.
 - The client's `NStcData.NOS` parsed into 779 grids. Ranking them against the
   live `mv` samples selected map **20** (230x260): 100 % of 173,503 samples
   (5,849 unique positions) land on `0x00` walkable cells. The Map/Bot tab
   renders it; `map render` produced `docs/assets/map20.png`.
-- The GUI map and the bot were verified headlessly (`make gui-test`,
-  `make bot-test`). They have not yet been run against the live client.
+- The GUI map and the bot pass the headless tests (`make gui-test`,
+  `make bot-test`) and have now been run against the live client: the bot
+  completed the six-cell path above. The live auto-attack still needs a real
+  skill vnum/`u_s` confirmation.
 
 ## Honest status
 

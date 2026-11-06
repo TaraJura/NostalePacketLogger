@@ -22,5 +22,5 @@ Packets we've seen in logs but haven't fully documented yet. When investigating,
 ## Investigation Queue
 
 - [ ] `gidx` — appears on map load, seems related to family/guild info
-- [ ] Walk packet checksum — the 3rd field in `walk` alternates 0/1, need to understand the algorithm
+- [x] Walk packet checksum — solved 2026-11-06: it is `1 if (x + y) % 3 == 1 else 0`; the server rejects the wrong value. See [movement.md](movement.md).
 - [ ] `cond` unknown fields — what do the middle fields mean?

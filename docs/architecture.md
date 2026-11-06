@@ -106,9 +106,11 @@ builds a Delphi string, and calls the game's own send function through
 `TNTClient`.
 
 The DLL also exposes loopback-only `SCAN`, `FIND` and `READ` debug commands for
-locating and reading structures in the game process. They are reverse
-engineering aids, not part of the play loop; the authoritative player position
-comes from the server's `tp`/`mv`. See [ipc.md](ipc.md) and
+locating and reading structures in the game process, plus `MOVE|x y` and `POS`
+for movement. `MOVE` calls the client's own MoveTo/pathfinding function, so the
+game animates the character and sends its own `walk` packets; injecting a raw
+`walk` packet only moves the server and makes the client teleport on the
+correction. `POS` reads the local player object. See [ipc.md](ipc.md) and
 [live-session-2026-11-06.md](live-session-2026-11-06.md).
 
 ## Host state model
@@ -121,7 +123,7 @@ is ignored, never fatal.
 
 | Action | Send | Confirmation |
 |---|---|---|
-| move | `walk <x> <y> <checksum> <speed>` | `tp`/`mv` for a player at the target |
+| move | `MOVE\|x y` (client MoveTo) | the client's own `walk` SEND / `world.position` |
 | sit/stand | `rest 1 1 <charId>` (toggles) | `rest <type> <charId> <state>` (0 stand, 1 sit) |
 | target | `ncif <type> <id>` | no direct reply; used before a skill |
 | skill | `u_s …` | `su <attacker> <target> <skill> …` |
@@ -144,7 +146,9 @@ runs on the GLib main loop:
 
 1. stand up if the `rest` state is sitting;
 2. auto-attack the nearest monster in range (`ncif` + configurable `u_s`);
-3. walk the next path cell and wait for the server's `tp`/`mv` before the next.
+3. walk the next path cell through the DLL's `MOVE|x y` command, which calls
+   the client's own MoveTo/pathfinding, so the client animates and sends its own
+   `walk` packet; confirm from `world.position`.
 
 Everything still goes through the same `PacketClient`; the map is only a view
 and a path source. See [map.md](map.md).
@@ -185,6 +189,11 @@ game threads can push at once; one worker pops. See
 8. **Debug probes are read-only and loopback-only.** `SCAN`/`FIND`/`READ` read
    the game's own memory; they are not part of the play loop and must not be
    exposed beyond `127.0.0.1`.
+9. **Animate movement in the client.** A raw `walk` packet only moves the
+   server; the correction arrives as `tp` and the character teleports. `MOVE`
+   calls the client's own MoveTo so the game pathfinds, animates and sends its
+   own `walk`. The call site and player object are client-build-specific:
+   validate the prologue/pointer and fail soft after a patch.
 
 ## Directory map
 

@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <string>
 
+#include "clientmove.h"
 #include "config.h"
 #include "log.h"
 #include "memory.h"
@@ -74,6 +75,44 @@ void handle_command(const std::string& command) {
             tcpserver::send_line(
                 "STATUS|send failed: hooks are not active in this client");
         }
+        return;
+    }
+
+    // MOVE|x y -- walk through the game's own movement controller. This gives
+    // the client a real path and its normal walking animation; the client
+    // sends its own walk packets, which the server accepts.
+    if (command.compare(0, 5, "MOVE|") == 0) {
+        int x = 0;
+        int y = 0;
+        if (std::sscanf(command.c_str() + 5, "%d %d", &x, &y) != 2) {
+            tcpserver::send_line("STATUS|usage: MOVE|x y");
+            return;
+        }
+        std::string error;
+        if (!client_move(x, y, error)) {
+            tcpserver::send_line("STATUS|" + error);
+            return;
+        }
+        char reply[64] = {0};
+        std::snprintf(reply, sizeof(reply), "STATUS|MOVE %d %d", x, y);
+        tcpserver::send_line(reply);
+        return;
+    }
+
+    // POS -- return the client's own local position and char id.
+    if (command.compare(0, 3, "POS") == 0) {
+        int x = 0;
+        int y = 0;
+        unsigned long char_id = 0;
+        std::string error;
+        if (!client_position(x, y, char_id, error)) {
+            tcpserver::send_line("STATUS|" + error);
+            return;
+        }
+        char reply[80] = {0};
+        std::snprintf(reply, sizeof(reply), "STATUS|POS %d %d %lu", x, y,
+                      char_id);
+        tcpserver::send_line(reply);
         return;
     }
 

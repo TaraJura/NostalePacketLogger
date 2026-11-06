@@ -43,6 +43,9 @@ class WorldState:
     map_id: int | None = None
     x: int | None = None
     y: int | None = None
+    # Last movement direction in map coordinates: (dx, dy), each -1, 0 or 1.
+    # +x is right, +y is down on the map. None until the first walk.
+    facing: tuple[int, int] | None = None
     entities: dict[int, Entity] = field(default_factory=dict)
     stats: CharacterStats = field(default_factory=CharacterStats)
     chat: deque[tuple[int, int, str]] = field(default_factory=lambda: deque(maxlen=200))
@@ -60,12 +63,29 @@ class WorldState:
         return (self.x, self.y)
 
 
+def walk_checksum(x: int, y: int) -> int:
+    """The client's walk checksum: 1 when ``(x + y) % 3 == 1``, else 0.
+
+    The client's walk builder computes exactly this before formatting
+    ``walk <x> <y> <checksum> <speed>``; the live server rejects a walk with
+    the wrong value. Confirmed on 2026-11-06: ``(19, 138)`` needs 1 and moved
+    the character, the same target with 0 did not.
+    """
+    return 1 if (x + y) % 3 == 1 else 0
+
+
 Handler = Callable[[WorldState, Packet], None]
 
 
 def _on_walk(world: WorldState, packet: Packet) -> None:
     coords = packet.ints(2)
-    if coords:
+    # Negative coordinates are the CLI/GUI's position probe, not a real move.
+    if coords and coords[0] >= 0 and coords[1] >= 0:
+        if world.position is not None:
+            dx = coords[0] - world.x
+            dy = coords[1] - world.y
+            if dx != 0 or dy != 0:
+                world.facing = ((dx > 0) - (dx < 0), (dy > 0) - (dy < 0))
         world.x, world.y = coords
 
 
@@ -80,6 +100,7 @@ def _on_position(world: WorldState, packet: Packet) -> None:
     # at <charId> <mapId> <x> <y> <direction> ...
     values = packet.ints(4)
     if values:
+        world.self_id = values[0]
         world.map_id = values[1]
         world.x, world.y = values[2], values[3]
 
@@ -93,6 +114,8 @@ def _on_move(world: WorldState, packet: Packet) -> None:
     entity.kind = kind
     entity.x = x
     entity.y = y
+    if entity_id == world.self_id:
+        world.x, world.y = x, y
 
 
 def _on_spawn(world: WorldState, packet: Packet) -> None:
@@ -165,6 +188,8 @@ def _on_teleport(world: WorldState, packet: Packet) -> None:
     entity = world.entities.setdefault(entity_id, Entity(entity_id, kind))
     entity.x = x
     entity.y = y
+    if entity_id == world.self_id:
+        world.x, world.y = x, y
 
 
 def _on_rest(world: WorldState, packet: Packet) -> None:
@@ -187,6 +212,12 @@ def _on_condition(world: WorldState, packet: Packet) -> None:
     if not values:
         return
     kind, entity_id, _unknown1, _unknown2, speed = values
+    # The live client sends `cond` only for the local player (every observed
+    # line in the 2026-11-06 log carried the owner's charId and no other), so
+    # it is also the earliest cheap way to learn self_id before the first
+    # `rest` or `tp`.
+    if kind == 1 and world.self_id is None:
+        world.self_id = entity_id
     entity = world.entities.get(entity_id)
     if entity is not None:
         entity.kind = kind

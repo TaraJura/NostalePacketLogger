@@ -304,12 +304,13 @@ def cmd_cast(args: argparse.Namespace) -> int:
 
 
 def cmd_walk(args: argparse.Namespace) -> int:
-    """Send one walk and wait for the server's position update.
+    """Ask the client to walk to a cell and wait for its own walk packet.
 
-    The client does not reliably echo its own movement, but the server answers
-    an accepted walk with ``tp <type> <id> <x> <y> ...`` (observed live) or
-    ``mv``. This command exists so the engine can act and verify, not just fire
-    packets into the dark.
+    This uses the DLL's ``MOVE|x y`` command, which calls the client's own
+    pathfinding. The client animates the movement and sends
+    ``walk <x> <y> <checksum> <speed>`` itself. Injecting a walk packet
+    directly moves only the server; the client then snaps on a correction and
+    appears to teleport.
 
     The character must be standing. While sitting the server ignores movement;
     send ``rest 1 1 <charId>`` to toggle the sit state first.
@@ -321,18 +322,31 @@ def cmd_walk(args: argparse.Namespace) -> int:
     target = (args.x, args.y)
     deadline = time.monotonic() + args.timeout
     try:
-        client.send_packet(f"walk {args.x} {args.y} 0 {args.speed}")
+        # Ask the client to pathfind and animate the walk itself. A raw
+        # `walk` packet only moves the server; the client then snaps when the
+        # server corrects it (teleporting).
+        client.send_raw(f"MOVE|{args.x} {args.y}")
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
-            message = client.recv(timeout=remaining)
+            message = client.recv(timeout=min(remaining, 0.2))
             if message is None:
                 continue
             if message.kind is Kind.STATUS:
                 print(message.payload)
-                if "send failed" in message.payload.lower():
+                lowered = message.payload.lower()
+                if "send failed" in lowered or "move:" in lowered:
                     return 1
+                continue
+            if message.kind is Kind.SEND:
+                packet = Packet.from_message(message)
+                if packet.opcode != "walk":
+                    continue
+                values = packet.ints(2)
+                if values and (values[0], values[1]) == target:
+                    print(f"confirmed client walk: {packet.text}")
+                    return 0
                 continue
             if message.kind is Kind.RECV:
                 packet = Packet.from_message(message)
@@ -349,7 +363,7 @@ def cmd_walk(args: argparse.Namespace) -> int:
     finally:
         client.close()
 
-    print("ntpl: no server position update for the walk", file=sys.stderr)
+    print("ntpl: no client walk packet for the target", file=sys.stderr)
     return 1
 
 

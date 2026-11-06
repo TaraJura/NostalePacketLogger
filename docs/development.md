@@ -28,7 +28,7 @@ The MinGW compiler is `i686-w64-mingw32-g++`. Override with
 ## Tests
 
 ```bash
-make -C linux host-test        # 48 stdlib unittest cases
+make -C linux host-test        # 55 stdlib unittest cases
 make -C linux gui-test         # headless GTK4, needs xvfb
 make -C linux bot-test         # path loop + auto-attack against a fake server
 make -C linux all test-host
@@ -41,8 +41,10 @@ parser/A* (a synthetic NOS archive, bad headers, walls, unreachable targets,
 ranking; the local archive test is skipped when the game is absent). The GUI
 test opens the real window under Xvfb against a fake server and checks the rows,
 the status bar and the map surface. The bot test drives the same window with
-auto-attack on and a two-cell path, and asserts the `ncif`/`u_s`/`walk`
-sequence and the `tp` confirmations. The Wine script covers the x86 stubs
+auto-attack on and a one-cell path, and asserts the `ncif`/`u_s`/`MOVE`
+sequence and that the fake client's own `walk` confirms the move. A second test
+makes the server silent and asserts the bot stops after three rejected moves.
+The Wine script covers the x86 stubs
 (`HookStubTest.exe`), the DLL lifecycle and the command path with a fake game.
 
 Nothing in this repository can test the real detours against the real client;
@@ -53,14 +55,15 @@ export WINEPREFIX="$HOME/.wine-nostale"   # or the prefix the game uses
 linux/scripts/inject.sh
 linux/scripts/host.sh status              # both hooks ACTIVE, addresses non-zero
 linux/scripts/host.sh send "rest 1 1 <charId>"   # ensure standing
-linux/scripts/host.sh walk X Y            # waits for tp/mv at the target
+linux/scripts/host.sh walk X Y            # client MoveTo; natural walk
 linux/scripts/host.sh cast <skill> --target-id <id>   # waits for su
 linux/scripts/gui.sh                      # packet view + Map/Bot tab
 ```
 
 In the Map/Bot tab, load the map (auto-detected/default 20), click waypoints,
 and Start the loop with auto-attack enabled. The bot stands first if needed,
-then walks one cell at a time, waiting for `tp`/`mv`. See [map.md](map.md).
+then walks one cell at a time through the client's own MoveTo (`MOVE|x y`).
+See [map.md](map.md).
 
 The file log is `<prefix>/drive_c/NosTalePacketLog.txt`. Confirm each action
 from the server (`tp`/`mv`, `su`, `rest`); the client does not reliably echo its

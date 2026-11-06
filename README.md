@@ -20,7 +20,7 @@ shared: the transport differs, the game's packets do not.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 48 Python unit tests
+make -C linux host-test                      # 55 Python unit tests
 make -C linux gui-test                       # headless GTK4 + map smoke (xvfb)
 make -C linux bot-test                       # fake server: path loop + auto-attack
 
@@ -63,7 +63,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 48 unit tests pass, the GTK4 window and the map/bot
+The Linux port builds, its 55 unit tests pass, the GTK4 window and the map/bot
 loop pass their headless smoke tests, and the real injector has been run
 against the **live NosTale client** under Wine 11:
 
@@ -71,14 +71,17 @@ against the **live NosTale client** under Wine 11:
   `drops recv=0`;
 - `rest 1 1 14881134` stood the character up; the server answered
   `rest 1 14881134 0`;
-- `walk 25 117 0 10` made the server answer `tp 1 14881134 25 117 0`, moving
-  the authoritative position from `(25,118)` to `(25,117)`.
+- movement calls the client's own MoveTo through the DLL's `MOVE|x y`; the
+  client pathfinds, animates and sends its own `walk` packet. `POS` reads its
+  local position. Injecting a raw `walk` (checksum `1 if (x+y)%3 == 1`) moves
+  only the server, and the correction teleports the client;
+- the live GUI bot walked `(26,133)→(23,130)` as six client `[SEND] walk`
+  packets, with no injected walks, probes or teleports.
 
-`linux/scripts/host.sh walk X Y` sends a walk and waits for the server's
-`tp`/`mv` confirmation. The character must be **standing**: sitting blocks
-movement and is controlled by the `rest` packet. Some targets are ignored
-(blocked tile, or the client still settling), so confirm each move before
-sending the next one.
+`linux/scripts/host.sh walk X Y` uses `MOVE` and waits for the client's own
+`walk` packet. The character must be **standing**: sitting blocks movement and
+is controlled by the `rest` packet. Some targets are still ignored (blocked
+tile/entity); the bot stops after three rejected steps.
 
 The client's own map grids are parsed from `NostaleData/NStcData.NOS`; the live
 map is **20** (230x260) and every observed entity position is on walkable cells.

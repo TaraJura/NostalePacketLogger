@@ -23,11 +23,12 @@ the host differ, the game's packets do not.
 - **Windows tree (`windows/`)** — the original working implementation. Injector
   + DLL + WinForms GUI, named pipes.
 - **Linux tree (`linux/`)** — MinGW DLL + TCP loopback + Python CLI + GTK4 GUI
-  + state engine. Builds cleanly, **48 host tests pass**, the GTK4 window
+  + state engine. Builds cleanly, **55 host tests pass**, the GTK4 window
   passes a headless smoke test, and the DLL has been verified against the
   **live NosTale client** under Wine 11: both hooks ACTIVE, drops 0,
-  sit/stand via `rest`, and a `walk` moved the server's authoritative position
-  to the requested tile (`tp 1 14881134 25 117 0`). Spell support
+  sit/stand via `rest`, and natural movement through the client's own MoveTo
+  (`MOVE|x y` + `POS`). The live GUI bot walked a six-cell A* path as client
+  walk packets, with no injected walks or teleport corrections. Spell support
   (`su` parsing, `ntpl cast`) is in; the exact `u_s` field order still needs
   one live cast. See [live-session-2026-11-06.md](live-session-2026-11-06.md).
 - **Map / bot** — `NStcData.NOS` parser (779 grids); the live map is **20**

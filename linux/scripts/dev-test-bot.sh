@@ -15,6 +15,11 @@ if ! command -v xvfb-run >/dev/null 2>&1; then
     exit 1
 fi
 
-exec xvfb-run -a env GDK_BACKEND=x11 \
-    PYTHONPATH="$ROOT/host" \
-    python3 "$ROOT/test/gui_bot_smoke.py"
+run() {
+    xvfb-run -a env GDK_BACKEND=x11 \
+        PYTHONPATH="$ROOT/host" \
+        python3 "$ROOT/test/$1"
+}
+
+run gui_bot_smoke.py
+run gui_bot_reject_smoke.py

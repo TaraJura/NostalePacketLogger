@@ -69,16 +69,72 @@ sent the packet twice in one press). Send it once per desired change.
 
 ### Movement
 
+The first injected walks used `walk 25 117 0 10` and got
+`tp 1 14881134 25 117 0`. That looked like movement, but it was the server
+**correcting** the client to its authoritative position after an invalid walk
+(the same `tp` came back for targets like `121 23`). The actual walk packet
+needs a checksum, and the server silently ignores the wrong one.
+
+The client's own walk builder is at VA `0x72DDD8`. It computes the third field
+as:
+
 ```
-[SEND] walk 25 117 0 10
-[RECV] tp 1 14881134 25 117 0   # repeated while the server settled
+checksum = 1 if (x + y) % 3 == 1 else 0
 ```
 
-The server's authoritative position moved from `(25,118)` to `(25,117)`, the
-requested tile. The client does not reliably echo its own `mv`, so `tp` is the
-confirmation. Some tiles are rejected: `walk 25 116` produced only
-`cond 1 14881134 0 0 10`, no `tp` (blocked/occupied tile or a settling client).
-Confirm one move before sending the next.
+The client's own walks match this (e.g. `walk 22 123 1 10`, sum 145). Live
+tests confirmed the server enforces it:
+
+```
+walk 19 138 1 10   -> probe -> tp 1 14881134 19 138 0   (accepted)
+walk 19 138 0 10   -> no tp                              (ignored)
+walk 20 140 1 10   -> probe -> tp 1 14881134 20 140 0   (accepted)
+```
+
+The server does **not** echo an accepted walk. Its `tp` appears only when it
+wants to correct the client, and an impossible probe (`walk -1 -1 0 10`)
+reliably triggers that correction at the authoritative position. But that
+correction is exactly what made the character **teleport**: the client did not
+animate the injected walk, then snapped to the server's `tp`.
+
+The fix is the client's own pathfinding entry point, found at VA `0x565E88`:
+
+```
+__fastcall bool MoveTo(PlayerObject *this /*EAX*/,
+                       uint32_t packedXY /*EDX*/,  // x | (y << 16)
+                       int flags /*ECX*/, int run /*stack*/)
+```
+
+The player object is `[[0x792468]]`; int16 x at +4, y at +6, char id at
++0x24. The DLL now exposes:
+
+- `MOVE|x y` — call MoveTo; the client computes a path, animates, and sends
+  its own `walk` packet (with the correct checksum).
+- `POS` — read the local player position/char id.
+
+Live tests:
+
+```
+MOVE|25 133   -> client [SEND] walk 25 133 0 10; local position became (25,133)
+GUI bot       -> (26,133) -> (23,130), six client [SEND] walk packets
+                 (25,133 0; 24,133 1; 23,133 0; 23,132 0; 23,131 1; 23,130 0)
+```
+
+No MANUAL_SEND walks, no probes and no `tp` corrections: the character walked
+and animated normally. `ntpl walk` and the GUI bot now use `MOVE`; the earlier
+checksum/probe path remains available as raw packet tooling.
+
+Some targets are still rejected (blocked tile/entity). The bot stops after
+three consecutive unconfirmed moves instead of walking away from a rejected
+position.
+
+### Phoenix Bot
+
+The user installed the third-party Phoenix Bot (Qt5, 9.5 MB) to compare. Its
+PE has `.UPX0/.UPX1` sections but the `UPX!` magic is removed; `upx -d` reports
+`NotPackedException`, and it crashes under the system Wine 10 before yielding
+useful behaviour. No code or data from it was reused. The client-side MoveTo
+approach above was found directly in `NostaleClientX.exe`.
 
 ### Skills
 
@@ -102,6 +158,22 @@ The exact `u_s` field order is **not verified** on the live server yet.
 `ntpl cast` defaults to `u_s <skill> <targetType> <targetId>` and accepts
 `--packet` for a literal captured form. A live cast while the user watches the
 log is the remaining step.
+
+### Facing
+
+The protocol has no packet that states the local player's facing. The only
+explicit direction field is in the `in` spawn packet (`in 1 <name> - <charId>
+<x> <y> <direction> ...` and `in 2|3 ... <x> <y> <direction> ...`). The log
+analysis found 63 players; the 25 who spawned more than once kept the same
+direction value at different positions, so that field is a spawn/appearance
+constant, not a live facing. `mv` has no direction and the client's own `tp`
+is a correction.
+
+The GUI therefore derives the facing arrow from the last `walk` delta: it
+points in map coordinates (`+x` right, `+y` down) and supports all eight
+directions, including diagonals. If the character turns in place, the arrow
+does not change until the next move — that is the honest limit of the packet
+stream.
 
 ### Map and walkability
 
@@ -177,12 +249,17 @@ skill packet.
 
 ## Host engine state at the end of the session
 
-- Character `14881134`; server position `(25,117)`; sitting (`rest` state 1).
+- Character `14881134`; after the final live bot run the position was
+  `(23,130)`, standing. Movement now goes through the client's own MoveTo, so
+  the local and server positions stay in sync without teleport corrections.
 - The DLL (`PacketLogger5.dll`) remained loaded in the client with hooks
   active; older `PacketLogger*.dll` copies from the re-injection tests are
   inert until the client restarts.
 - The file log is `~/games/gameforge/prefix/drive_c/NosTalePacketLog.txt`.
 - The TCP server is `127.0.0.1:47821`.
+- The host test count is now 55; `make bot-test` also runs the
+  rejected-move regression test. The DLL in the client is `PacketLogger8.dll`
+  (hooks ACTIVE, `MOVE`/`POS` available).
 
 ## Reproduction
 
@@ -212,18 +289,21 @@ linux/scripts/host.sh cast 866 --target-id 5180  # waits for su (u_s format pend
 
 ## Open items
 
-1. The walkability grid exists (map 20), but `walk 25 116` was rejected even
-   though adjacent logic suggests open ground. Add a rejected-tile cache from
-   live attempts and never spam targets.
-2. Capture the client's own `walk`/`u_s` SEND packets (the send hook misses
-   them) to learn the exact checksum and `u_s` field order.
+1. The walkability grid exists (map 20), but some adjacent `0x00` cells are
+   still rejected (an entity or object occupies them). The bot skips a cell
+   after a timeout and stops after three consecutive rejections; a
+   rejected-tile cache would make the path smarter.
+2. Movement is solved through the client's `MoveTo`; the remaining unknown is
+   the `u_s` skill layout. The client's `walk` SEND packets are captured. Its
+   own `u_s`/`ncif` skill packets are not, or have not been observed; capture
+   them to confirm the field order.
 3. Verify one live cast with the user's own skill vnum and target; lock the
    `u_s` layout in `docs/protocol/combat.md`.
-4. ~~Build the closed loop~~ — implemented: A* path, one confirmed `walk` per
-   cell, loop, auto-attack, stand-first. Smoke-tested with a fake server; the
-   live run remains.
-5. Run the Map/Bot tab against the live client with a short path and
-   auto-attack, then tune the range/cooldown from what the server accepts.
+4. ~~Build the closed loop~~ — implemented and **run live**: A* path,
+   one client-animated `MOVE` per cell, loop, stand-first, auto-attack. The
+   `(21,141)→(18,138)` and `(26,133)→(23,130)` runs passed.
+5. Run the Map/Bot tab against the live client with auto-attack enabled and
+   tune the range/cooldown from what the server accepts.
 6. Reconcile the protocol wiki with more live captures.
 
 ## Safety

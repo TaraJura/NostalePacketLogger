@@ -99,8 +99,13 @@ linux/scripts/host.sh map best --log "$WINEPREFIX/drive_c/NosTalePacketLog.txt"
 | Char ID | own char id; auto-filled from a `rest` packet, or enter it manually |
 | skill template | default `u_s {skill} {type} {target}`; use `{skill}`, `{type}`, `{target}` |
 
-Overlays: cyan path, yellow waypoints, red own character, green players, blue
-NPCs/pets, orange monsters.
+Overlays: cyan path, yellow waypoints, green players, blue NPCs/pets, orange
+monsters. The own character is a **bigger red dot with a white ring and a red
+facing arrow**. The arrow follows the last `walk` delta (map coordinates:
+`+x` right, `+y` down), so it has eight directions. The protocol has no
+own-facing packet: `in` carries a direction only at spawn, and every observed
+character kept one constant spawn direction regardless of movement. Deriving
+the arrow from movement is therefore the honest source.
 
 ![GUI map tab](assets/gui-map.png)
 
@@ -113,44 +118,68 @@ NPCs/pets, orange monsters.
 2. **Auto-attack**, if enabled and the cooldown is over: pick the nearest
    `kind == 3` entity within the range from the own position, send
    `ncif 3 <id>` and the skill template, and set the cooldown.
-3. **Walk** the next A* cell: `walk x y 0 10`, then wait up to 3 s for the
-   server's `tp`/`mv` for a player at that cell. On confirmation advance; on
-   timeout skip the cell (blocked tile or a settling client).
+3. **Walk** the next A* cell by calling the client's own MoveTo function:
+   the GUI sends `MOVE|x y` to the DLL. The client pathfinds, animates the
+   movement and sends its own `walk` packets; the server accepts them as a
+   normal player move. The bot confirms when the engine's own position
+   (`world.position`) reaches the target. On a timeout it skips the cell
+   (blocked tile) and stops after three consecutive rejections.
 4. Repeat/loop; Stop ends the timer.
 
-The bot only sends packets through the existing `PacketClient`; it never
+The bot sends ordinary packets (`ncif`, `u_s`, `rest`) through the existing
+`PacketClient` and uses the DLL's `MOVE`/`POS` commands for movement. It never
 touches GTK from a worker thread. The engine feeds it the live `tp`, `mv`,
-`rest`, `cond`, `su` and `stat` packets.
+`rest`, `cond`, `su` and `stat` packets. On connect the GUI sends `POS` to
+learn the client's local position, because a host that attaches after login
+never sees the `at` packet.
 
 ### Limits
 
 - A `0x00` cell can still contain an object or entity at the pixel level; if
-  the server rejects the walk, the bot skips the cell after the timeout.
+  the client refuses the path or the server rejects the move, the bot skips the
+  cell after the timeout.
+- `MOVE` calls a client-build-specific function (`0x565E88`). The DLL validates
+  its prologue and reports `MOVE: client build mismatch` after a client patch
+  instead of crashing. `POS` reads the client's local player object
+  (`[[0x792468]]`): int16 x at +4, y at +6, char id at +0x24.
+- Packet-only walking is still possible (`SEND|walk` with
+  `walk_checksum(x, y)`), and the checksum is `1 if (x + y) % 3 == 1`; but the
+  client does not animate such a walk, and the server's correction teleports
+  the character. `MOVE` is the visible path.
+- The facing arrow reflects the last **walk target**, not an independently
+  turning character. The live protocol exposes no own-facing field; `in` spawn
+  directions are constant per character. If the game turns in place, the arrow
+  does not change until the next move.
 - The exact `u_s` field order is still unverified. The template is editable;
   capture one live cast (`su 1 <charId> ...` in the log) and adjust it.
 - Auto-attack targets `kind == 3` only; the skill vnum must be one the character
   actually has.
 - The map id is not always known; use Auto-detect or enter the id from a
   `c_map` packet.
-- The server may rate-limit or reject injected walks after many attempts; stop
-  the bot and let the client settle.
+- The server may rate-limit or reject moves after many attempts; the bot stops
+  after three consecutive unconfirmed moves.
 
 ## Tests
 
 ```bash
-make -C linux host-test   # 48 cases incl. synthetic NOS, A*, ranking
-make -C linux gui-test    # GUI + map surface smoke
-make -C linux bot-test    # fake server: bot sends ncif/u_s/walk
+make -C linux host-test   # 55 cases incl. synthetic NOS, A*, checksum
+make -C linux gui-test    # GUI + map surface + unknown-position guard
+make -C linux bot-test    # fake server: auto-attack, MOVE, rejection
 ```
 
 The bot test sends a fake player at (25,117) on map 20 and a monster at
 (25,118); it asserts the engine sent `ncif 3 500`, `u_s 866 3 500` and
-`walk 25 118 0 10`, and the server answered each walk with a `tp`.
+`MOVE|26 119` (not an injected walk), and the fake client answered with its
+own `walk`. A second test makes the server silent and asserts the bot stops
+after three rejected moves.
 
 ## Live status
 
 - Map **20** is current; 100 % of 173,503 `mv` samples are on walkable cells.
-- The character `14881134` was sitting at (25,117) at the end of the session.
-- The map tab renders map 20; the path/A* and bot logic pass the fake-server
-  test. The live path loop and auto-attack still need a session with the
-  character standing and a valid skill vnum/`u_s` layout.
+- Client-side walking was verified live on 2026-11-06. The GUI bot walked a
+  six-cell A* path `(21,141)→(18,138)` via the checksum/probe method, then a
+  second six-cell path `(26,133)→(23,130)` through the client's own MoveTo:
+  the log contains only client `[SEND] walk` lines, no injected walks, no
+  probes and no server `tp` teleports. The character animates normally.
+- The live auto-attack path (skill vnum + `u_s` layout) still needs user
+  supervision; movement is verified.
