@@ -491,6 +491,34 @@ shortcut and the no-corner-cutting rule.
   diagonal MoveTo is handled by the client's own pathfinder and should be
   watched on the first live run.
 
+
+### Live feature pass (late, ~22:47–22:56)
+
+A full live pass was run against character 14881134 on map 20, with the GUI
+stopped so the test harness could own the DLL host. The character started at
+(45,187), 3209/3209 HP and 4401/4401 MP. No client or game process was
+restarted or killed.
+
+| Feature | Live result |
+|---|---|
+| Hooks / status | `recv`, `send` and `skill` ACTIVE; drops 0. |
+| POS | `45 187 14881134`, matching the client's local player object. |
+| MoveTo | `MOVE|48 187` → status `MOVE 48 187`, client `[SEND] walk 48 187 1 10`; position updated. |
+| Sit/stand | `rest 1 1 14881134` → `rest … 1` (sitting), second toggle → `rest … 0` (standing). |
+| Basic attack | `ncif 3 5030` + `u_s 0 3 5030` → `su 1 14881134 3 5030 866 …`, damage 1056, no self-target. |
+| Spell slot 9 | `u_s 9 1 14881134` → `su 1 14881134 1 14881134 875 …` (Blessing); MP 4401 → 4251 (150 cost). |
+| Spell slot 7 | `u_s 7 1 14881134` → `su … 873` (Group Healing); HP 2761 → 3209 (full). |
+| Spell slot 1 | `u_s 1 1 14881134` (Healing 867) → `cancel 0 1 -1`; 867 is not self-castable. The picker heuristic was fixed to default only Skill.dat target type 1 to Self. |
+| Bot combo | Path (49,187)→(52,187), Auto-attack + Move first + Pickup on, Auto-recover off, rule Mana Shield 869 Always/Self. The bot cast `u_s 3 1 14881134` → `su … 869` (MP -300), then `MOVE 52 187` → client `walk 52 187`. |
+| Out-of-range guard | Earlier live packet: bot targeted 5087 at 35+ cells and the server answered self-target; fixed to cap basic attacks at the scanned skill range and covered by a smoke. |
+
+The character was healed back to full HP with **Group Healing 873** after the
+combination test (the user’s “don’t die” instruction); no combat was left running.
+
+Not exercised live in this pass: a ground-drop pickup (no drop appeared),
+forced low-HP recovery, and a portal crossing (map switching was verified live
+earlier in the day). Their headless smokes pass.
+
 ## Safety
 
 Gameforge's terms prohibit automation. This work is on the account owner's own

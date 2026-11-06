@@ -129,6 +129,12 @@ The monster shape (`u_s <slot> 3 <id>`) and the self-target shape
 `u_s 10 3 5161` → `su ... 876` (Holy Hammer) and
 `u_s 7 1 14881134` → `su 1 14881134 1 14881134 873 ...` (Group Healing).
 
+Only spells whose Skill.dat target type is 1 default to the Self target in the
+picker. The old name heuristic was wrong for **Healing 867** (target type 0,
+range 10): a self cast is answered with `cancel 0 1 -1`. Use **Group Healing
+873** (type 1) for a live-verified self heal; Healing 867 is for another
+entity/party target and is not auto-selected as self.
+
 If no rule matches, the bot uses the **Skill** field from Combat (0 = normal
 attack). Recovery runs before spell rules: below **Auto-recover → Below HP %**
 the bot sits and waits for full HP, so a heal rule with a lower threshold does

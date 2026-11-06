@@ -75,7 +75,7 @@ Target types observed or used by the bot:
 | targetType | targetId | Meaning |
 |---|---|---|
 | 3 | monster `entityId` | monster/normal attack or offensive spell |
-| 1 | own `charId` | self-target spell/buff; live `u_s 7 1 14881134` → `su ... 873` |
+| 1 | own `charId` | self-target spell/buff; live `u_s 7 1 14881134` → `su ... 873` (Group Healing). Healing 867 is type 0/range 10 and a self cast is canceled (`cancel 0 1 -1`) |
 
 The GUI's ordered **Spells** rules use this format: monster rules send
 `ncif 3 <entityId>` then `u_s <spell> 3 <entityId>`; self rules send

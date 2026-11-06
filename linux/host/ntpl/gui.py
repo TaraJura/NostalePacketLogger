@@ -1004,16 +1004,10 @@ class Application(Gtk.Application):
 
     @staticmethod
     def _prefers_self_target(spell: SpellInfo) -> bool:
-        if spell.target_mode in ("self", "ally"):
-            return True
-        name = spell.name.lower()
-        return any(
-            word in name
-            for word in (
-                "healing", "cure", "shield", "blessing", "song",
-                "totem", "recovery", "restore",
-            )
-        )
+        # Only Skill.dat target type 1 is self. A name-based heuristic was
+        # wrong: Healing (867) is target type 0/range 10 and the server
+        # cancels a self cast, while Group Healing (873) is type 1 and works.
+        return spell.target_mode == "self"
 
     def _set_rule_spell(self, rule_info: dict, spell: SpellInfo) -> None:
         rule_info["spell"].set_text(str(spell.vnum))

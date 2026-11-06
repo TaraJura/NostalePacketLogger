@@ -187,6 +187,10 @@ def main() -> int:
                 )
                 == "self"
             )
+            heal_target_ok = (
+                not app._prefers_self_target(app.spells[867])
+                and app._prefers_self_target(app.spells[869])
+            )
             app._add_spell_from_info(app.spells[876])
             added = app.spell_rows[-1]
             picker_ok = (
@@ -285,6 +289,7 @@ def main() -> int:
                 and slot_ok
                 and catalog_ok
                 and self_spell_ok
+                and heal_target_ok
                 and picker_ok
                 and unknown_ok
                 and config_ok
@@ -297,7 +302,8 @@ def main() -> int:
                 f"conditions={condition_ok} self={self_target_ok} "
                 f"always={always_ok} slots={slot_ok} "
                 f"catalog={catalog_ok} "
-                f"self_spell={self_spell_ok} picker={picker_ok} "
+                f"self_spell={self_spell_ok} heal_target={heal_target_ok} "
+                f"picker={picker_ok} "
                 f"unknown={unknown_ok} config={config_ok} "
                 f"spell_rules={spell_rules_ok} "
                 f"picker_dialog={picker_dialog_ok} lines={lines[-10:]}"
