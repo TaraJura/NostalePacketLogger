@@ -324,9 +324,9 @@ skill packet.
 ```bash
 # build and unit tests
 make -C linux all test-host
-make -C linux host-test        # 78 cases
+make -C linux host-test        # 83 cases
 make -C linux gui-test         # headless GTK4 + map surface
-make -C linux bot-test         # 4 smokes: combat, rules/config, rejection, recovery
+make -C linux bot-test         # 5 smokes: combat, rules/config, spell order, rejection, recovery
 
 # with the game running
 export WINEPREFIX=/home/novakj/games/gameforge/prefix
@@ -439,10 +439,18 @@ monsters are in range.
 - Targets: All / Only selected / All except selected by monster template
   vnum; search by name or vnum, manual vnum entry, and the unknown-vnum
   option. The filter applies to Retaliate too.
-- Spells: ordered rules with spell vnum, **My HP %** or **My MP %**,
-  below/above threshold, per-rule cooldown, and Monster/Self target. First
-  matching rule wins; otherwise the Combat **Skill** is used. Requires
-  Auto-attack. Recovery runs first.
+- Spells: the **Add spell…** picker scans `NSgtdData.NOS` → `Skill.dat` and
+  shows the active spell catalog (Holy Attack 866, Healing 867, Mana Shield
+  869, Holy Hammer 876, ...) with MP cost, range, cast time and cooldown.
+  The `ski 0 866 866 866 867 ... 876 ...` packet is the learned skill list;
+  `u_s` uses a zero-based slot into it, not the vnum. Live mapping:
+  slot 0→866, 2→868, 7→873, 8→874, 9→875, 10→876. The bot resolves the rule's
+  vnum to this slot (live `ski` or the log backfill) before sending.
+  Rules are ordered 1., 2., … and use **Always**, My HP % or My MP %; the
+  first eligible rule wins. Always + cooldowns forms a rotation. Static MP,
+  range, cooldown and cast-time checks come from Skill.dat. Requires
+  Auto-attack; recovery runs first. The order smoke casts 876 first, then
+  866 twice while 876 is on cooldown.
 - Configuration: **Save config… / Load config…** export/import all bot
   settings as validated JSON (`botconfig.py`). Loading stops the bot;
   waypoints/path are session state and are not saved. Full schema and caveats
@@ -470,17 +478,18 @@ shortcut and the no-corner-cutting rule.
 
 ### Verification and state
 
-- **78 host tests**, `make gui-test` (map switch, tooltips, toggle classes,
-  recovery banner), and **4 bot smokes** (combat, target filter + spell rules
+- **83 host tests**, `make gui-test` (map switch, tooltips, toggle classes,
+  recovery banner), and **5 bot smokes** (combat, target filter + spell rules
   + config round-trip, rejected walks, recovery) pass.
 - Headless rules smoke: two monsters (vnum 201 nearer, vnum 200 farther),
   allow only 200, HP 40 %, rule spell 7 below 50 % → `ncif 3 500` +
   `u_s 7 3 500`, no traffic to 501, no basic attack; save/load restores it.
 - Live path/auto-attack/pickup/map-switch captures above; GUI restarted with
   the final build and connected (`recv/send/skill ACTIVE`, drops 0).
-- Remaining caveats: self-target spells use `u_s <spell> 1 <charId>` (protocol
-  shape, needs one benign live cast); diagonal MoveTo is handled by the
-  client's own pathfinder and should be watched on the first live run.
+- Self-target spells are live-captured: `u_s 7 1 14881134` →
+  `su 1 14881134 1 14881134 873 ...` (Group Healing). Remaining caveat:
+  diagonal MoveTo is handled by the client's own pathfinder and should be
+  watched on the first live run.
 
 ## Safety
 

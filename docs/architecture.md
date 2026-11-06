@@ -117,7 +117,10 @@ correction. `POS` reads the local player object. See [ipc.md](ipc.md) and
 
 The host turns the stream into a `WorldState` (`linux/host/ntpl/engine.py`):
 map id, own position, entities keyed by entity id, HP/MP, chat, sit/stand
-state, the selected target, the last skill, and a ring of combat events.
+state, the selected target, the last skill, the ordered learned skill list
+from `ski`, and a ring of combat events. `u_s` carries a zero-based slot into
+that skill list, not the Skill.dat vnum; the bot resolves a chosen spell vnum
+to the slot before sending.
 Parsing is tolerant: an unknown opcode, a short packet or a non-numeric field
 is ignored, never fatal.
 
@@ -161,8 +164,9 @@ The bot runs on the GLib main loop:
 1. recover: below the HP threshold, sit and wait for full HP;
 2. stand up if the `rest` state is sitting;
 3. pick up own/unowned drops in range;
-4. evaluate ordered spell rules (my HP/MP conditions) and the target filter,
-   then cast or auto-attack (`ncif` + configurable `u_s`); Retaliate first;
+4. evaluate ordered spell rules (Always or my HP/MP conditions; per-rule and
+   catalog cooldowns, MP, range, cast time) and the target filter, then cast
+   or auto-attack (`ncif` + configurable `u_s`); Retaliate first;
 5. walk the next multi-cell leg through the DLL's `MOVE|x y` command, which
    calls the client's own MoveTo/pathfinding, so the client animates and sends
    its own `walk` packet; confirm from `world.position`.

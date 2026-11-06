@@ -45,6 +45,7 @@ sudo apt install python3-gi gir1.2-gtk-4.0
 | `engine.py` | `WorldState` (map, position, entities, stats, chat) fed by packets |
 | `mapdata.py` | `NStcData.NOS` parser, walkability, 8-direction A*, map ranking, PNG render |
 | `monsternames.py` | `NSlangData_*.NOS` text archive, nibble codec, monster/skill names |
+| `spells.py` | `NSgtdData.NOS` → `Skill.dat` spell catalog (MP, range, cooldown) |
 | `spawnlog.py` | entity → vnum/player-name backfill from the DLL session log |
 | `botconfig.py` | JSON bot configuration (targets, spell rules, settings) |
 | `cli.py` | `monitor`, `walk`, `cast`, `send`, `status`, `map`, `replay`, `gui` |
@@ -55,9 +56,9 @@ sudo apt install python3-gi gir1.2-gtk-4.0
 From `linux/`:
 
 ```bash
-make host-test      # 78 unittest cases
+make host-test      # 83 unittest cases
 make gui-test       # headless GTK4: map switch, tooltips, toggles, recovery banner
-make bot-test       # 4 smokes: combat, rules/config, rejection, recovery
+make bot-test       # 5 smokes: combat, rules/config, spell order, rejection, recovery
 ```
 
 The tests start a fake TCP server, so they need neither the DLL nor Wine. The

@@ -165,9 +165,11 @@ grouped by function:
   vnum, or add a vnum manually. **Also attack monsters with unknown vnum**
   covers monsters that spawned before the DLL was injected and therefore
   have no `in` packet.
-- **Spells** — ordered conditional cast rules (spell vnum, My HP/MP above or
-  below a %, cooldown, monster/self target). The first matching rule wins;
-  otherwise the **Skill** in Combat is the fallback.
+- **Spells** — **Add spell…** opens a searchable catalog scanned from
+  `NSgtdData.NOS` → `Skill.dat` (name, vnum, MP, target, cooldown). Rules are
+  ordered 1., 2., … and can use **Always**, My HP % or My MP %; the first rule
+  that is off cooldown, in range and affordable wins. Always + cooldowns forms
+  a rotation. Otherwise the **Skill** in Combat is the fallback.
 - **Loot** — Pickup and loot radius.
 - **Recovery** — Auto-recover and the low-HP threshold.
 - **Configuration** — Save/Load the whole bot configuration as JSON.
@@ -192,7 +194,7 @@ in the window header.
 | Range / Cooldown | attack radius and seconds between attacks |
 | Loop | repeat the path when it finishes |
 | Targets | all / only selected / all except selected monster templates (`vnum`); Retaliate respects the same filter |
-| Spell rule | spell vnum + My HP/MP below/above threshold + cooldown + Monster/Self target; first matching rule wins |
+| Spell rule | scanned spell + Always/My HP/My MP + below/above + cooldown + Monster/Self target; ordered top to bottom; static MP/range/cooldown checks from Skill.dat |
 | Save/Load config | export/import the toggles, numbers, target list and spell rules as JSON |
 
 The A* path is drawn as one continuous cyan polyline through cell centres.
@@ -241,14 +243,19 @@ honest source.
    Target choice: with **Retaliate** on, first try the most recent `su`
    attacker that hit you (within 5 s); otherwise pick the nearest `kind == 3`
    entity within range. Both paths apply the **Targets** filter.
-   Spell rules are evaluated before the basic attack: the first enabled rule
-   whose HP/MP condition is true and whose per-rule cooldown is over is cast
-   on the monster or on yourself; if none matches, the **Skill** from Combat
-   is used (`0` = basic attack). Monster casts send `ncif 3 <id>` plus the
-   skill template; self casts use target type 1 and the char id.
+   Spell rules are evaluated before the basic attack in list order: the first
+   enabled rule that is off its per-rule cooldown, has enough MP, has the
+   target in spell range and whose condition (Always or HP/MP threshold) is
+   true is cast on the monster or on yourself. **Always** plus cooldowns is a
+   rotation. If none matches, the **Skill** from Combat is used (`0` = basic
+   attack). Monster casts send `ncif 3 <id>` plus the skill template; self
+   casts use target type 1 and the char id. The rule stores the Skill.dat
+   vnum; the bot resolves it to the zero-based `u_s` slot from the learned
+   `ski` list (e.g. 876 → slot 10) before sending. Cast time from Skill.dat
+   extends the walk pause.
 5. **Walk** a multi-cell leg (three cells from the A* path, plus the final
-   cell on the 8-direction path, plus the final cell) by calling the client's
-   own MoveTo: the GUI sends `MOVE|x y` to the DLL. The client pathfinds,
+   cell on the 8-direction path) by calling the client's own MoveTo: the GUI
+   sends `MOVE|x y` to the DLL. The client pathfinds,
    animates and sends its own `walk` packet with
    the leg destination; the server accepts it as a normal player move. Because
    that packet arrives at the **start** of the animation, the bot waits
@@ -291,8 +298,9 @@ never sees the `at` packet.
   bot does not walk to distant drops by itself yet.
 - The verified `u_s` prefix is `<skill> <targetType> <targetId>`; later
   fields are unknown. `u_s 0 3 <id>` is the normal attack and skill 10 cast
-  produced `su ... 876` live. Self-target rules use `u_s <spell> 1 <charId>`;
-  that shape still needs one benign live cast. The template is editable.
+  produced `su ... 876` live. Self-target rules use `u_s <slot> 1 <charId>`;
+  live `u_s 7 1 14881134` → `su ... 873` (Group Healing). The template is
+  editable.
 - Auto-attack targets `kind == 3` only, within **Range**. Skill **0** is the
   normal attack; the server reports the basic skill (866/868) in `su`. Skill
   866 itself is not castable and gets `cancel 0 866 -1`.
@@ -303,9 +311,18 @@ never sees the `at` packet.
 - Spell rules require **Auto-attack** to be on. The recovery check runs first:
   below the Auto-recover threshold the bot sits, so a heal rule with a lower
   threshold never fires while recovery is active. Self-target rules use the
-  current char id and send `u_s <spell> 1 <charId>`. Spell descriptions shown
-  in the rule editor come from the client's `_code_<lang>_Skill.txt`; they are
-  tooltip text, not guaranteed spell names.
+  current char id and send `u_s <spell> 1 <charId>`.
+- The spell catalog comes from `NSgtdData.NOS` → `Skill.dat`; names/descriptions
+  come from `_code_<lang>_Skill.txt` through the record's `NAME` key. The
+  `u_s` field is a zero-based slot in the learned skill list from `ski`, not
+  the Skill.dat vnum: live `u_s 10` → `su ... 876`, `u_s 7` → `su ... 873`.
+  The bot resolves vnums to slots using the live list or the DLL-log backfill. MP cost,
+  range, cast time and cooldown are static game data and are enforced before a
+  rule is selected; the rule's own cooldown can only make it stricter. A
+  spell whose target type is self overrides the rule's Monster/Self choice.
+- Skill.dat also contains monster/system records. The picker filters to active
+  skills (`TYPE[0] == 1`) and hides empty/NotUse names; a manual vnum can still
+  reference any id.
 - The map id comes from `c_map`/`at`. If the host attached after login and has
   not seen either yet, the GUI ranks the map grids against live player
   positions every 2 s and keeps the current map while it still fits.
@@ -315,9 +332,9 @@ never sees the `at` packet.
 ## Tests
 
 ```bash
-make -C linux host-test   # 78 cases incl. synthetic NOS, 8-way A*, checksum, config
+make -C linux host-test   # 83 cases incl. synthetic NOS, 8-way A*, checksum, config
 make -C linux gui-test    # GUI + map surface + tooltips + unknown-position guard
-make -C linux bot-test    # 4 fake-server smokes: combat, rules, rejection, recovery
+make -C linux bot-test    # 5 fake-server smokes: combat, rules, rejection, recovery
 ```
 
 The bot test sends a fake player at (25,117) on map 20, a monster at

@@ -44,6 +44,9 @@
 | Tooltip shows `Monster #id` with no name | the entity spawned before the DLL/GUI and has no `in` vnum | `spawnlog.py` covers pre-GUI spawns; for pre-injection spawns enable the unknown-vnum option or re-enter the area so `in` is sent again |
 | Toggles are grey, not green/red | an old GUI process predates the CSS classes, or CSS was installed after the widgets | restart `gui.sh` with the current build |
 | Path is still 90° / staircase | the path was built by the old 4-direction A* | restart the GUI and click the waypoints again; paths are rebuilt on click |
+| Add spell… picker is empty | `NSgtdData.NOS` is missing or `NTPL_NSGTD` points elsewhere | set `NTPL_NSGTD` / `NTPL_NSTC`; manual vnums still work |
+| Spell rule never casts | not enough MP, target out of the spell's own range, rule/spell cooldown still running, or a higher rule is always winning | check the rule's description metadata; wait, move closer, raise MP, or reorder/disable the higher rule |
+| Rule order is not what I wanted | the list is evaluated 1., 2., … from the top | use the ↑/↓ buttons; the number on the left shows execution priority |
 
 ## Injection
 

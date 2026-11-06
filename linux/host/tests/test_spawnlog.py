@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ntpl.spawnlog import load_spawns
+from ntpl.spawnlog import load_skill_list, load_spawns
 
 
 class SpawnLogTests(unittest.TestCase):
@@ -34,8 +34,19 @@ class SpawnLogTests(unittest.TestCase):
         vnums, _names = load_spawns(log)
         self.assertEqual(vnums[5000], 206)
 
+    def test_reads_skill_list_and_deduplicates(self):
+        log = self._write(
+            "1 [RECV] ski 0 866 866 866 867 868 873 876 30\r\n"
+            "2 [RECV] ski 1 31 866 30\r\n"
+        )
+        self.assertEqual(
+            load_skill_list(log),
+            [866, 867, 868, 873, 876, 30, 31],
+        )
+
     def test_missing_log_is_not_fatal(self):
         self.assertEqual(load_spawns("/nonexistent/NosTalePacketLog.txt"), ({}, {}))
+        self.assertEqual(load_skill_list("/nonexistent/NosTalePacketLog.txt"), [])
 
 
 if __name__ == "__main__":

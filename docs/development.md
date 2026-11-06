@@ -28,9 +28,9 @@ The MinGW compiler is `i686-w64-mingw32-g++`. Override with
 ## Tests
 
 ```bash
-make -C linux host-test        # 78 stdlib unittest cases
+make -C linux host-test        # 83 stdlib unittest cases
 make -C linux gui-test         # headless GTK4, needs xvfb
-make -C linux bot-test         # 4 smokes: combat, rules/config, rejection, recovery
+make -C linux bot-test         # 5 smokes: combat, rules/config, spell order, rejection, recovery
 make -C linux all test-host
 linux/scripts/dev-test-wine.sh 25
 ```
@@ -39,10 +39,12 @@ The unit tests cover the wire protocol, the TCP client (including split-line
 reassembly and peer close), the engine's world-state handlers, the map
 parser/A* (synthetic NOS, bad headers, walls, unreachable targets, ranking,
 8-direction diagonals and no corner cutting), bot-config validation/clamping,
-spawn-log parsing and the monster/skill text tables. The GUI test opens the
+spawn-log parsing (spawns and the `ski` skill list), Skill.dat spell metadata,
+and the monster/skill text tables. The GUI test opens the
 real window under Xvfb and checks rows, status, map switch, tooltips, toggle
 colors and the recovery banner. The bot smokes cover combat + path movement,
-target filters + spell rules + config save/load, rejected walks and recovery.
+target filters + spell rules + config save/load, scanned-spell rotation in
+list order, rejected walks and recovery.
 The combat smoke asserts the `get`/`ncif`/`u_s`/`MOVE` sequence (Retaliate
 picks the monster that hit us) and that the fake client's own `walk` confirms
 the move. The rules smoke filters two monsters by vnum, checks that HP 40 %

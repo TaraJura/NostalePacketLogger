@@ -14,7 +14,7 @@ non-native piece. Everything outside the game is native Linux:
 | Host library / CLI | Python 3.10+, standard library only | no dependencies, easy to extend into the engine |
 | GUI | GTK4 via PyGObject | the native Linux toolkit, already present on Ubuntu |
 | State model | `ntpl.engine.WorldState` | packets become a world, not just a list |
-| Map / bot | `ntpl.mapdata` + GTK4 Map/Bot tab | client map grids, 8-direction A* paths, target filters, spell rules, auto-attack, JSON config |
+| Map / bot | `ntpl.mapdata` + `ntpl.spells` + GTK4 Map/Bot tab | client map grids, 8-direction A* paths, scanned spell catalog, ordered rules, target filters, auto-attack, JSON config |
 
 See `../docs/architecture.md`, `../docs/engine.md`, `../docs/map.md`,
 `../docs/ipc.md`, `../docs/hooking.md`, `../docs/linux.md` and
@@ -64,9 +64,9 @@ uses lowercase includes for that reason.
 
 ```bash
 make -C linux all test-host
-make -C linux host-test          # 78 cases: protocol, client, engine, mapdata, config, names
+make -C linux host-test          # 83 cases: protocol, client, engine, mapdata, config, names
 make -C linux gui-test           # headless GTK4: map switch, tooltips, toggles, banner
-make -C linux bot-test           # 4 smokes: combat, rules/config, rejection, recovery
+make -C linux bot-test           # 5 smokes: combat, rules/config, spell order, rejection, recovery
 ./linux/scripts/dev-test-wine.sh 25
 ```
 

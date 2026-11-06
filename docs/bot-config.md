@@ -44,27 +44,70 @@ Retaliate, Move first, Pickup, Auto-recover) are **green**, inactive ones are
 **RECOVERING** banner explains that attacks and movement are paused; the
 recovery check runs before targeting and spell rules.
 
-## Spells — conditional cast rules
+## Spells — scanned catalog, rules and execution order
+
+![Spell rules and scanned metadata](assets/gui-spells.png)
+
+The **Add spell…** button opens a searchable picker built from the game's own
+`NSgtdData.NOS` → `Skill.dat`. Each entry shows the readable name/description
+from `_code_<lang>_Skill.txt`, the vnum, MP cost, target mode and cooldown.
+**Blank rule** adds an empty row for a manually entered vnum. Each rule also
+has a `…` picker button to replace its spell.
+
+The catalog records `Skill.dat` fields: `VNUM`, `NAME` (a `zts<key>e` text
+key), `TYPE` (active/passive/system), `TARGET` (target type, hit type, range)
+and `DATA` (cast time, cooldown, MP cost). Only `TYPE[0] == 1` records are
+offered as active spells. Examples from the live client:
+
+| vnum | name | `u_s` slot (this character) | MP | target | cooldown | cast |
+|---|---|---|---|---|---|---|
+| 866 | Holy Attack | 0 | 0 | monster | 0.9 s | 0.2 s |
+| 867 | Healing | 1 | 50 | monster/any | 3 s | 0.2 s |
+| 869 | Mana Shield | 3 | 300 | self | 60 s | 1.0 s |
+| 873 | Group Healing | 7 | 250 | self/any | 20 s | 0.4 s |
+| 876 | Holy Hammer | 10 | 145 | monster | 90 s | 0.7 s |
+| 264 | Magic Missile | depends on class | 35 | monster | 20 s | 1.0 s |
+
+**Important:** the first `u_s` field is the **zero-based slot in the
+character's learned skill list**, not the Skill.dat vnum. The client sends
+`u_s 10 3 <id>` for Holy Hammer and the server answers `su ... 876 ...`; the
+live `ski 0 866 866 866 867 ... 876 ...` list gives the slot. The bot stores
+the **vnum** in the rule (portable) and resolves it to the slot before
+sending, using the live `ski` packet or the DLL-log backfill from startup
+(`spawnlog.load_skill_list`). The rule text shows both the vnum and slot; the
+picker lists the actual learned skills (or all active spells when no skill
+list is known).
 
 Each rule has:
 
 | Field | Meaning |
 |---|---|
+| order | execution priority, shown as 1., 2., …; up/down arrows change it |
 | enabled | rule participates in selection |
-| spell | spell vnum sent in `u_s`; 0 is skipped (basic attack is the fallback, not a rule) |
-| subject | **My HP %** or **My MP %** (from the server's `stat` packet) |
-| comparator | **below** = strictly lower than the threshold, **above** = strictly higher |
+| spell | spell vnum sent in `u_s`; the picker fills it from the catalog; 0 is skipped |
+| subject | **Always**, **My HP %** or **My MP %** (HP/MP from `stat`) |
+| comparator | **below** = strictly lower than the threshold, **above** = strictly higher; disabled for Always |
 | threshold | percentage, 0–100 |
-| cooldown | minimum seconds before this rule can fire again |
-| target | **Monster** (nearest/Retaliate target) or **Self** (own char id) |
+| cooldown | minimum seconds before this rule can fire again; the spell's catalog cooldown is also enforced |
+| target | **Monster** (nearest/Retaliate target) or **Self** (own char id); self-target spells from Skill.dat override this |
 
-Rules are evaluated **top to bottom** every bot tick; the first enabled rule
-that is off cooldown and whose condition is true wins. Up/down arrows change
-priority; the description next to the spell vnum comes from the client's
-`_code_<lang>_Skill.txt` (tooltip text, not necessarily a display name).
+Rules are evaluated **top to bottom** every bot tick. The first enabled rule
+that is off cooldown, in spell range, affordable in MP and whose condition is
+true wins. With **Always**, the order + cooldowns form a rotation: rule 1
+casts, is blocked for its cooldown, rule 2 casts, and so on. Up/down arrows
+change priority; the number on the left shows the current order.
 
-Casting still obeys the global **Cooldown** in Combat and sets the same walk
-pause as a normal attack. Monster rules require a monster in range and send:
+Data-driven checks before a cast:
+
+- **MP**: if `DATA[8] > current MP`, the rule is skipped (next rule may fit).
+- **range**: a monster spell is skipped when the target is farther than
+  `TARGET[2]` (`DATA[11]`) cells.
+- **spell cooldown**: the rule's own cooldown is `max(rule.cooldown, catalog
+  cooldown)`, so a 90 s spell is not re-cast every few seconds.
+- **cast time**: the walk pause after the cast is at least `DATA[4]`.
+
+Casting still obeys the global **Cooldown** in Combat. Monster rules require a
+monster in range and send:
 
 ```
 ncif 3 <entityId>
@@ -77,15 +120,20 @@ Self rules require the char id and send:
 u_s <spell> 1 <charId>
 ```
 
-The monster shape (`u_s <spell> 3 <id>`) matches the live client captures.
-The self-target shape (target type 1 + char id) is the protocol-consistent
-guess; verify one benign self cast live before relying on a timed buff/heal.
+The monster shape (`u_s <slot> 3 <id>`) and the self-target shape
+(`u_s <slot> 1 <charId>`) both match live client captures. Live:
+`u_s 10 3 5161` → `su ... 876` (Holy Hammer) and
+`u_s 7 1 14881134` → `su 1 14881134 1 14881134 873 ...` (Group Healing).
 
 If no rule matches, the bot uses the **Skill** field from Combat (0 = normal
 attack). Recovery runs before spell rules: below **Auto-recover → Below HP %**
 the bot sits and waits for full HP, so a heal rule with a lower threshold does
 not fire while recovery is active. Spell rules require **Auto-attack** to be
 on.
+
+The catalog is loaded in a background thread at startup (Skill.dat decodes
+about 1.2 MB); the picker shows a loading row until it is ready. If the file is
+missing, the picker is empty and manual vnums still work.
 
 ## Save and load
 
@@ -117,21 +165,30 @@ Example:
   "spell_rules": [
     {
       "enabled": true,
-      "spell": 7,
-      "subject": "my_hp",
+      "spell": 876,
+      "subject": "always",
       "comparator": "below",
       "threshold": 50.0,
-      "cooldown": 10.0,
+      "cooldown": 90.0,
       "target": "monster"
     },
     {
       "enabled": true,
-      "spell": 20,
-      "subject": "my_mp",
-      "comparator": "above",
-      "threshold": 80.0,
-      "cooldown": 60.0,
+      "spell": 867,
+      "subject": "my_hp",
+      "comparator": "below",
+      "threshold": 50.0,
+      "cooldown": 3.0,
       "target": "self"
+    },
+    {
+      "enabled": true,
+      "spell": 866,
+      "subject": "always",
+      "comparator": "below",
+      "threshold": 50.0,
+      "cooldown": 1.0,
+      "target": "monster"
     }
   ]
 }
@@ -147,8 +204,15 @@ touching the UI.
 - `botconfig.py` — dataclasses, validation, atomic save, load.
 - `gui.py` — `_collect_config` / `_apply_config`, the Targets/Spells frames,
   `_monster_allowed`, `_select_spell_rule`, `_cast_spell`.
-- `monsternames.py` — `load_skill_descriptions` for the rule hint.
+- `spells.py` — `NSgtdData.NOS` container reader, nibble decode, Skill.dat
+  parser and `vnum → SpellInfo` catalog.
+- `monsternames.py` — `load_skill_descriptions` provides the readable names.
 - `linux/host/tests/test_botconfig.py` — schema round trip, clamping, errors.
+- `linux/host/tests/test_spells.py` — parser, self target, known live spells.
 - `linux/test/gui_bot_rules_smoke.py` — fake server with two monsters: filter
   selects vnum 200 and ignores the nearer vnum 201; HP 40 % triggers a spell
-  rule (`u_s 7 3 500`), no basic attack; save/load restores the configuration.
+  rule (`u_s 7 3 500`), no basic attack; catalog/picker, MP/range gating and
+  save/load.
+- `linux/test/gui_spell_order_smoke.py` — scanned spells 876 (Holy Hammer,
+  90 s cooldown) and 866 (Holy Attack): 876 must cast first, then 866 twice
+  while 876 is on cooldown; no basic attack.

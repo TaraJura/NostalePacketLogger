@@ -72,6 +72,8 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `self_id` | own char id from `at`, `cond` (the live client sends it only for the local player), `rest`, or a matched `tp` |
 | `target_id` | last `ncif` target |
 | `last_skill` | skill vnum from the last `su` |
+| `skill_pages` / `skill_list` | learned skills from `ski <page> <vnum>...`; `skill_list` is page-ordered and deduplicated; `u_s` uses a zero-based index into it |
+| `skill_slot(vnum)` / `skill_vnum(slot)` | map between Skill.dat vnums and `u_s` slots |
 | `combat` | last 100 combat events (`attacker`, `target`, `skill`, raw args) |
 | `last_packet` | the most recently fed `Packet` |
 
@@ -95,6 +97,7 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `rest` | RECV | `resting` |
 | `cond` | RECV | entity `speed` |
 | `ncif` | SEND | `target_id` |
+| `ski` | RECV | learned skill pages and the ordered `skill_list` used by `u_s` slots |
 | `su` | RECV | `combat`, `last_skill` (first five ints); if the target is self, `last_attacker_id`/`last_attacker_at` |
 | `stat` | RECV | own HP/MP |
 | `say` | RECV/SEND | `chat` |
@@ -127,7 +130,7 @@ animate a walk:
 | raw move | `SEND\|walk x y checksum speed` | probe `walk -1 -1 0 10` → server `tp`; the client may visibly teleport |
 | sit/stand | `rest 1 1 <charId>` (toggles) | `rest <type> <charId> <state>` (0 stand, 1 sit) |
 | target | `ncif <type> <id>` | no direct reply; used before `u_s` |
-| skill | `u_s <skill> <targetType> <targetId>`; skill 0 = normal attack | `su <attacker> <target> <skill> …` (normal attack reports 866/868) |
+| skill | `u_s <skillSlot> <targetType> <targetId>`; slot 0 = normal attack; `ski` maps slots to Skill.dat vnums | `su <attacker> <target> <skill> …` (normal attack reports 866/868) |
 
 The raw `walk` checksum is `walk_checksum(x, y)` = `1 if (x + y) % 3 == 1 else
 0`; the client's own builder uses exactly this. The client's MoveTo sends a
@@ -144,7 +147,7 @@ The GUI bot and `ntpl walk` use `MOVE`; the bot's status advances when
 |---|---|
 | `monitor [--engine] [--filter] [--log]` | live stream; `/send`, `/filter`, `/status`, `/engine`, `/quit` |
 | `walk X Y [--speed] [--timeout]` | `MOVE` through the client, wait for its own `walk` packet |
-| `cast <skill> [--target-id] [--target-type] [--stand ID] [--packet]` | send `ncif` + `u_s`, wait for `su` |
+| `cast <slot> [--target-id] [--target-type] [--stand ID] [--packet]` | send `ncif` + `u_s`, wait for `su` |
 | `send <packet…>` | raw packet; exits 1 if the DLL reports a failed send |
 | `status` | hook addresses, hook state, drop counters |
 | `scan X Y` | find a coordinate pair in game memory (debug) |
@@ -208,6 +211,9 @@ The sidebar also owns the bot configuration:
 
 - `monsternames.py` — `vnum → monster name` and skill descriptions from
   `NSlangData_<lang>.NOS`;
+- `spells.py` — `NSgtdData.NOS` → `Skill.dat` catalog: active spell vnum, name,
+  MP cost, range, cast time, cooldown and target type. The bot resolves the
+  Skill.dat vnum to the `u_s` **slot** from `ski`; the GUI shows both;
 - `spawnlog.py` — entity vnum/player-name backfill from the DLL session log
   for creatures that spawned before the host connected;
 - `botconfig.py` — validated JSON export/import of targets, spell rules and
@@ -219,10 +225,11 @@ The bot loop:
 - recover below the configured HP % (sit, wait for full, stand);
 - pick up your own/unowned drops in the loot radius (`get 1 <charId>
   <dropId>`);
-- evaluate ordered spell rules (my HP/MP below/above thresholds, per-rule
-  cooldown, monster/self target), then auto-attack the nearest allowed monster
-  (Retaliate first) using `ncif` + a configurable `u_s` template; skill 0 is
-  the normal attack;
+- evaluate ordered spell rules from the scanned Skill.dat catalog (Always or
+  my HP/MP below/above threshold; per-rule cooldown, MP, spell range and cast
+  time enforced; monster/self target), then auto-attack the nearest allowed
+  monster (Retaliate first) using `ncif` + a configurable `u_s` template;
+  skill 0 is the normal attack;
 - walk three-cell legs via the DLL's `MOVE|x y`, which runs the client's own
   pathfinding and animation; confirmation is the client's own `walk` packet /
   `world.position`.

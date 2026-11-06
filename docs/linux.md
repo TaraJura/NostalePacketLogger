@@ -234,10 +234,10 @@ both.
 ## Tests
 
 ```bash
-make host-test          # 78 stdlib unit tests: protocol, engine, map, config
+make host-test          # 83 stdlib unit tests: protocol, engine, map, config, spells
 
 make gui-test           # headless GTK4 window + map surface against a fake stream
-make bot-test           # 4 fake-server smokes: combat, rules, rejection, recovery
+make bot-test           # 5 fake-server smokes: combat, rules/config, spell order, rejection, recovery
 make all test-host
 ./scripts/dev-test-wine.sh 25
 ```
@@ -248,11 +248,12 @@ map switch (the 20→85→20 `c_map` sequence), map tooltips (including a vnum
 backfilled from the DLL log), green/red toggle classes, the recovery banner,
 and the unknown-position path guard. Install `xvfb` if it is missing.
 
-`bot-test` drives the real GTK window against fake servers. The four smokes
+`bot-test` drives the real GTK window against fake servers. The five smokes
 cover auto-attack + path movement (`ncif`, `u_s`, `MOVE`), target filtering +
-conditional spell rules + JSON config round-trip, three rejected walks, and
-the sit/wait-for-full-HP recovery loop. They need `xvfb`, but no game.
-`bot-test` uses the real map archive when it is installed.
+conditional spell rules + JSON config round-trip, scanned-spell rotation and
+execution order, three rejected walks, and the sit/wait-for-full-HP recovery
+loop. They need `xvfb`, but no game. `bot-test` uses the real map archive when
+it is installed.
 
 `dev-test-wine.sh` is the end-to-end test that does not need NosTale:
 
@@ -321,8 +322,9 @@ The recommended setup is still a dedicated prefix.
   game with the Map/Bot tab, map switching, tooltips and the bot.
 - The map parser, A* and the bot loop pass their tests and have been run live:
   the bot completed client-animated paths, auto-attacked, picked up drops and
-  switched maps. The only live-unverified protocol shape is the self-target
-  spell variant (`u_s <spell> 1 <charId>`).
+  switched maps. The self-target shape (`u_s <slot> 1 <charId>`) is also
+  live-captured (`u_s 7 1 14881134` → `su ... 873` Group Healing). Watch the
+  first live diagonal MoveTo run.
 - The `SCAN`/`FIND`/`READ` commands are new reverse-engineering aids. `FIND`
   located the charId record, but the live position comes from the server's
   `tp`/`mv`, not from those addresses.

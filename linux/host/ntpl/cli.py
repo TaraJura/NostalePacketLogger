@@ -221,11 +221,11 @@ def build_cast_packet(
     x: int | None = None,
     y: int | None = None,
 ) -> str:
-    """Default u_s layout: u_s <skill> <targetType> <targetId> [x y].
+    """Default u_s layout: u_s <skillSlot> <targetType> <targetId> [x y].
 
-    The client's own builder concatenates the "u_s " prefix with numeric
-    fields; the exact order is not fully verified yet. Use --packet to send a
-    literal packet when the live client shows a different layout.
+    The first u_s field is a zero-based slot in the character's learned skill
+    list (the `ski` packet), not the Skill.dat vnum; slot 0 is the basic
+    attack. Use --packet for a literal packet.
     """
     fields = [str(skill), str(target_type)]
     if target_id is not None:
@@ -248,7 +248,7 @@ def cmd_cast(args: argparse.Namespace) -> int:
             args.skill, args.target_type, args.target_id, args.x, args.y
         )
     else:
-        print("ntpl: give a skill vnum or --packet", file=sys.stderr)
+        print("ntpl: give a skill slot or --packet", file=sys.stderr)
         client.close()
         return 2
 
@@ -691,7 +691,7 @@ def build_parser() -> argparse.ArgumentParser:
         "cast", help="use a skill (experimental u_s layout; --packet overrides)"
     )
     _add_connection(cast)
-    cast.add_argument("skill", type=int, nargs="?", help="skill vnum")
+    cast.add_argument("skill", type=int, nargs="?", help="u_s skill slot (0 = basic attack; not the Skill.dat vnum)")
     cast.add_argument("--target-type", type=int, default=3)
     cast.add_argument("--target-id", type=int)
     cast.add_argument("--x", type=int)

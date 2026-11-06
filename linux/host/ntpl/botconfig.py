@@ -27,7 +27,7 @@ Schema (version 1)::
         {
           "enabled": true,
           "spell": 10,
-          "subject": "my_hp",       # my_hp | my_mp
+          "subject": "always",      # always | my_hp | my_mp
           "comparator": "below",    # below | above
           "threshold": 50,
           "cooldown": 5,
@@ -48,7 +48,7 @@ from pathlib import Path
 CONFIG_VERSION = 1
 
 MONSTER_MODES = ("all", "only", "except")
-SUBJECTS = ("my_hp", "my_mp")
+SUBJECTS = ("always", "my_hp", "my_mp")
 COMPARATORS = ("below", "above")
 SPELL_TARGETS = ("monster", "self")
 
@@ -64,7 +64,7 @@ class ConfigError(ValueError):
 class SpellRule:
     enabled: bool = True
     spell: int = 0
-    subject: str = "my_hp"
+    subject: str = "always"
     comparator: str = "below"
     threshold: float = 50.0
     cooldown: float = 5.0
@@ -85,13 +85,13 @@ class SpellRule:
     def from_dict(cls, data: object) -> "SpellRule":
         if not isinstance(data, dict):
             raise ConfigError("spell rule is not an object")
-        subject = data.get("subject", "my_hp")
+        subject = data.get("subject", "always")
         comparator = data.get("comparator", "below")
         target = data.get("target", "monster")
         return cls(
             enabled=_as_bool(data.get("enabled"), True),
             spell=_as_int(data.get("spell"), 0, 0, 10**9),
-            subject=subject if subject in SUBJECTS else "my_hp",
+            subject=subject if subject in SUBJECTS else "always",
             comparator=(
                 comparator if comparator in COMPARATORS else "below"
             ),

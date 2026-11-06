@@ -184,6 +184,11 @@ def _load_text_table(
     return {}
 
 
+def read_archive_entries(data: bytes) -> dict[str, bytes]:
+    """Public reader for the shared count/name/size NOS container."""
+    return _read_archive_entries(data)
+
+
 def load_monster_names(path: str | Path | None = None) -> dict[int, str]:
     """Load the vnum → monster-name table.
 

@@ -21,6 +21,7 @@ import re
 from pathlib import Path
 
 _IN_MARKER = "[RECV] in "
+_SKI_MARKER = "[RECV] ski "
 _ENTITY = re.compile(r"^([23]) (\d+) (\d+) ")
 _PLAYER = re.compile(r"^1 (.+) - (\d+) ")
 
@@ -90,3 +91,42 @@ def load_spawns(
                 names[int(match.group(2))] = match.group(1).strip()
 
     return vnums, names
+
+
+def load_skill_list(
+    path: str | Path | None = None,
+) -> list[int]:
+    """Return the ordered, deduplicated skill list from `[RECV] ski` lines.
+
+    The client's `u_s` packet sends a zero-based slot in this list, not the
+    Skill.dat vnum (`u_s 10` → server `su 876` for the live specialist).
+    """
+    source = Path(path) if path is not None else default_log_path()
+    if source is None:
+        return []
+    try:
+        log = open(source, "r", encoding="latin1", errors="replace")
+    except OSError:
+        return []
+
+    pages: dict[int, list[int]] = {}
+    with log:
+        for line in log:
+            marker = line.find(_SKI_MARKER)
+            if marker < 0:
+                continue
+            values = []
+            for token in line[marker + len(_SKI_MARKER) :].split():
+                try:
+                    values.append(int(token))
+                except ValueError:
+                    break
+            if values:
+                pages[values[0]] = [n for n in values[1:] if n > 0]
+
+    ordered: list[int] = []
+    for page in sorted(pages):
+        for vnum in pages[page]:
+            if vnum not in ordered:
+                ordered.append(vnum)
+    return ordered

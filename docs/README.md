@@ -25,7 +25,7 @@ the host differ, the game's packets do not.
 - **Windows tree (`windows/`)** — the original working implementation. Injector
   + DLL + WinForms GUI, named pipes.
 - **Linux tree (`linux/`)** — MinGW DLL + TCP loopback + Python CLI + GTK4 GUI
-  + state engine. Builds cleanly, **78 host tests pass**, the GTK4 window
+  + state engine. Builds cleanly, **83 host tests pass**, the GTK4 window
   passes a headless smoke test, and the DLL has been verified against the
   **live NosTale client** under Wine 11: both hooks ACTIVE, drops 0,
   sit/stand via `rest`, and natural movement through the client's own MoveTo
@@ -42,7 +42,10 @@ the host differ, the game's packets do not.
   and can auto-attack monsters (Retaliate prioritises the one hitting you),
   pick up drops, and sit to recover below a configurable HP %. The UI has live
   HP/MP bars with a recovery banner, green/red toggles, map tooltips with
-  monster names, monster target filters and conditional spell rules; the whole
-  configuration can be saved/loaded as JSON. `make gui-test` and `make
-  bot-test` pass (4 bot smokes). See [map.md](map.md) and
+  monster names, monster target filters and ordered conditional spell rules
+  scanned from `NSgtdData.NOS` → `Skill.dat` (Always/HP/MP conditions, MP,
+  range, cast time, cooldown); the whole configuration can be saved/loaded as
+  JSON. `make gui-test` and `make
+  bot-test` pass (5 bot smokes, including the spell rotation). See
+  [map.md](map.md) and
   [bot-config.md](bot-config.md).

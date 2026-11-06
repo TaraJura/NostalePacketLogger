@@ -67,6 +67,10 @@ class WorldState:
     self_id: int | None = None
     target_id: int | None = None
     last_skill: int | None = None
+    # `ski <page> <skillVnum...>`: the client's ordered skill list. `u_s`
+    # carries a zero-based slot in this deduplicated list, not the vnum.
+    skill_pages: dict[int, list[int]] = field(default_factory=dict)
+    skill_list: list[int] = field(default_factory=list)
     # Last entity that hit the local player, with the packet timestamp.
     last_attacker_id: int | None = None
     last_attacker_at: float = 0.0
@@ -78,6 +82,18 @@ class WorldState:
         if self.x is None or self.y is None:
             return None
         return (self.x, self.y)
+
+    def skill_slot(self, vnum: int) -> int | None:
+        """Zero-based `u_s` slot for a skill vnum, or None if not learned."""
+        try:
+            return self.skill_list.index(vnum)
+        except ValueError:
+            return None
+
+    def skill_vnum(self, slot: int) -> int | None:
+        if 0 <= slot < len(self.skill_list):
+            return self.skill_list[slot]
+        return None
 
 
 def walk_checksum(x: int, y: int) -> int:
@@ -298,6 +314,23 @@ def _on_select(world: WorldState, packet: Packet) -> None:
         world.target_id = values[1]
 
 
+def _on_skill_list(world: WorldState, packet: Packet) -> None:
+    # ski <page> <vnum> <vnum> ... ; duplicates are skill ranks/variants.
+    # The client's u_s slot is the index in the deduplicated, page-ordered
+    # skill list, so 866..876 map to slots 0..10 for the live specialist.
+    values = packet.ints(len(packet.args))
+    if not values:
+        return
+    page = values[0]
+    world.skill_pages[page] = [value for value in values[1:] if value > 0]
+    ordered: list[int] = []
+    for page_number in sorted(world.skill_pages):
+        for vnum in world.skill_pages[page_number]:
+            if vnum not in ordered:
+                ordered.append(vnum)
+    world.skill_list = ordered
+
+
 def _on_skill_used(world: WorldState, packet: Packet) -> None:
     # su <attackerType> <attackerId> <targetType> <targetId> <skillVnum> ...
     # Live example:
@@ -368,6 +401,7 @@ class Engine:
                 "rest": _on_rest,       # RECV: sit/stand state
                 "cond": _on_condition,  # RECV: entity speed/state
                 "ncif": _on_select,     # SEND: target selection
+                "ski": _on_skill_list,  # RECV: learned skill list
                 "su": _on_skill_used,   # RECV: a skill hit
                 "stat": _on_stats,      # RECV: own hp/mp
                 "say": _on_chat,        # RECV and SEND: chat

@@ -45,7 +45,8 @@ from .mapdata import (
     terrain_rgb,
 )
 from .monsternames import load_monster_names, load_skill_descriptions
-from .spawnlog import load_spawns
+from .spawnlog import load_skill_list, load_spawns
+from .spells import SpellInfo, load_spells
 from .protocol import Kind, Packet, ProtocolError
 
 MAX_ROWS = 20000
@@ -163,10 +164,14 @@ class Application(Gtk.Application):
         self.map_grid: MapGrid | None = None
         self.monster_names: dict[int, str] = {}
         self.spell_descriptions: dict[int, str] = {}
+        self.spells: dict[int, SpellInfo] = {}
+        self.spells_loaded = False
+        self.spells_loading = False
         self.monster_names_loaded = False
         self.log_file = log_file or os.environ.get("NTPL_LOG")
         self.log_vnums: dict[int, int] = {}
         self.log_names: dict[int, str] = {}
+        self.log_skill_list: list[int] = []
         self.spawns_loaded = False
         self.target_mode = None
         self.target_search = None
@@ -226,6 +231,7 @@ class Application(Gtk.Application):
         self.map_redraw_scheduled = False
         self.stats_redraw_scheduled = False
         self.bot_running = False
+        self.start_when_located = False
         self.bot_timer = None
         self._closing = False
 
@@ -280,6 +286,9 @@ class Application(Gtk.Application):
         self._ensure_map_loaded()
         self._ensure_monster_names()
         self._ensure_spawns_loaded()
+        # Skill.dat decodes 1.2 MB of nibble-coded text (~1.5 s). Do it off
+        # the main loop so the window and the packet drain stay responsive.
+        self._ensure_spells_loaded()
         GLib.timeout_add(250, self._layout_tick)
         GLib.timeout_add(2000, self._auto_map_tick)
 
@@ -524,7 +533,7 @@ class Application(Gtk.Application):
         # Skill 0 is the normal/basic attack (`u_s 0 3 <monster>`); the server
         # reports 866/868 in `su`. 866 is not a castable `u_s` skill.
         self.skill_entry.set_text("0")
-        self.skill_entry.set_tooltip_text("skill vnum sent to the server")
+        self.skill_entry.set_tooltip_text("skill vnum; mapped to the u_s skill slot when known (0 = basic attack)")
         self.attack_range = Gtk.SpinButton.new_with_range(1, 40, 1)
         self.attack_range.set_value(10)
         self.attack_cooldown = Gtk.SpinButton.new_with_range(1, 30, 1)
@@ -618,14 +627,27 @@ class Application(Gtk.Application):
             orientation=Gtk.Orientation.VERTICAL, spacing=6
         )
         spell_box.append(self.spell_rules_box)
-        add_spell = Gtk.Button(label="Add spell rule")
-        add_spell.connect("clicked", lambda *_: self._add_spell_rule())
-        spell_box.append(add_spell)
+        spell_buttons = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6
+        )
+        add_spell = Gtk.Button(label="Add spell…")
+        add_spell.set_tooltip_text("Pick a scanned spell and add a rule")
+        add_spell.connect(
+            "clicked",
+            lambda *_: self._open_spell_picker(self._add_spell_from_info),
+        )
+        add_blank = Gtk.Button(label="Blank rule")
+        add_blank.set_tooltip_text("Add an empty rule and enter a vnum")
+        add_blank.connect("clicked", lambda *_: self._add_spell_rule())
+        spell_buttons.append(add_spell)
+        spell_buttons.append(add_blank)
+        spell_box.append(spell_buttons)
         spell_hint = Gtk.Label(
             label=(
-                "Requires Auto-attack. Rules are checked in order; the first "
-                "matching rule wins. No match falls back to Skill in Combat. "
-                "HP/MP are your current percentages."
+                "Requires Auto-attack. Rules execute top to bottom; each "
+                "fires when its condition is true and its cooldown is over. "
+                "Use Always for a rotation. No match falls back to Skill in "
+                "Combat."
             )
         )
         spell_hint.set_xalign(0)
@@ -760,6 +782,27 @@ class Application(Gtk.Application):
             self._refresh_target_list()
             self._update_target_info()
 
+    def _ensure_spells_loaded(self) -> None:
+        if self.spells_loaded or self.spells_loading:
+            return
+        self.spells_loading = True
+
+        def work() -> None:
+            spells = load_spells()
+            GLib.idle_add(self._finish_spells_load, spells)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _finish_spells_load(
+        self, spells: dict[int, SpellInfo]
+    ) -> bool:
+        self.spells = spells
+        self.spells_loaded = True
+        self.spells_loading = False
+        for info in self.spell_rows:
+            self._update_spell_desc(info)
+        return False
+
     def _ensure_spawns_loaded(self) -> None:
         """Backfill entity → vnum/name from the DLL's session log.
 
@@ -771,6 +814,7 @@ class Application(Gtk.Application):
             return
         self.spawns_loaded = True
         self.log_vnums, self.log_names = load_spawns(self.log_file)
+        self.log_skill_list = load_skill_list(self.log_file)
 
     # -- target filter --------------------------------------------------
 
@@ -922,8 +966,24 @@ class Application(Gtk.Application):
 
     def _spell_desc_text(self, spell: int) -> str:
         if spell <= 0:
-            return "basic attack"
-        return self.spell_descriptions.get(spell, "unknown spell")
+            return "basic attack (skill 0)"
+        info = self.spells.get(spell)
+        if info is None:
+            return "unknown spell (not in Skill.dat)"
+        parts = [info.name]
+        slot = self._skill_slot(spell)
+        if slot is not None:
+            parts.append(f"slot {slot}")
+        elif self._known_skills():
+            parts.append("NOT LEARNED")
+        if info.mp_cost:
+            parts.append(f"{info.mp_cost} MP")
+        if info.cooldown:
+            parts.append(f"{info.cooldown:g}s CD")
+        parts.append(info.target_mode)
+        if info.range:
+            parts.append(f"range {info.range}")
+        return " · ".join(parts)
 
     def _update_spell_desc(self, info: dict) -> None:
         text = info["spell"].get_text().strip()
@@ -937,6 +997,192 @@ class Application(Gtk.Application):
         info["desc"].set_text(description)
         info["desc"].set_tooltip_text(description)
 
+    def _renumber_spell_rules(self) -> None:
+        for index, info in enumerate(self.spell_rows, 1):
+            info["order"].set_text(f"{index}.")
+
+    @staticmethod
+    def _prefers_self_target(spell: SpellInfo) -> bool:
+        if spell.target_mode in ("self", "ally"):
+            return True
+        name = spell.name.lower()
+        return any(
+            word in name
+            for word in (
+                "healing", "cure", "shield", "blessing", "song",
+                "totem", "recovery", "restore",
+            )
+        )
+
+    def _set_rule_spell(self, rule_info: dict, spell: SpellInfo) -> None:
+        rule_info["spell"].set_text(str(spell.vnum))
+        rule_info["target"].set_selected(
+            1 if self._prefers_self_target(spell) else 0
+        )
+        if spell.cooldown > rule_info["cooldown"].get_value():
+            rule_info["cooldown"].set_value(min(300.0, spell.cooldown))
+        self._update_spell_desc(rule_info)
+
+    def _add_spell_from_info(self, spell: SpellInfo) -> None:
+        target = "self" if self._prefers_self_target(spell) else "monster"
+        self._add_spell_rule(
+            SpellRule(
+                enabled=True,
+                spell=spell.vnum,
+                subject="always",
+                comparator="below",
+                threshold=50,
+                cooldown=max(1.0, spell.cooldown),
+                target=target,
+            )
+        )
+
+    def _open_spell_picker(self, on_pick) -> None:
+        """Modal searchable list over the scanned Skill.dat catalog."""
+        if self.window is None:
+            return
+        self._ensure_spells_loaded()
+        window = Gtk.Window(title="Choose spell")
+        window.set_transient_for(self.window)
+        window.set_modal(True)
+        window.set_default_size(640, 620)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_top(8)
+        box.set_margin_bottom(8)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+
+        search = Gtk.SearchEntry()
+        search.set_placeholder_text("Search spell name or vnum")
+        box.append(search)
+
+        listbox = Gtk.ListBox()
+        listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        listbox.set_activate_on_single_click(True)
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_child(listbox)
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_vexpand(True)
+        box.append(scroller)
+
+        info = Gtk.Label(
+            label=(
+                "Scanned from NSgtdData.NOS / Skill.dat. "
+                "Active spells only."
+            )
+        )
+        info.set_xalign(0)
+        info.set_wrap(True)
+        info.add_css_class("dim-label")
+        box.append(info)
+        window.set_child(box)
+
+        def refresh() -> None:
+            while (child := listbox.get_first_child()) is not None:
+                listbox.remove(child)
+            if not self.spells_loaded:
+                label = Gtk.Label(label="Loading spell catalog…")
+                label.add_css_class("dim-label")
+                label.set_xalign(0)
+                row = Gtk.ListBoxRow()
+                row.set_child(label)
+                row.set_selectable(False)
+                row.set_activatable(False)
+                listbox.append(row)
+                info.set_text("Decoding NSgtdData.NOS / Skill.dat…")
+                return
+            query = search.get_text().strip().lower()
+            known = self._known_skills()
+            if known:
+                spells = [
+                    self.spells[vnum]
+                    for vnum in known
+                    if vnum in self.spells and self.spells[vnum].active
+                ]
+            else:
+                spells = [
+                    spell
+                    for spell in self.spells.values()
+                    if spell.active
+                ]
+            spells = [
+                spell
+                for spell in spells
+                if spell.name
+                and spell.name.lower() not in ("notuse", "monster skill")
+                and not spell.name.lower().startswith("notuse")
+            ]
+            if query:
+                spells = [
+                    spell
+                    for spell in spells
+                    if query in spell.name.lower()
+                    or str(spell.vnum) == query
+                    or query in str(spell.vnum)
+                ]
+            if not known:
+                spells.sort(
+                    key=lambda spell: (
+                        0 if str(spell.vnum) == query else 1,
+                        spell.name.lower(),
+                        spell.vnum,
+                    )
+                )
+            for spell in spells[:120]:
+                slot = self._skill_slot(spell.vnum)
+                slot_text = f"slot {slot}" if slot is not None else "not learned"
+                label = Gtk.Label(
+                    label=(
+                        f"{spell.name}   (vnum {spell.vnum}, {slot_text})   · "
+                        f"{spell.mp_cost} MP · {spell.target_mode} · "
+                        f"{spell.cooldown:g}s CD"
+                    )
+                )
+                label.set_xalign(0)
+                label.set_ellipsize(Pango.EllipsizeMode.END)
+                row = Gtk.ListBoxRow()
+                row.set_child(label)
+                row.set_tooltip_text(
+                    f"spell {spell.vnum} · range {spell.range} · "
+                    f"cast {spell.cast_time:g}s"
+                )
+                row.connect(
+                    "activated",
+                    lambda _row, chosen=spell: (
+                        on_pick(chosen),
+                        window.close(),
+                    ),
+                )
+                listbox.append(row)
+            if not spells:
+                label = Gtk.Label(label="no matching spell")
+                label.add_css_class("dim-label")
+                label.set_xalign(0)
+                row = Gtk.ListBoxRow()
+                row.set_child(label)
+                row.set_selectable(False)
+                row.set_activatable(False)
+                listbox.append(row)
+            info.set_text(
+                f"{len(spells)} spell(s) matched · "
+                f"{len(known) if known else len(self.spells)} "
+                f"{'learned' if known else 'scanned'}"
+            )
+
+        search.connect("search-changed", lambda *_: refresh())
+        refresh()
+
+        def wait_loaded() -> bool:
+            if not self.spells_loaded:
+                return True
+            refresh()
+            return False
+
+        GLib.timeout_add(250, wait_loaded)
+        window.present()
+        search.grab_focus()
+
     def _add_spell_rule(self, rule: SpellRule | None = None) -> None:
         if self.spell_rules_box is None:
             return
@@ -946,6 +1192,9 @@ class Application(Gtk.Application):
         container.set_margin_bottom(4)
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        order = Gtk.Label(label="1.")
+        order.set_width_chars(2)
+        order.set_tooltip_text("execution order (top to bottom)")
         enabled = Gtk.CheckButton()
         enabled.set_active(rule.enabled)
         enabled.set_tooltip_text("enable this rule")
@@ -953,11 +1202,15 @@ class Application(Gtk.Application):
         spell.set_width_chars(5)
         spell.set_max_width_chars(6)
         spell.set_text(str(rule.spell))
-        spell.set_tooltip_text("spell vnum")
+        spell.set_tooltip_text(
+            "spell vnum from Skill.dat; the picker maps it to the u_s slot"
+        )
+        pick = Gtk.Button(label="…")
+        pick.set_tooltip_text("Choose a spell from the scanned Skill.dat catalog")
         desc = Gtk.Label()
         desc.set_xalign(0)
         desc.set_hexpand(True)
-        desc.set_max_width_chars(18)
+        desc.set_max_width_chars(38)
         desc.set_ellipsize(Pango.EllipsizeMode.END)
         desc.add_css_class("dim-label")
         up = Gtk.Button(label="↑")
@@ -966,12 +1219,13 @@ class Application(Gtk.Application):
         down.set_tooltip_text("lower priority")
         remove = Gtk.Button(label="×")
         remove.set_tooltip_text("remove rule")
-        for widget in (enabled, spell, desc, up, down, remove):
+        for widget in (order, enabled, spell, pick, up, down, remove):
             header.append(widget)
         container.append(header)
+        container.append(desc)
 
         condition = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        subject = Gtk.DropDown.new_from_strings(["My HP %", "My MP %"])
+        subject = Gtk.DropDown.new_from_strings(["Always", "My HP %", "My MP %"])
         subject_index = (
             SUBJECTS.index(rule.subject) if rule.subject in SUBJECTS else 0
         )
@@ -986,11 +1240,21 @@ class Application(Gtk.Application):
         threshold = Gtk.SpinButton.new_with_range(0, 100, 5)
         threshold.set_value(rule.threshold)
         threshold.set_tooltip_text("percentage threshold")
+        percent_label = Gtk.Label(label="%")
+
+        def sync_condition(*_args) -> None:
+            active = subject.get_selected() != 0  # 0 = Always
+            comparator.set_sensitive(active)
+            threshold.set_sensitive(active)
+            percent_label.set_sensitive(active)
+
+        subject.connect("notify::selected", sync_condition)
         condition.append(subject)
         condition.append(comparator)
         condition.append(threshold)
-        condition.append(Gtk.Label(label="%"))
+        condition.append(percent_label)
         container.append(condition)
+        sync_condition()
 
         timing = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         cooldown = Gtk.SpinButton.new_with_range(0, 300, 1)
@@ -1012,6 +1276,7 @@ class Application(Gtk.Application):
 
         info = {
             "box": container,
+            "order": order,
             "enabled": enabled,
             "spell": spell,
             "desc": desc,
@@ -1025,11 +1290,19 @@ class Application(Gtk.Application):
         self.spell_rules_box.append(container)
 
         spell.connect("changed", lambda *_: self._update_spell_desc(info))
+        spell.connect("changed", lambda *_: self._reset_spell_timers())
         enabled.connect("toggled", lambda *_: self._reset_spell_timers())
         up.connect("clicked", lambda *_: self._move_spell_rule(info, -1))
         down.connect("clicked", lambda *_: self._move_spell_rule(info, 1))
         remove.connect("clicked", lambda *_: self._remove_spell_rule(info))
+        pick.connect(
+            "clicked",
+            lambda *_: self._open_spell_picker(
+                lambda spell_info: self._set_rule_spell(info, spell_info)
+            ),
+        )
         self._update_spell_desc(info)
+        self._renumber_spell_rules()
 
     def _remove_spell_rule(self, info: dict) -> None:
         if info not in self.spell_rows:
@@ -1039,6 +1312,7 @@ class Application(Gtk.Application):
         if parent is not None:
             parent.remove(info["box"])
         self._reset_spell_timers()
+        self._renumber_spell_rules()
 
     def _move_spell_rule(self, info: dict, delta: int) -> None:
         try:
@@ -1059,11 +1333,13 @@ class Application(Gtk.Application):
         )
         self.spell_rules_box.reorder_child_after(info["box"], sibling)
         self._reset_spell_timers()
+        self._renumber_spell_rules()
 
     def _clear_spell_rules(self) -> None:
         for info in list(self.spell_rows):
             self._remove_spell_rule(info)
         self._reset_spell_timers()
+        self._renumber_spell_rules()
 
     def _reset_spell_timers(self) -> None:
         self.spell_last_cast.clear()
@@ -1105,6 +1381,8 @@ class Application(Gtk.Application):
         return rules
 
     def _spell_condition_met(self, rule: SpellRule) -> bool:
+        if rule.subject == "always":
+            return True
         stats = self.engine.world.stats
         if rule.subject == "my_mp":
             if stats.mp_max <= 0:
@@ -1118,20 +1396,82 @@ class Application(Gtk.Application):
             return percent > rule.threshold
         return percent < rule.threshold
 
+    def _known_skills(self) -> list[int]:
+        return self.engine.world.skill_list or self.log_skill_list
+
+    def _skill_slot(self, vnum: int) -> int | None:
+        if vnum <= 0:
+            return None
+        slot = self.engine.world.skill_slot(vnum)
+        if slot is None and self.log_skill_list:
+            try:
+                slot = self.log_skill_list.index(vnum)
+            except ValueError:
+                slot = None
+        return slot
+
+    def _skill_send_id(self, vnum: int) -> int:
+        """Map a Skill.dat vnum to the zero-based `u_s` slot, if known."""
+        if vnum <= 0:
+            return vnum
+        slot = self._skill_slot(vnum)
+        return vnum if slot is None else slot
+
+    def _spell_target(self, rule: SpellRule) -> str:
+        """Resolve the target from Skill.dat, with the rule as fallback.
+
+        Skill.dat target type 1 is self; 2 is an ally/party target, which the
+        bot cannot address yet, so it falls back to self. Type 0 (any/entity)
+        uses the rule's Monster/Self choice.
+        """
+        info = self.spells.get(rule.spell)
+        if info is not None and info.target_mode in ("self", "ally"):
+            return "self"
+        return rule.target
+
+    def _spell_in_range(
+        self, info: SpellInfo | None, monster: Entity | None
+    ) -> bool:
+        if info is not None and info.target_mode in ("self", "ally"):
+            return True
+        if info is None or info.range <= 0 or monster is None:
+            return True
+        position = self._player_cell()
+        if position is None:
+            return True
+        distance = max(
+            abs(monster.x - position[0]), abs(monster.y - position[1])
+        )
+        return distance <= info.range
+
     def _select_spell_rule(
         self,
         now: float,
         monster: Entity | None,
         char_id: int | None,
     ) -> tuple[int, SpellRule] | None:
+        stats = self.engine.world.stats
+        known = self._known_skills()
         for index, rule in enumerate(self._collect_spell_rules()):
             if not rule.enabled or rule.spell <= 0:
                 continue
-            if now < self.spell_last_cast.get(index, 0.0) + rule.cooldown:
+            if known and rule.spell not in known:
                 continue
-            if rule.target == "self" and char_id is None:
+            info = self.spells.get(rule.spell)
+            cooldown = max(
+                rule.cooldown, info.cooldown if info is not None else 0.0
+            )
+            if now < self.spell_last_cast.get(index, 0.0) + cooldown:
                 continue
-            if rule.target == "monster" and monster is None:
+            target = self._spell_target(rule)
+            if target == "self" and char_id is None:
+                continue
+            if target == "monster":
+                if monster is None:
+                    continue
+                if not self._spell_in_range(info, monster):
+                    continue
+            if info is not None and info.mp_cost > 0 and stats.mp < info.mp_cost:
                 continue
             if self._spell_condition_met(rule):
                 return index, rule
@@ -1145,7 +1485,16 @@ class Application(Gtk.Application):
         char_id: int | None,
         now: float,
     ) -> bool:
-        if rule.target == "self":
+        info = self.spells.get(rule.spell)
+        if info is not None and info.mp_cost > 0:
+            stats = self.engine.world.stats
+            if stats.mp < info.mp_cost:
+                self._set_status(
+                    f"spell {rule.spell}: not enough MP "
+                    f"({stats.mp}/{info.mp_cost})"
+                )
+                return False
+        if self._spell_target(rule) == "self":
             if char_id is None:
                 return False
             target_type, target_id = 1, char_id
@@ -1154,15 +1503,27 @@ class Application(Gtk.Application):
                 return False
             target_type, target_id = 3, monster.entity_id
             self._send(f"ncif 3 {monster.entity_id}")
+        send_skill = self._skill_send_id(rule.spell)
         packet = self._skill_packet(
-            target_id, skill=rule.spell, target_type=target_type
+            target_id, skill=send_skill, target_type=target_type
         )
         self._send(packet)
+        # The global cooldown paces all actions; the spell's own cooldown is
+        # applied per rule in _select_spell_rule so a long spell does not
+        # block basic attacks or the next rule.
         cooldown = float(self.attack_cooldown.get_value())
         self.attack_cooldown_until = now + cooldown
-        self.walk_not_before = now + self.attack_walk_delay
+        cast_pause = info.cast_time if info is not None else 0.0
+        self.walk_not_before = now + max(
+            self.attack_walk_delay, cast_pause
+        )
         self.spell_last_cast[index] = now
-        self._set_status(f"spell {rule.spell}: {packet}")
+        name = info.name if info is not None else str(rule.spell)
+        slot = self._skill_slot(rule.spell)
+        slot_text = f" slot {slot}" if slot is not None else ""
+        self._set_status(
+            f"spell {name} (vnum {rule.spell}{slot_text}): {packet}"
+        )
         return True
 
     # -- configuration --------------------------------------------------
@@ -1253,6 +1614,7 @@ class Application(Gtk.Application):
         self._clear_spell_rules()
         for rule in config.spell_rules:
             self._add_spell_rule(rule)
+        self._renumber_spell_rules()
         self._reset_spell_timers()
         self.attack_cooldown_until = 0.0
         self.walk_not_before = 0.0
@@ -2076,6 +2438,9 @@ class Application(Gtk.Application):
                 self._learn_char_id(self.engine.world.self_id)
                 # Switch the map as soon as the server announces it instead of
                 # waiting for the next 2 s auto-map tick.
+                if packet.opcode == "ski":
+                    for info in self.spell_rows:
+                        self._update_spell_desc(info)
                 if packet.opcode in ("c_map", "mapout", "at"):
                     map_id = self.engine.world.map_id
                     if (
@@ -2086,6 +2451,14 @@ class Application(Gtk.Application):
                         self._auto_map_tick()
                 self._append(packet)
                 dirty = True
+
+        if (
+            self.start_when_located
+            and not self.bot_running
+            and self._player_cell() is not None
+        ):
+            self.start_when_located = False
+            self._start_bot()
 
         if dirty:
             # The game can send hundreds of packets per tick. Coalesce the
@@ -2238,8 +2611,11 @@ class Application(Gtk.Application):
                 self._set_status("add waypoints or enable combat/pickup")
                 return
         if self._player_cell() is None:
+            self.start_when_located = True
             self._request_position()
-            self._set_status("locating character; press Start again")
+            self._set_status(
+                "locating character; starting when the position arrives"
+            )
             return
         # The client's MoveTo already does the pathfinding and animation. Give
         # it a multi-cell leg per call instead of one cell: a per-cell MOVE
@@ -2282,6 +2658,7 @@ class Application(Gtk.Application):
 
     def _stop_bot(self) -> None:
         self.bot_running = False
+        self.start_when_located = False
         self.pending_target = None
         if self.bot_timer is not None:
             GLib.source_remove(self.bot_timer)
@@ -2522,7 +2899,11 @@ class Application(Gtk.Application):
                 and now >= self.attack_cooldown_until
             ):
                 self._send(f"ncif 3 {monster.entity_id}")
-                packet = self._skill_packet(monster.entity_id)
+                basic = self._entry_int(self.skill_entry, 0)
+                packet = self._skill_packet(
+                    monster.entity_id,
+                    skill=self._skill_send_id(basic) if basic > 0 else 0,
+                )
                 self._send(packet)
                 cooldown = float(self.attack_cooldown.get_value())
                 self.attack_cooldown_until = now + cooldown

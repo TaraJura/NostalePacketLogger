@@ -118,6 +118,22 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(entity.name, "Guder")
         self.assertEqual((entity.kind, entity.x, entity.y), (1, 105, 23))
 
+    def test_skill_list_maps_u_s_slots(self):
+        # Live: ski 0 866 866 866 867 ... 876; u_s 10 -> server su 876,
+        # u_s 7 -> 873, u_s 2 -> 868. The slot is the index into the
+        # deduplicated list.
+        world = self.engine.feed(
+            packet(
+                Kind.RECV,
+                "ski 0 866 866 866 867 868 869 870 871 872 873 874 "
+                "875 876 30 37 42",
+            )
+        )
+        self.assertEqual(world.skill_list[:11], list(range(866, 877)))
+        self.assertEqual(world.skill_slot(876), 10)
+        self.assertEqual(world.skill_vnum(7), 873)
+        self.assertEqual(world.skill_slot(999), None)
+
     def test_monster_spawn_records_template_vnum(self):
         # Live: in 3 206 5122 132 182 ...
         world = self.engine.feed(

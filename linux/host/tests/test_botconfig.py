@@ -68,7 +68,7 @@ class BotConfigTests(unittest.TestCase):
         rule = config.spell_rules[0]
         self.assertEqual(
             (rule.spell, rule.subject, rule.comparator),
-            (7, "my_hp", "below"),
+            (7, "always", "below"),
         )
         self.assertEqual(rule.threshold, 100.0)
         self.assertEqual(rule.cooldown, 0.0)

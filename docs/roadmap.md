@@ -63,8 +63,10 @@ of the observed `mv` positions are on walkable cells.
   own MoveTo and waits for the client `walk`/`world.position` before the next.
 - Recovery sits below a configurable HP %, waits for full and resumes.
 - Targets can be filtered by monster vnum (all/only/except, plus unknown-vnum
-  handling); ordered spell rules cast by my HP/MP thresholds; the whole bot
-  configuration is JSON save/load.
+  handling). Spells come from the client's `NSgtdData.NOS` → `Skill.dat`
+  catalog (name, MP, range, cast time, cooldown, target); ordered rules use
+  Always/my HP/my MP and a rotation, with MP/range/cooldown enforcement. The
+  whole bot configuration is JSON save/load.
 - Monster names come from the client's `NSlangData_UK.NOS`; the spawn log
   backfills vnums for entities that predate the host connection.
 
@@ -79,7 +81,7 @@ client's own MoveTo, so the character pathfinds and animates normally; `POS`
 reads its local position; `rest` controls sit/stand; the Map/Bot tab runs a
 confirmed path loop with auto-attack, recovery, target filters and conditional
 spell rules. It is not autonomous yet: some tiles are rejected and the
-self-target spell shape still needs one benign live cast.
+self-target spell shape is live-captured (`u_s 7 1 <charId>` → `su 873`).
 
 When it starts:
 
@@ -100,8 +102,8 @@ When it starts:
    over walkable map cells, path loop, auto-attack. Still to do: a
    rejected-tile cache from live attempts and a rate limit.
 4. ~~Run the loop live~~ — movement, auto-attack and pickup passed on
-   2026-11-06; `u_s 0 3 <id>` is the verified normal attack. A self-target
-   spell (`u_s <spell> 1 <charId>`) still needs one live confirmation.
+   2026-11-06; `u_s 0 3 <id>` is the verified normal attack and
+   `u_s 7 1 <charId>` → `su 873` verifies the self-target shape.
 5. ~~Capture the client's own `walk`/`u_s` SEND packets~~ — done; the send hook
    sees `walk` and the skill hook captures `u_s` (checksum `1 if (x+y)%3 == 1`).
 6. **Reconcile the protocol wiki** with the live session (`rest`, `tp`, `cond`,

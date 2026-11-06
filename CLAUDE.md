@@ -30,10 +30,11 @@ build); the fixed build is in the repo, and the client must be restarted.
 |---|---|
 | `windows/` | Original MSVC/C# implementation, moved unchanged. Builds with Visual Studio; not exercised on this machine. |
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
-| Linux host tests | 78/78 pass (`make -C linux host-test`). |
+| Linux host tests | 83/83 pass (`make -C linux host-test`). |
 | Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live map is **20** (230x260); 100 % of 173,503 `mv` samples land on walkable `0x00` cells. `astar()` is 8-direction with sqrt(2) diagonals and no corner cutting; the path is drawn as a continuous polyline. |
 | Monster names | `NSlangData_UK.NOS` / `_code_uk_monster.txt` parsed by `monsternames.py` (nibble codec + archive reader): 2,795 `vnum → name` entries. The live `in 3 206 5122 ...` spawn is entity 5122, Angry Queen Bee (vnum 206); map tooltips use the name. `spawnlog.py` backfills entities that spawned before the host attached from the DLL's `C:\NosTalePacketLog.txt` (`[RECV] in ...` lines). |
-| Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), automatic whole-map (contain-fit) view with no manual map/scale/center controls, **immediate map switch** from `c_map`/`at` (the map id is the second `c_map` field), structured sidebar (Character HP/MP bars + recovery banner, Path, Combat with green/red toggles, Targets with an unknown-vnum option, Spells, Loot, Recovery, Configuration), drops + 8-direction A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover + **Move first** (attack while progressing; off = clear the area), monster target filters (all/only/except by vnum), ordered conditional spell rules (my HP/MP below/above %, cooldown, monster/self), JSON save/load of the whole bot config, bigger own dot + facing arrow, and hover tooltips for players/monsters/NPCs/drops. `make gui-test` and `make bot-test` (4 smokes) pass. |
+| Spell catalog | `NSgtdData.NOS` → `Skill.dat` parsed by `spells.py`: 1,964 records, 791 active (`TYPE[0]==1`), with name from the `NAME` zts key, MP cost, range, cast time, cooldown and target type. Live examples: 866 Holy Attack (0 MP/0.9 s), 869 Mana Shield (self, 300 MP/60 s), 876 Holy Hammer (145 MP/90 s). The GUI **Add spell…** picker uses it; the bot enforces MP/range/cooldown/cast time. |
+| Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), automatic whole-map (contain-fit) view with no manual map/scale/center controls, **immediate map switch** from `c_map`/`at` (the map id is the second `c_map` field), structured sidebar (Character HP/MP bars + recovery banner, Path, Combat with green/red toggles, Targets with an unknown-vnum option, Spells, Loot, Recovery, Configuration), drops + 8-direction A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover + **Move first** (attack while progressing; off = clear the area), monster target filters (all/only/except by vnum), ordered spell rules from the scanned Skill.dat catalog (Always/my HP/my MP, cooldown, MP/range/cast-time checks, monster/self), JSON save/load of the whole bot config, bigger own dot + facing arrow, and hover tooltips for players/monsters/NPCs/drops. `make gui-test` and `make bot-test` (5 smokes) pass. |
 | x86 hook stubs | `HookStubTest.exe` (Wine) calls the real `hooks.S` detours and verifies the EDX packet pointer at `20(%ebp)`, the original-call replay and the send trampoline. Passes. |
 | GUI | Headless GTK4 smoke test passes (`make -C linux gui-test`, Xvfb): fake stream → 2 rows + STATUS in the status bar. |
 | Injector | Verified under Wine end-to-end against both the fake target and the live client (PID 1216): remote `LoadLibraryA` succeeds and the DLL starts. |
@@ -53,9 +54,9 @@ cd ~/games/gameforge/NostalePacketLogger
 # Linux build (MinGW-w64 i686; installed via apt)
 make -C linux all test-host
 make -C linux check                 # file(1) on the three PE32 outputs
-make -C linux host-test             # 78 stdlib unittest cases
+make -C linux host-test             # 83 stdlib unittest cases
 make -C linux gui-test              # headless GTK4 + map surface smoke
-make -C linux bot-test              # 4 smokes: combat, rules/config, rejection, recovery
+make -C linux bot-test              # 5 smokes: combat, rules/config, spell order, rejection, recovery
 make -C linux clean
 
 # End-to-end without the game (temporary Wine prefix, deletes itself)
@@ -107,8 +108,10 @@ PYTHONPATH=linux/host python3 -m ntpl status
   `rest`, `cond`, `ncif`, `su`, `stat`, spawns), `mapdata.py`
   (`NStcData.NOS` grids, A*, map ranking), `monsternames.py`
   (`NSlangData_*.NOS` language archive, nibble text codec, `vnum → monster
-  name`), `spawnlog.py` (entity id → vnum/player name from the DLL session
-  log, for spawns that happened before the host connected), `botconfig.py`
+  name`), `spells.py` (`NSgtdData.NOS` → `Skill.dat` catalog: MP, range, cast
+  time, cooldown, target), `spawnlog.py` (entity id → vnum/player name from
+  the DLL session log, for spawns that happened before the host connected),
+  `botconfig.py`
   (JSON bot configuration: target filters, spell rules, validation and atomic
   save/load), `cli.py` (`walk` waits for the server's `tp`/`mv`; `cast` waits
   for `su`), `gui.py` (packet table + Map/Bot tab). Standard library only
@@ -119,10 +122,11 @@ PYTHONPATH=linux/host python3 -m ntpl status
   does not echo its own `mv`; wait for the server's `tp` after a walk.
 - **Combat:** the server sends `su <attackerType> <attackerId> <targetType>
   <targetId> <skillVnum> ...` for every hit; the engine records the first five
-  fields. `ntpl cast <skill> --target-id <id>` sends `ncif` then a default
-  `u_s <skill> <targetType> <targetId>` and waits for `su`. The prefix is
-  live-verified (`u_s 0 3 <id>` is the normal attack; skill 10 cast produced
-  `su ... 876`); later fields are unknown. Use `--packet` for a literal
+  fields. `ntpl cast <slot> --target-id <id>` sends `ncif` then a default
+  `u_s <skillSlot> <targetType> <targetId>` and waits for `su`. The first
+  field is a zero-based **skill slot** from `ski`, not the Skill.dat vnum
+  (`u_s 0` = normal attack, `u_s 10` → `su ... 876`); later fields are
+  unknown. Use `--packet` for a literal
   captured packet when experimenting.
 - **Map/bot:** `mapdata.py` reads `NostaleData/NStcData.NOS` (16-byte header,
   count, id/offset index, zlib blocks; `width:int16`, `height:int16`,
@@ -136,9 +140,10 @@ PYTHONPATH=linux/host python3 -m ntpl status
   **Move first** (default on) attacks while a path is active and walks on
   between attacks; with it off the bot clears nearby monsters before moving.
   **Targets** filters by monster template vnum (all / only selected / all
-  except selected); **Spells** evaluates ordered rules by my HP% or MP%
-  (below/above threshold, per-rule cooldown, monster or self target) before
-  falling back to the Skill field. The whole configuration is JSON
+  except selected); **Spells** uses the scanned Skill.dat catalog and ordered
+  rules (Always / my HP% / MP%; per-rule cooldown; monster or self target;
+  MP/range/cast-time checks) before falling back to the Skill field. Always +
+  cooldowns is a rotation; rule order is explicit (1., 2., up/down). The whole configuration is JSON
   save/load (see [docs/bot-config.md](docs/bot-config.md)).
   With no path the bot runs stationary combat/pickup/recovery. Map changes come from
   `c_map <type> <mapId> <state>` (`mapId` is the **second** int) plus `at`;
@@ -204,7 +209,8 @@ Next:
    hook sees `walk`, and the skill hook captures `u_s` at `0x72D5B2`.
 3. Map switching is live-verified for the `c_map` 20↔85 portal capture; more
    maps will confirm the parser and 8-direction A* on other grids.
-4. Verify one benign self-target spell shape (`u_s <spell> 1 <charId>`) live.
+4. Self-target shape (`u_s <slot> 1 <charId>`) is live-captured
+   (`u_s 7 1 14881134` → `su ... 873`); no remaining protocol guess.
 5. Unknown-vnum monsters that existed before DLL injection remain the main
    target-filter gap; the UI has an explicit option and docs describe relog.
 4. Reconcile `docs/protocol/` with more live captures, then extend the loop

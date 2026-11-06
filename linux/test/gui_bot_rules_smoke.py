@@ -59,6 +59,8 @@ class FakeServer:
             b"RECV|at 14881134 20 25 117 0 0 0 0 0 0 0\n"
             b"RECV|stat 40 100 100 100 0 0\n"
             b"RECV|rest 1 14881134 0\n"
+            b"RECV|ski 0 866 866 866 867 868 869 870 871 872 873 "
+            b"874 875 876\n"
             b"RECV|in 3 201 501 25 118 2 100 100 0\n"
             b"RECV|in 3 200 500 26 119 2 100 100 0\n"
         )
@@ -122,7 +124,7 @@ def main() -> int:
             app._add_spell_rule(
                 SpellRule(
                     enabled=True,
-                    spell=7,
+                    spell=867,
                     subject="my_hp",
                     comparator="below",
                     threshold=50,
@@ -141,7 +143,7 @@ def main() -> int:
         try:
             lines = list(server.received)
             has_target = any(line == "SEND|ncif 3 500" for line in lines)
-            has_spell = any(line == "SEND|u_s 7 3 500" for line in lines)
+            has_spell = any(line == "SEND|u_s 1 3 500" for line in lines)
             ignored_other = not any("501" in line for line in lines)
             no_basic = not any(line.startswith("SEND|u_s 0 ") for line in lines)
 
@@ -166,6 +168,37 @@ def main() -> int:
                 app._skill_packet(14881134, skill=20, target_type=1)
                 == "u_s 20 1 14881134"
             )
+            always_ok = app._spell_condition_met(
+                SpellRule(subject="always")
+            )
+            slot_ok = (
+                app._skill_send_id(867) == 1
+                and app._skill_send_id(876) == 10
+            )
+            catalog_ok = (
+                app.spells.get(866) is not None
+                and app.spells[866].name == "Holy Attack"
+                and app.spells.get(876) is not None
+                and app.spells[876].mp_cost == 145
+            )
+            self_spell_ok = (
+                app._spell_target(
+                    SpellRule(spell=869, target="monster")
+                )
+                == "self"
+            )
+            app._add_spell_from_info(app.spells[876])
+            added = app.spell_rows[-1]
+            picker_ok = (
+                added["spell"].get_text() == "876"
+                and added["cooldown"].get_value() >= 90
+                and added["subject"].get_selected() == 0  # Always
+                and app._spell_target(
+                    SpellRule(spell=876, target="monster")
+                )
+                == "monster"
+            )
+            app._remove_spell_rule(added)
 
             unknown = Entity(9999, 3)  # vnum 0: spawned before injection
             app.target_mode.set_selected(1)  # only selected
@@ -188,7 +221,31 @@ def main() -> int:
                 and app.target_mode.get_selected() == 1
                 and app.target_vnums == {200}
                 and len(app.spell_rows) == 1
-                and app.spell_rows[0]["spell"].get_text() == "7"
+                and app.spell_rows[0]["spell"].get_text() == "867"
+            )
+
+            # Scanned spell metadata is enforced during selection.
+            app._clear_spell_rules()
+            app._add_spell_from_info(app.spells[876])
+            stats = app.engine.world.stats
+            stats.mp, stats.mp_max = 100, 1000
+            app.spell_last_cast.clear()
+            now = time.monotonic()
+            mp_blocked = app._select_spell_rule(
+                now, Entity(500, 3, x=26, y=119), 14881134
+            ) is None
+            stats.mp = 1000
+            near = app._select_spell_rule(
+                now, Entity(500, 3, x=26, y=119), 14881134
+            )
+            far = app._select_spell_rule(
+                now, Entity(500, 3, x=45, y=119), 14881134
+            )
+            spell_rules_ok = (
+                mp_blocked
+                and near is not None
+                and near[1].spell == 876
+                and far is None
             )
 
             result["ok"] = (
@@ -198,22 +255,36 @@ def main() -> int:
                 and no_basic
                 and condition_ok
                 and self_target_ok
+                and always_ok
+                and slot_ok
+                and catalog_ok
+                and self_spell_ok
+                and picker_ok
                 and unknown_ok
                 and config_ok
+                and spell_rules_ok
             )
             result["detail"] = (
                 f"target={has_target} spell={has_spell} "
                 f"ignored_other={ignored_other} no_basic={no_basic} "
                 f"conditions={condition_ok} self={self_target_ok} "
+                f"always={always_ok} slots={slot_ok} "
+                f"catalog={catalog_ok} "
+                f"self_spell={self_spell_ok} picker={picker_ok} "
                 f"unknown={unknown_ok} config={config_ok} "
-                f"lines={lines[-10:]}"
+                f"spell_rules={spell_rules_ok} lines={lines[-10:]}"
             )
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"check exception: {exc!r}"
         app.quit()
         return False
 
-    GLib.timeout_add(1500, start_bot)
+    def start_when_ready() -> bool:
+        if not app.spells_loaded:
+            return True
+        return start_bot()
+
+    GLib.timeout_add(1500, start_when_ready)
     app.run([])
     server.close()
     try:
