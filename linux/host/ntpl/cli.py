@@ -664,7 +664,7 @@ def cmd_gui(args: argparse.Namespace) -> int:
         )
         return 2
 
-    return run_gui(args.host, args.port, args.map_data)
+    return run_gui(args.host, args.port, args.map_data, args.log)
 
 
 # --------------------------------------------------------------------- main
@@ -781,6 +781,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--map-data",
         default=None,
         help="NStcData.NOS path for the Map tab (default: NTPL_NSTC or the local install)",
+    )
+    gui.add_argument(
+        "--log",
+        default=None,
+        help="DLL packet log for backfilling entity vnums/names "
+        "(default: NTPL_LOG or the Wine prefix's C:\\NosTalePacketLog.txt)",
     )
     gui.set_defaults(handler=cmd_gui)
 

@@ -9,7 +9,9 @@ Run through scripts/dev-test-gui.sh (which supplies Xvfb), not directly.
 
 from __future__ import annotations
 
+import os
 import socket
+import tempfile
 import threading
 import time
 
@@ -50,6 +52,10 @@ def start_fake_server() -> int:
             b"RECV|in 1 Tester - 123 7 8 2 0 0 0\n"
             b"RECV|in 3 206 500 8 9 2 100 100 0 0 0 -1 0 0 -1 - 0 -1 "
             b"0 0 0 0 0 0 0 0 0 0 0 1 0\n"
+            # These two were "already spawned" when the host attached: only
+            # mv is sent. Their vnum/name must come from the DLL log.
+            b"RECV|mv 3 777 9 10 4\n"
+            b"RECV|mv 1 888 5 9 4\n"
         )
         time.sleep(15)
         connection.close()
@@ -60,8 +66,21 @@ def start_fake_server() -> int:
 
 
 def main() -> int:
+    # The DLL log covers the session before the GUI attached. It tells the
+    # host that entity 777 is monster vnum 200 and entity 888 is player
+    # "Logged", even though only `mv` packets arrive for them.
+    log = tempfile.NamedTemporaryFile(
+        "w", suffix=".txt", delete=False, encoding="latin1"
+    )
+    with log:
+        log.write(
+            "17:00:00.000 [RECV] in 3 200 777 9 10 2 100 100 0\r\n"
+            "17:00:00.000 [RECV] in 1 Logged - 888 5 9 2 0 0 0\r\n"
+        )
+    log_path = log.name
+
     port = start_fake_server()
-    app = Application("127.0.0.1", port, unique=False)
+    app = Application("127.0.0.1", port, unique=False, log_file=log_path)
     result = {"ok": False, "detail": "no check ran"}
 
     def check() -> bool:
@@ -88,6 +107,8 @@ def main() -> int:
             own_tip = tip((6, 8))
             player_tip = tip((7, 8))
             monster_tip = tip((8, 9))
+            logged_monster_tip = tip((9, 10))
+            logged_player_tip = tip((5, 9))
             tooltips_ok = (
                 own_tip is not None
                 and own_tip.startswith("You")
@@ -98,6 +119,11 @@ def main() -> int:
                 and "Monster Angry Queen Bee" in monster_tip
                 and "entity id 500" in monster_tip
                 and "vnum 206" in monster_tip
+                and logged_monster_tip is not None
+                and "Monster Mountain Turtle" in logged_monster_tip
+                and "vnum 200" in logged_monster_tip
+                and logged_player_tip is not None
+                and "Player Logged" in logged_player_tip
             )
 
             # Without a known own position, rebuilding a path must not pretend
@@ -129,7 +155,8 @@ def main() -> int:
                 f"switched={switched} tooltips={tooltips_ok} "
                 f"size={app.map_area.get_width()}x{app.map_area.get_height()} "
                 f"entities={len(app.engine.world.entities)} "
-                f"tips={own_tip!r}/{player_tip!r}/{monster_tip!r}"
+                f"tips={own_tip!r}/{player_tip!r}/{monster_tip!r}/"
+                f"{logged_monster_tip!r}/{logged_player_tip!r}"
             )
             result["ok"] = (
                 rows >= 2
@@ -154,6 +181,10 @@ def main() -> int:
 
     GLib.timeout_add(1000, show_map)
     app.run([])
+    try:
+        os.unlink(log_path)
+    except OSError:
+        pass
 
     print("GUI SMOKE:", "PASS" if result["ok"] else "FAIL", result["detail"])
     return 0 if result["ok"] else 1

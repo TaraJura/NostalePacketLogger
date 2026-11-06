@@ -34,6 +34,7 @@ from .mapdata import (
     terrain_rgb,
 )
 from .monsternames import load_monster_names
+from .spawnlog import load_spawns
 from .protocol import Kind, Packet, ProtocolError
 
 MAX_ROWS = 20000
@@ -109,6 +110,7 @@ class Application(Gtk.Application):
         port: int | None,
         map_data: str | None = None,
         unique: bool = True,
+        log_file: str | None = None,
     ) -> None:
         super().__init__(
             application_id="cz.tarajura.ntpl",
@@ -150,6 +152,10 @@ class Application(Gtk.Application):
         self.map_grid: MapGrid | None = None
         self.monster_names: dict[int, str] = {}
         self.monster_names_loaded = False
+        self.log_file = log_file or os.environ.get("NTPL_LOG")
+        self.log_vnums: dict[int, int] = {}
+        self.log_names: dict[int, str] = {}
+        self.spawns_loaded = False
         self.map_surface: cairo.ImageSurface | None = None
         self.map_area = None
         self.map_scrolled = None
@@ -243,6 +249,7 @@ class Application(Gtk.Application):
 
         self._ensure_map_loaded()
         self._ensure_monster_names()
+        self._ensure_spawns_loaded()
         GLib.timeout_add(250, self._layout_tick)
         GLib.timeout_add(2000, self._auto_map_tick)
 
@@ -566,6 +573,18 @@ class Application(Gtk.Application):
             return
         self.monster_names_loaded = True
         self.monster_names = load_monster_names()
+
+    def _ensure_spawns_loaded(self) -> None:
+        """Backfill entity → vnum/name from the DLL's session log.
+
+        The live packet stream starts when the host connects; monsters and
+        players that spawned before that are known only from `mv`/`tp`. Their
+        `in` packets are still in the DLL log, which covers the whole session.
+        """
+        if self.spawns_loaded:
+            return
+        self.spawns_loaded = True
+        self.log_vnums, self.log_names = load_spawns(self.log_file)
 
     def _ensure_map_loaded(self) -> None:
         if self.map_grids:
@@ -1039,9 +1058,12 @@ class Application(Gtk.Application):
     def _entity_tooltip_text(self, entity: Entity) -> str:
         labels = {1: "Player", 2: "NPC/pet", 3: "Monster"}
         label = labels.get(entity.kind, "Entity")
-        name = entity.name
+        # The live `in` packet is authoritative. If the host attached after
+        # this entity spawned, recover the vnum/name from the session log.
+        vnum = entity.vnum or self.log_vnums.get(entity.entity_id, 0)
+        name = entity.name or self.log_names.get(entity.entity_id, "")
         if not name and entity.kind == 3:
-            name = self.monster_names.get(entity.vnum, "")
+            name = self.monster_names.get(vnum, "")
         if name:
             title = f"{label} {name}"
         else:
@@ -1051,8 +1073,8 @@ class Application(Gtk.Application):
             lines.append(f"char id {entity.entity_id}")
         else:
             lines.append(f"entity id {entity.entity_id}")
-            if entity.vnum:
-                lines.append(f"vnum {entity.vnum}")
+            if vnum:
+                lines.append(f"vnum {vnum}")
         lines.append(f"position {entity.x}, {entity.y}")
         own = self._player_cell()
         if own is not None:
@@ -1756,6 +1778,7 @@ def run_gui(
     host: str = "127.0.0.1",
     port: int | None = None,
     map_data: str | None = None,
+    log_file: str | None = None,
 ) -> int:
-    app = Application(host, port, map_data)
+    app = Application(host, port, map_data, log_file=log_file)
     return int(app.run([]))

@@ -108,6 +108,21 @@ template vnum first and the per-session entity id second. The map's `ncif`,
 through the stored vnum. For example, live `in 3 206 5122 ...` is entity 5122,
 an Angry Queen Bee (vnum 206).
 
+### Entities that spawned before the host attached
+
+The host only receives packets after it connects. A monster that was already
+alive is first seen as `mv`/`tp`, which carries no vnum, so its tooltip used to
+fall back to the entity id. The DLL's packet log covers the whole client
+session (it is truncated when the DLL is injected), so `spawnlog.py` scans its
+`[RECV] in ...` lines at GUI startup and fills `entity id → vnum` plus player
+names. Later log entries override earlier ones, which handles a reused entity
+id.
+
+`spawnlog.py` looks for `C:\NosTalePacketLog.txt` inside `$WINEPREFIX`, then
+the dedicated prefix and the Gameforge prefix on this machine. Override it
+with `NTPL_LOG=<path>` or `ntpl gui --log <path>`. Missing logs are harmless:
+the GUI simply keeps the activity from the live packet stream.
+
 ## CLI
 
 ```bash
@@ -261,7 +276,7 @@ never sees the `at` packet.
 ## Tests
 
 ```bash
-make -C linux host-test   # 67 cases incl. synthetic NOS, A*, checksum
+make -C linux host-test   # 70 cases incl. synthetic NOS, A*, checksum
 make -C linux gui-test    # GUI + map surface + unknown-position guard
 make -C linux bot-test    # fake server: auto-attack, pickup, MOVE, rejection
 ```

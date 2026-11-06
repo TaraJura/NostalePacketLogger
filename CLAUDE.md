@@ -30,9 +30,9 @@ build); the fixed build is in the repo, and the client must be restarted.
 |---|---|
 | `windows/` | Original MSVC/C# implementation, moved unchanged. Builds with Visual Studio; not exercised on this machine. |
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
-| Linux host tests | 67/67 pass (`make -C linux host-test`). |
+| Linux host tests | 70/70 pass (`make -C linux host-test`). |
 | Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live map is **20** (230x260); 100 % of 173,503 `mv` samples land on walkable `0x00` cells. |
-| Monster names | `NSlangData_UK.NOS` / `_code_uk_monster.txt` parsed by `monsternames.py` (nibble codec + archive reader): 2,795 `vnum → name` entries. The live `in 3 206 5122 ...` spawn is entity 5122, Angry Queen Bee (vnum 206); map tooltips use the name. |
+| Monster names | `NSlangData_UK.NOS` / `_code_uk_monster.txt` parsed by `monsternames.py` (nibble codec + archive reader): 2,795 `vnum → name` entries. The live `in 3 206 5122 ...` spawn is entity 5122, Angry Queen Bee (vnum 206); map tooltips use the name. `spawnlog.py` backfills entities that spawned before the host attached from the DLL's `C:\NosTalePacketLog.txt` (`[RECV] in ...` lines). |
 | Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), automatic whole-map (contain-fit) view with no manual map/scale/center controls, **immediate map switch** from `c_map`/`at` (the map id is the second `c_map` field), structured sidebar (Character HP/MP bars, Path, Combat, Loot, Recovery), drops + A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover + **Move first** (attack while progressing; off = clear the area), bigger own dot + facing arrow, and hover tooltips for players/monsters/NPCs/drops. `make gui-test` and `make bot-test` pass. |
 | x86 hook stubs | `HookStubTest.exe` (Wine) calls the real `hooks.S` detours and verifies the EDX packet pointer at `20(%ebp)`, the original-call replay and the send trampoline. Passes. |
 | GUI | Headless GTK4 smoke test passes (`make -C linux gui-test`, Xvfb): fake stream → 2 rows + STATUS in the status bar. |
@@ -53,7 +53,7 @@ cd ~/games/gameforge/NostalePacketLogger
 # Linux build (MinGW-w64 i686; installed via apt)
 make -C linux all test-host
 make -C linux check                 # file(1) on the three PE32 outputs
-make -C linux host-test             # 67 stdlib unittest cases
+make -C linux host-test             # 70 stdlib unittest cases
 make -C linux gui-test              # headless GTK4 + map surface smoke
 make -C linux bot-test              # fake server: path loop + auto-attack
 make -C linux clean
@@ -107,9 +107,11 @@ PYTHONPATH=linux/host python3 -m ntpl status
   `rest`, `cond`, `ncif`, `su`, `stat`, spawns), `mapdata.py`
   (`NStcData.NOS` grids, A*, map ranking), `monsternames.py`
   (`NSlangData_*.NOS` language archive, nibble text codec, `vnum → monster
-  name`), `cli.py` (`walk` waits for the server's `tp`/`mv`; `cast` waits for
-  `su`), `gui.py` (packet table + Map/Bot tab). Standard library only outside
-  the GUI (PyGObject + pycairo for the window).
+  name`), `spawnlog.py` (entity id → vnum/player name from the DLL session
+  log, for spawns that happened before the host connected), `cli.py` (`walk`
+  waits for the server's `tp`/`mv`; `cast` waits for `su`), `gui.py` (packet
+  table + Map/Bot tab). Standard library only outside the GUI (PyGObject +
+  pycairo for the window).
 - **Sit/stand:** `rest 1 1 <charId>` toggles; the server answers
   `rest <type> <charId> <state>` with 0 = standing, 1 = sitting. Sitting
   regenerates HP/MP but blocks movement, so stand before `walk`. The client
