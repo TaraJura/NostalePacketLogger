@@ -111,7 +111,7 @@ in the window header.
 
 | Control | Effect |
 |---|---|
-| Move first | with a path active, keep walking and skip auto-attack (default on) |
+| Move first | attack while walking; turn off to clear nearby monsters before moving on (default on) |
 | Retaliate | attack the monster that most recently hit you first, if in range |
 | Auto-recover | below the HP threshold, sit and wait for full HP, then stand |
 | Below HP % | recovery threshold (default 30) |
@@ -145,15 +145,17 @@ honest source.
    loot radius: send `get 1 <charId> <dropId>`. Each drop is tried at most
    three times; the server's `get` confirmation removes it from
    `WorldState.drops`.
-4. **Move first / Auto-attack.** With **Move first** on (the default), a live
-   path takes priority: the bot keeps walking and skips auto-attack, so it does
-   not stop to clear every monster around the next waypoint. Turn Move first
-   off to fight along the way. With no path, Start still runs stationary
-   combat, pickup and recovery.
-   When auto-attack runs (Move first off or no path) and the cooldown is over:
-   with **Retaliate** on, first try the most recent `su` attacker that hit you
-   (within 5 s); otherwise pick the nearest `kind == 3` entity within range.
-   Send `ncif 3 <id>` and the skill template, and set the cooldown.
+4. **Move first / Auto-attack.** Auto-attack is not disabled by the path: with
+   **Move first** on (the default) the bot attacks whenever the cooldown is
+   ready and then resumes the path after the attack animation, so monsters
+   along the route are fought without waiting for the area to be clear. With
+   Move first **off** it holds the current position and keeps attacking until
+   no monster is within range, then moves on ("clear the area"). With no path,
+   Start still runs stationary combat, pickup and recovery.
+   Target choice: with **Retaliate** on, first try the most recent `su`
+   attacker that hit you (within 5 s); otherwise pick the nearest `kind == 3`
+   entity within range. Send `ncif 3 <id>` and the skill template, and set the
+   cooldown.
 5. **Walk** a multi-cell leg (three cells from the A* path, plus the final
    cell) by calling the client's own MoveTo: the GUI sends `MOVE|x y` to the
    DLL. The client pathfinds, animates and sends its own `walk` packet with

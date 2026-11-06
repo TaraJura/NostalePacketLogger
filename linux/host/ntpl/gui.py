@@ -437,8 +437,8 @@ class Application(Gtk.Application):
         self.move_first_toggle = Gtk.ToggleButton(label="Move first")
         self.move_first_toggle.set_active(True)
         self.move_first_toggle.set_tooltip_text(
-            "Follow the path without stopping to fight every monster; "
-            "turn off to clear the area"
+            "Attack while following the path and keep walking between "
+            "attacks; turn off to clear the area before moving on"
         )
         combat_box.append(
             self._field_row(
@@ -581,6 +581,11 @@ class Application(Gtk.Application):
             return
 
         self.map_grid = grid
+        # A new map invalidates the old coordinates: do not keep walking a
+        # path from the previous map.
+        if self.bot_running:
+            self._stop_bot()
+        self.bot_goals = []
         self.waypoints.clear()
         self.path_cells.clear()
         self.path_index = 0
@@ -1525,12 +1530,11 @@ class Application(Gtk.Application):
             and self.move_first_toggle.get_active()
             and bool(self.bot_goals)
         )
-        if (
+        auto_attack = (
             self.auto_attack_toggle is not None
             and self.auto_attack_toggle.get_active()
-            and not move_first
-            and now >= self.attack_cooldown_until
-        ):
+        )
+        if auto_attack:
             radius = int(self.attack_range.get_value())
             monster = None
             if (
@@ -1541,16 +1545,24 @@ class Application(Gtk.Application):
             if monster is None:
                 monster = self._nearest_monster(radius)
             if monster is not None:
-                self._send(f"ncif 3 {monster.entity_id}")
-                packet = self._skill_packet(monster.entity_id)
-                self._send(packet)
-                cooldown = float(self.attack_cooldown.get_value())
-                self.attack_cooldown_until = now + cooldown
-                # Do not walk inside the skill animation: the server drops
-                # the walk and the bot would skip the whole path.
-                self.walk_not_before = now + self.attack_walk_delay
-                self._set_status(f"attack {monster.entity_id}: {packet}")
-                return True
+                if now >= self.attack_cooldown_until:
+                    self._send(f"ncif 3 {monster.entity_id}")
+                    packet = self._skill_packet(monster.entity_id)
+                    self._send(packet)
+                    cooldown = float(self.attack_cooldown.get_value())
+                    self.attack_cooldown_until = now + cooldown
+                    # Do not walk inside the skill animation: the server drops
+                    # the walk and the bot would skip the whole path.
+                    self.walk_not_before = now + self.attack_walk_delay
+                    self._set_status(
+                        f"attack {monster.entity_id}: {packet}"
+                    )
+                    return True
+                if not move_first:
+                    # Clear-the-area mode: stay on this position until the
+                    # nearby monsters are dead. Move first keeps walking
+                    # between attacks instead.
+                    return True
 
         if not self.bot_goals:
             # Stationary mode: combat/pickup/recovery continue until Stop.

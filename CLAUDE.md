@@ -32,7 +32,7 @@ build); the fixed build is in the repo, and the client must be restarted.
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
 | Linux host tests | 61/61 pass (`make -C linux host-test`). |
 | Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live map is **20** (230x260); 100 % of 173,503 `mv` samples land on walkable `0x00` cells. |
-| Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), automatic whole-map (contain-fit) view with no manual map/scale/center controls, **immediate map switch** from `c_map`/`at` (the map id is the second `c_map` field), structured sidebar (Character HP/MP bars, Path, Combat, Loot, Recovery), drops + A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover + **Move first** (keep walking past monsters), bigger own dot + facing arrow. `make gui-test` and `make bot-test` pass. |
+| Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), automatic whole-map (contain-fit) view with no manual map/scale/center controls, **immediate map switch** from `c_map`/`at` (the map id is the second `c_map` field), structured sidebar (Character HP/MP bars, Path, Combat, Loot, Recovery), drops + A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover + **Move first** (attack while progressing; off = clear the area), bigger own dot + facing arrow. `make gui-test` and `make bot-test` pass. |
 | x86 hook stubs | `HookStubTest.exe` (Wine) calls the real `hooks.S` detours and verifies the EDX packet pointer at `20(%ebp)`, the original-call replay and the send trampoline. Passes. |
 | GUI | Headless GTK4 smoke test passes (`make -C linux gui-test`, Xvfb): fake stream → 2 rows + STATUS in the status bar. |
 | Injector | Verified under Wine end-to-end against both the fake target and the live client (PID 1216): remote `LoadLibraryA` succeeds and the DLL starts. |
@@ -127,8 +127,9 @@ PYTHONPATH=linux/host python3 -m ntpl status
   <dropId>`), auto-attacks with Retaliate priority (`ncif` + `u_s`; skill 0 =
   normal attack) and walks in three-cell legs through the client's own MoveTo
   (`MOVE|x y`), pacing each leg by distance so the animation stays continuous.
-  **Move first** (default on) skips auto-attack while a path is active; with no
-  path the bot runs stationary combat/pickup/recovery. Map changes come from
+  **Move first** (default on) attacks while a path is active and walks on
+  between attacks; with it off the bot clears nearby monsters before moving.
+  With no path the bot runs stationary combat/pickup/recovery. Map changes come from
   `c_map <type> <mapId> <state>` (`mapId` is the **second** int) plus `at`;
   the GUI switches immediately and clears stale entities/drops. The own marker
   is a bigger dot + a facing arrow from the last `walk` delta (the protocol has
