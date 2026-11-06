@@ -86,9 +86,10 @@ grouped by function:
 
 - **Map bar** — only the live map info (id, size, walkable %). There is no Map
   ID/Load/Auto-detect/Scale/Center control: the map is selected automatically
-  (from `c_map`/`at`, or ranked by live player positions every 2 s) and is
-  fitted to the widget with a "cover" scale. It follows the own character and
-  crops the outer terrain; there are no black letterbox bars.
+  (from `c_map`/`at`, or ranked by live player positions every 2 s) and uses a
+  "contain" fit: the **whole map** is scaled to the largest size that fits the
+  widget, with its aspect ratio fixed. The letterbox area is a dimmed copy of
+  the same map, so it reads as part of the map instead of black bars.
 - **Character** — live HP and MP bars with current/max/missing values, plus
   map/position/char id. HP and MP are fed by the server's `stat` packets.
 - **Path** — path summary, Start, Stop, Clear path, Loop.

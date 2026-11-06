@@ -32,7 +32,7 @@ build); the fixed build is in the repo, and the client must be restarted.
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
 | Linux host tests | 59/59 pass (`make -C linux host-test`). |
 | Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live map is **20** (230x260); 100 % of 173,503 `mv` samples land on walkable `0x00` cells. |
-| Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), auto-detected/auto-fitted map with no manual map/scale/center controls, structured sidebar (Character HP/MP bars, Path, Combat, Loot, Recovery, Identity), drops + A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover, bigger own dot + facing arrow. `make gui-test` and `make bot-test` (3 smokes) pass. |
+| Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), auto-detected whole-map (contain-fit) map with no manual map/scale/center controls, structured sidebar (Character HP/MP bars, Path, Combat, Loot, Recovery, Identity), drops + A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover, bigger own dot + facing arrow. `make gui-test` and `make bot-test` (3 smokes) pass. |
 | x86 hook stubs | `HookStubTest.exe` (Wine) calls the real `hooks.S` detours and verifies the EDX packet pointer at `20(%ebp)`, the original-call replay and the send trampoline. Passes. |
 | GUI | Headless GTK4 smoke test passes (`make -C linux gui-test`, Xvfb): fake stream → 2 rows + STATUS in the status bar. |
 | Injector | Verified under Wine end-to-end against both the fake target and the live client (PID 1216): remote `LoadLibraryA` succeeds and the DLL starts. |

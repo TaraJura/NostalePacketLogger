@@ -617,27 +617,19 @@ class Application(Gtk.Application):
             self.map_area.queue_draw()
 
     def _map_geometry(self, width: int, height: int) -> tuple[float, float, float]:
-        """Return scale and top-left offset for a window-filling, player-centred map.
+        """Return scale and top-left offset that show the **whole** map.
 
-        The map uses a "cover" fit (the larger of the two ratios), so there are
-        no black letterbox bars when the window changes shape. The view is
-        centred on the own character and clamped so the surface always covers
-        the whole widget; terrain at the outer edge is cropped.
+        The map keeps its aspect ratio and is scaled to the largest size that
+        fits both dimensions (contain fit). Nothing is cropped, so this is the
+        maximum view of the map for the current window. The surrounding canvas
+        is filled with a dimmed copy of the map, so there is no black.
         """
         if self.map_grid is None or width <= 1 or height <= 1:
             return 1.0, 0.0, 0.0
-        scale = max(
-            width / self.map_grid.width,
-            height / self.map_grid.height,
-        )
+        scale = min(width / self.map_grid.width, height / self.map_grid.height)
         scale = max(0.15, scale)
-        position = self._player_cell()
-        if position is None:
-            position = (self.map_grid.width / 2, self.map_grid.height / 2)
-        offset_x = width / 2 - (position[0] * scale + scale / 2)
-        offset_y = height / 2 - (position[1] * scale + scale / 2)
-        offset_x = min(0.0, max(width - self.map_grid.width * scale, offset_x))
-        offset_y = min(0.0, max(height - self.map_grid.height * scale, offset_y))
+        offset_x = (width - self.map_grid.width * scale) / 2
+        offset_y = (height - self.map_grid.height * scale) / 2
         return scale, offset_x, offset_y
 
     # -- redraw scheduling ---------------------------------------------
@@ -819,13 +811,32 @@ class Application(Gtk.Application):
     # -- map drawing ----------------------------------------------------
 
     def _draw_map(self, _area, context, width: int, height: int) -> None:
-        # Fill the whole widget: the old ScrolledWindow left the unused part
-        # of the viewport black when the window was widened. The map keeps its
-        # aspect ratio and is centred; the surrounding canvas is a deliberate
-        # slate "blueprint" instead of a black hole.
+        # Fill the whole widget. The old ScrolledWindow left the unused part
+        # of the viewport black when the window was widened. The surrounding
+        # canvas is a dimmed, zoomed-out copy of the same map, so it reads as
+        # part of the map rather than a black hole.
         context.set_source_rgb(0.13, 0.16, 0.20)
         context.paint()
-        context.set_source_rgba(1.0, 1.0, 1.0, 0.06)
+
+        if self.map_surface is None or self.map_grid is None:
+            return
+
+        grid_for_bg = self.map_grid
+        bg_scale = max(
+            width / grid_for_bg.width,
+            height / grid_for_bg.height,
+        )
+        bg_x = (width - grid_for_bg.width * bg_scale) / 2
+        bg_y = (height - grid_for_bg.height * bg_scale) / 2
+        context.save()
+        context.translate(bg_x, bg_y)
+        context.scale(bg_scale, bg_scale)
+        context.set_source_surface(self.map_surface, 0, 0)
+        context.paint_with_alpha(0.26)
+        context.restore()
+        context.set_source_rgba(0.06, 0.08, 0.11, 0.55)
+        context.paint()
+        context.set_source_rgba(1.0, 1.0, 1.0, 0.045)
         context.set_line_width(1.0)
         for gx in range(0, width, 64):
             context.move_to(gx + 0.5, 0)
@@ -834,9 +845,6 @@ class Application(Gtk.Application):
             context.move_to(0, gy + 0.5)
             context.line_to(width, gy + 0.5)
         context.stroke()
-
-        if self.map_surface is None or self.map_grid is None:
-            return
 
         scale, ox, oy = self._map_geometry(width, height)
         grid = self.map_grid
