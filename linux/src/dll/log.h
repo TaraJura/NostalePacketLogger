@@ -8,8 +8,12 @@ namespace ntpl {
 void log_open();
 void log_close();
 
-// printf-style status line. Thread safe.
+// printf-style status line. Flushes immediately. Thread safe.
 void logf(const char* fmt, ...);
+
+// Flushes buffered packet lines. The drain loop calls this once per pass
+// instead of flushing every packet, which was the main throughput bottleneck.
+void log_flush();
 
 // One packet line in the historic format:
 //   10:19:19.123 [RECV] walk 19 146 0 10

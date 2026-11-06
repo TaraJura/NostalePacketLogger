@@ -95,6 +95,17 @@ bool accept_client() {
         return false;
     }
 
+    // Never block here. The worker must keep draining the packet queues and
+    // writing the file log even when no host is attached; a blocking accept
+    // would freeze the log and overflow the rings between host connections.
+    fd_set readable;
+    FD_ZERO(&readable);
+    FD_SET(g_listen, &readable);
+    timeval timeout = {0, 0};
+    if (select(0, &readable, nullptr, nullptr, &timeout) <= 0) {
+        return false;
+    }
+
     sockaddr_in from = {};
     int from_length = sizeof(from);
     SOCKET client =

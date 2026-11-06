@@ -123,7 +123,7 @@ game threads can push at once; one worker pops. See
 
 1. **Never allocate or block inside a hook.** A game thread is holding its own
    locks; a long pause is a freeze or a disconnect.
-2. **Bound everything.** 512 slots × 2048 bytes per direction, 64 KiB per host
+2. **Bound everything.** 4096 slots × 2048 bytes per direction, 64 KiB per host
    line, 10 s injection wait, 2 s socket send timeout.
 3. **Drop and count, never stall.** A full queue increments `drops`; the next
    `STATUS` reports it.

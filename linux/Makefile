@@ -13,7 +13,8 @@ SRC_INJ  := src/injector
 
 WARN := -Wall -Wextra -Wno-unused-parameter
 COMMON := -std=c++17 -O2 -mstackrealign -fno-exceptions -fno-rtti \
-          -fno-pic -fno-pie -D_WIN32_WINNT=0x0601 -I$(SRC_DLL) $(WARN)
+          -fno-pic -fno-pie -D_WIN32_WINNT=0x0601 -I$(SRC_DLL) $(WARN) \
+          -MMD -MP
 DLL_CXXFLAGS := $(COMMON) -DNTPL_BUILD_DLL
 STATIC_LIBS := -static-libgcc -static-libstdc++
 
@@ -24,6 +25,10 @@ DLL_OBJECTS := $(patsubst $(SRC_DLL)/%.cpp,$(BUILD)/dll/%.o,$(DLL_SOURCES)) \
 
 INJ_SOURCES := $(wildcard $(SRC_INJ)/*.cpp)
 INJ_OBJECTS := $(patsubst $(SRC_INJ)/%.cpp,$(BUILD)/injector/%.o,$(INJ_SOURCES))
+
+# Header changes must rebuild the objects that include them; otherwise a
+# changed PacketQueue capacity links against a stale ABI.
+-include $(DLL_OBJECTS:.o=.d) $(INJ_OBJECTS:.o=.d)
 
 .PHONY: all dll injector test-host host-test gui-test clean check
 

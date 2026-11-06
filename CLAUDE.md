@@ -75,7 +75,7 @@ PYTHONPATH=linux/host python3 -m ntpl status
 - **DLL** (`linux/src/dll/`): resolves three byte signatures in
   `NostaleClientX.exe`, installs two detours (5-byte call replay for recv,
   6-byte trampoline for send), copies packets into two `PacketQueue` rings
-  (512 slots of 2048 bytes each), logs to `C:\NosTalePacketLog.txt`, and serves
+  (4096 slots of 2048 bytes each), logs to `C:\NosTalePacketLog.txt`, and serves
   `TYPE|PAYLOAD` lines over TCP `127.0.0.1:47821`.
 - **Injector** (`linux/src/injector/`): expands `VirtualAllocEx` +
   `WriteProcessMemory` + `CreateRemoteThread(LoadLibraryA)`, with a real

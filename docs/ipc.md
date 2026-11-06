@@ -69,11 +69,16 @@ DLL stays alive and keeps reporting.
 
 ### Backpressure
 
-Each direction has a ring of 512 slots × 2048 bytes (1 MiB). When the ring is
+Each direction has a ring of 4096 slots × 2048 bytes (8 MiB). When the ring is
 full, the **newest** packet is dropped and `drops` increments. The game thread
 is never asked to wait. A slow host therefore loses the tail of a burst but
 cannot freeze the client. The file log still receives whatever made it into
 the ring; packets dropped before the ring are not logged.
+
+The listener is polled with a zero-timeout `select`, never with a blocking
+`accept`. That is deliberate: the worker must keep draining the rings and
+writing the file log while **no host is attached**. A blocking accept froze the
+log between host connections and overflowed the ring in the first live test.
 
 ### Reconnection
 

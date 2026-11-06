@@ -49,11 +49,16 @@ std::string status_line() {
 // log stays a complete record.
 void drain(packetlogger::Queue& queue, const char* direction) {
     std::string packet;
+    bool wrote = false;
     while (queue.pop(packet)) {
         ntpl::log_packet(direction, packet.c_str());
+        wrote = true;
         if (tcpserver::is_connected()) {
             tcpserver::send_line(std::string(direction) + "|" + packet);
         }
+    }
+    if (wrote) {
+        ntpl::log_flush();
     }
 }
 
@@ -156,7 +161,7 @@ DWORD WINAPI main_thread(LPVOID module) {
             }
         }
 
-        Sleep(5);
+        Sleep(1);
     }
 
     ntpl::logf("shutting down");

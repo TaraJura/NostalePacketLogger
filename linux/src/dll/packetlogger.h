@@ -6,7 +6,10 @@
 
 namespace packetlogger {
 
-using Queue = ntpl::PacketQueue<512, 2048>;
+// 4096 slots x 2048 bytes = 8 MiB per direction. The game can emit hundreds
+// of entity updates in one server tick; 512 slots overflowed during real
+// gameplay and dropped thousands of packets.
+using Queue = ntpl::PacketQueue<4096, 2048>;
 
 struct Status {
     bool           recv_found = false;

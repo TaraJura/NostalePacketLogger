@@ -129,6 +129,15 @@ void log_packet(const char* direction, const char* packet) {
     EnterCriticalSection(&g_cs);
     write_prefix_locked(direction);
     std::fprintf(g_file, "%s\n", packet);
+    LeaveCriticalSection(&g_cs);
+}
+
+void log_flush() {
+    if (g_file == nullptr) {
+        return;
+    }
+
+    EnterCriticalSection(&g_cs);
     std::fflush(g_file);
     LeaveCriticalSection(&g_cs);
 }
