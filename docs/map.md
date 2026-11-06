@@ -66,6 +66,48 @@ automatically scores every grid by the live entity positions
 
 Override the archive path with `NTPL_NSTC` or `--file`.
 
+## Monster names
+
+`NSlangData_<lang>.NOS` in the same `NostaleData` directory holds the client's
+text tables. The monster table is `_code_uk_monster.txt` (the language suffix
+follows the installed client) and contains one record per template:
+
+```
+zts200e	Mountain Turtle
+zts206e	Angry Queen Bee
+zts223e	Small Wiggler
+zts5160e	Crazed Crusader
+```
+
+The archive layout:
+
+```
+count       uint32
+entry       count times:
+              number       uint32
+              name_size    uint32
+              name         name_size bytes
+              is_dat       uint32
+              data_size    uint32
+              data         data_size bytes, encoded
+```
+
+`.txt`/`.dat` entries use the client's nibble codec: a control byte carries a
+count; when bit 7 is set the low/high half-bytes index a 16-character alphabet,
+otherwise the following bytes are XOR `0x33`; `0xFF` emits a carriage return.
+`monsternames.py` implements the archive reader and the codec, then parses the
+`zts<vnum>e\t<name>` records into `{vnum: name}` (2,795 entries in the current
+UK client). `NTPL_NSLANG` selects an explicit archive; otherwise the file is
+looked up next to `NStcData.NOS` (`NTPL_NSTC`), preferring `UK`, then any other
+language. A missing archive yields an empty table and the UI falls back to the
+entity id.
+
+Important: the `in 3 <vnum> <entityId> <x> <y> ...` spawn packet carries the
+template vnum first and the per-session entity id second. The map's `ncif`,
+`u_s` and `su` packets use the **entity id**; tooltips resolve it to the name
+through the stored vnum. For example, live `in 3 206 5122 ...` is entity 5122,
+an Angry Queen Bee (vnum 206).
+
 ## CLI
 
 ```bash
@@ -122,9 +164,10 @@ in the window header.
 
 Hovering a map marker shows a tooltip: **You** with char id, position and map;
 a **Player** with name, char id, position and distance; a **Monster/NPC** with
-entity id, template vnum, position and distance (plus “attacking you” for the
-last attacker); and a **drop** with item vnum, amount, drop id, owner and
-distance.
+name, entity id, template vnum, position and distance (plus “attacking you” for
+the last attacker); and a **drop** with item vnum, amount, drop id, owner and
+distance. Monster names come from the client's own language data (see below);
+when a vnum is not in that table the tooltip falls back to the entity id.
 
 Overlays: cyan path, yellow waypoints, **gold diamonds for drops**, green
 players, blue NPCs/pets, orange monsters. The own character is a **bigger red
@@ -218,7 +261,7 @@ never sees the `at` packet.
 ## Tests
 
 ```bash
-make -C linux host-test   # 62 cases incl. synthetic NOS, A*, checksum
+make -C linux host-test   # 67 cases incl. synthetic NOS, A*, checksum
 make -C linux gui-test    # GUI + map surface + unknown-position guard
 make -C linux bot-test    # fake server: auto-attack, pickup, MOVE, rejection
 ```

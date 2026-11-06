@@ -95,7 +95,8 @@ def main() -> int:
                 and "Player Tester" in player_tip
                 and "char id 123" in player_tip
                 and monster_tip is not None
-                and "Monster #500" in monster_tip
+                and "Monster Angry Queen Bee" in monster_tip
+                and "entity id 500" in monster_tip
                 and "vnum 206" in monster_tip
             )
 

@@ -33,6 +33,7 @@ from .mapdata import (
     load_nstc,
     terrain_rgb,
 )
+from .monsternames import load_monster_names
 from .protocol import Kind, Packet, ProtocolError
 
 MAX_ROWS = 20000
@@ -147,6 +148,8 @@ class Application(Gtk.Application):
         )
         self.map_grids: dict[int, MapGrid] = {}
         self.map_grid: MapGrid | None = None
+        self.monster_names: dict[int, str] = {}
+        self.monster_names_loaded = False
         self.map_surface: cairo.ImageSurface | None = None
         self.map_area = None
         self.map_scrolled = None
@@ -239,6 +242,7 @@ class Application(Gtk.Application):
         window.present()
 
         self._ensure_map_loaded()
+        self._ensure_monster_names()
         GLib.timeout_add(250, self._layout_tick)
         GLib.timeout_add(2000, self._auto_map_tick)
 
@@ -555,6 +559,13 @@ class Application(Gtk.Application):
             )
 
     # -- map data -------------------------------------------------------
+
+    def _ensure_monster_names(self) -> None:
+        """Load the client's vnum → monster-name table once."""
+        if self.monster_names_loaded:
+            return
+        self.monster_names_loaded = True
+        self.monster_names = load_monster_names()
 
     def _ensure_map_loaded(self) -> None:
         if self.map_grids:
@@ -1028,15 +1039,20 @@ class Application(Gtk.Application):
     def _entity_tooltip_text(self, entity: Entity) -> str:
         labels = {1: "Player", 2: "NPC/pet", 3: "Monster"}
         label = labels.get(entity.kind, "Entity")
-        if entity.kind == 1 and entity.name:
-            title = f"{label} {entity.name}"
+        name = entity.name
+        if not name and entity.kind == 3:
+            name = self.monster_names.get(entity.vnum, "")
+        if name:
+            title = f"{label} {name}"
         else:
             title = f"{label} #{entity.entity_id}"
         lines = [title]
         if entity.kind == 1:
             lines.append(f"char id {entity.entity_id}")
-        elif entity.vnum:
-            lines.append(f"vnum {entity.vnum}")
+        else:
+            lines.append(f"entity id {entity.entity_id}")
+            if entity.vnum:
+                lines.append(f"vnum {entity.vnum}")
         lines.append(f"position {entity.x}, {entity.y}")
         own = self._player_cell()
         if own is not None:
