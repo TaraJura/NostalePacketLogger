@@ -133,6 +133,7 @@ def main() -> int:
             app.path_cells = [(26, 119)]
             app.loop_toggle.set_active(False)
             app.auto_attack_toggle.set_active(True)
+            app.move_first_toggle.set_active(False)
             app.skill_entry.set_text("0")
             app.attack_cooldown.set_value(10)
             app.attack_walk_delay = 0.1

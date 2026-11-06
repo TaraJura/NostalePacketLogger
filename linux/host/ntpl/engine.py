@@ -106,11 +106,23 @@ def _on_walk(world: WorldState, packet: Packet) -> None:
 
 
 def _on_map(world: WorldState, packet: Packet) -> None:
-    ids = packet.ints(1)
-    if ids:
-        world.map_id = ids[0]
-        world.entities.clear()
-        world.drops.clear()
+    # Live: c_map 0 <mapId> <state> (state 1 = entered, 0 = leaving).
+    # The first field is a type, not the map id. Reading it made every map
+    # change end with map id 0, so the UI never switched maps.
+    values = packet.ints(3)
+    if len(values) >= 2:
+        world.map_id = values[1]
+    elif values:
+        world.map_id = values[0]
+    world.entities.clear()
+    world.drops.clear()
+
+
+def _on_mapout(world: WorldState, packet: Packet) -> None:
+    # `mapout` follows the leaving `c_map`, before the new map's `at` and
+    # spawns. Drop the old map's entities so the ranking sees only the new map.
+    world.entities.clear()
+    world.drops.clear()
 
 
 def _on_drop(world: WorldState, packet: Packet) -> None:
@@ -144,8 +156,14 @@ def _on_position(world: WorldState, packet: Packet) -> None:
     # at <charId> <mapId> <x> <y> <direction> ...
     values = packet.ints(4)
     if values:
+        map_id = values[1]
+        if world.map_id is not None and map_id != world.map_id:
+            # A map change can be seen here even when the host missed the
+            # leading c_map/mapout (for example right after attaching).
+            world.entities.clear()
+            world.drops.clear()
         world.self_id = values[0]
-        world.map_id = values[1]
+        world.map_id = map_id
         world.x, world.y = values[2], values[3]
 
 
@@ -334,6 +352,7 @@ class Engine:
             {
                 "walk": _on_walk,       # SEND: our own movement
                 "c_map": _on_map,       # RECV: map change
+                "mapout": _on_mapout,   # RECV: leave the current map
                 "at": _on_position,     # RECV: position after map load
                 "mv": _on_move,         # RECV: entity movement
                 "drop": _on_drop,       # RECV: item dropped on the ground

@@ -159,7 +159,6 @@ class Application(Gtk.Application):
         self.skill_packet_entry = None
         self.attack_range = None
         self.attack_cooldown = None
-        self.char_entry = None
         self.auto_attack_toggle = None
         self.loop_toggle = None
         self.pickup_toggle = None
@@ -435,8 +434,18 @@ class Application(Gtk.Application):
         self.retaliate_toggle.set_tooltip_text(
             "Prioritise the monster that is currently hitting you"
         )
+        self.move_first_toggle = Gtk.ToggleButton(label="Move first")
+        self.move_first_toggle.set_active(True)
+        self.move_first_toggle.set_tooltip_text(
+            "Follow the path without stopping to fight every monster; "
+            "turn off to clear the area"
+        )
         combat_box.append(
-            self._field_row(self.auto_attack_toggle, self.retaliate_toggle)
+            self._field_row(
+                self.auto_attack_toggle,
+                self.retaliate_toggle,
+                self.move_first_toggle,
+            )
         )
         self.skill_entry = Gtk.Entry()
         self.skill_entry.set_width_chars(6)
@@ -502,15 +511,6 @@ class Application(Gtk.Application):
             )
         )
         sidebar.append(self._frame("Recovery", recover_box))
-
-        # Identity.
-        id_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.char_entry = Gtk.Entry()
-        self.char_entry.set_placeholder_text("auto from rest/at/tp")
-        id_box.append(
-            self._field_row(Gtk.Label(label="Char ID"), self.char_entry)
-        )
-        sidebar.append(self._frame("Identity", id_box))
 
         hint = Gtk.Label(
             label=(
@@ -1137,6 +1137,16 @@ class Application(Gtk.Application):
                 self.engine.feed(packet)
                 self._track_packet(packet)
                 self._learn_char_id(self.engine.world.self_id)
+                # Switch the map as soon as the server announces it instead of
+                # waiting for the next 2 s auto-map tick.
+                if packet.opcode in ("c_map", "mapout", "at"):
+                    map_id = self.engine.world.map_id
+                    if (
+                        map_id is not None
+                        and self.map_grid is not None
+                        and map_id != self.map_grid.map_id
+                    ):
+                        self._auto_map_tick()
                 self._append(packet)
                 dirty = True
 
@@ -1241,18 +1251,12 @@ class Application(Gtk.Application):
     # -- bot ------------------------------------------------------------
 
     def _char_id(self) -> int | None:
-        if self.char_entry is not None:
-            text = self.char_entry.get_text().strip()
-            if text.isdigit():
-                return int(text)
         return self.char_id or self.engine.world.self_id
 
     def _learn_char_id(self, char_id: int | None) -> None:
         if char_id is None or char_id <= 0:
             return
         self.char_id = char_id
-        if self.char_entry is not None and not self.char_entry.get_text().strip():
-            self.char_entry.set_text(str(char_id))
         self._update_char_info()
 
     def _send(self, text: str) -> bool:
@@ -1284,8 +1288,18 @@ class Application(Gtk.Application):
         if self.bot_running:
             return
         if not self.path_cells:
-            self._set_status("add waypoints first (click the map)")
-            return
+            # A path is optional: without one the bot can stand and fight /
+            # pick up / recover (stationary combat mode).
+            if not (
+                (self.auto_attack_toggle is not None
+                 and self.auto_attack_toggle.get_active())
+                or (self.pickup_toggle is not None
+                    and self.pickup_toggle.get_active())
+                or (self.recover_toggle is not None
+                    and self.recover_toggle.get_active())
+            ):
+                self._set_status("add waypoints or enable combat/pickup")
+                return
         if self._player_cell() is None:
             self._request_position()
             self._set_status("locating character; press Start again")
@@ -1506,9 +1520,15 @@ class Application(Gtk.Application):
                     )
                 return True
 
+        move_first = (
+            self.move_first_toggle is not None
+            and self.move_first_toggle.get_active()
+            and bool(self.bot_goals)
+        )
         if (
             self.auto_attack_toggle is not None
             and self.auto_attack_toggle.get_active()
+            and not move_first
             and now >= self.attack_cooldown_until
         ):
             radius = int(self.attack_range.get_value())
@@ -1533,6 +1553,16 @@ class Application(Gtk.Application):
                 return True
 
         if not self.bot_goals:
+            # Stationary mode: combat/pickup/recovery continue until Stop.
+            if (
+                (self.auto_attack_toggle is not None
+                 and self.auto_attack_toggle.get_active())
+                or (self.pickup_toggle is not None
+                    and self.pickup_toggle.get_active())
+                or (self.recover_toggle is not None
+                    and self.recover_toggle.get_active())
+            ):
+                return True
             self._set_status("path finished")
             self._stop_bot()
             return False

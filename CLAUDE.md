@@ -30,9 +30,9 @@ build); the fixed build is in the repo, and the client must be restarted.
 |---|---|
 | `windows/` | Original MSVC/C# implementation, moved unchanged. Builds with Visual Studio; not exercised on this machine. |
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
-| Linux host tests | 59/59 pass (`make -C linux host-test`). |
+| Linux host tests | 61/61 pass (`make -C linux host-test`). |
 | Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live map is **20** (230x260); 100 % of 173,503 `mv` samples land on walkable `0x00` cells. |
-| Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), auto-detected whole-map (contain-fit) map with no manual map/scale/center controls, structured sidebar (Character HP/MP bars, Path, Combat, Loot, Recovery, Identity), drops + A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover, bigger own dot + facing arrow. `make gui-test` and `make bot-test` (3 smokes) pass. |
+| Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), automatic whole-map (contain-fit) view with no manual map/scale/center controls, **immediate map switch** from `c_map`/`at` (the map id is the second `c_map` field), structured sidebar (Character HP/MP bars, Path, Combat, Loot, Recovery), drops + A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover + **Move first** (keep walking past monsters), bigger own dot + facing arrow. `make gui-test` and `make bot-test` pass. |
 | x86 hook stubs | `HookStubTest.exe` (Wine) calls the real `hooks.S` detours and verifies the EDX packet pointer at `20(%ebp)`, the original-call replay and the send trampoline. Passes. |
 | GUI | Headless GTK4 smoke test passes (`make -C linux gui-test`, Xvfb): fake stream → 2 rows + STATUS in the status bar. |
 | Injector | Verified under Wine end-to-end against both the fake target and the live client (PID 1216): remote `LoadLibraryA` succeeds and the DLL starts. |
@@ -52,7 +52,7 @@ cd ~/games/gameforge/NostalePacketLogger
 # Linux build (MinGW-w64 i686; installed via apt)
 make -C linux all test-host
 make -C linux check                 # file(1) on the three PE32 outputs
-make -C linux host-test             # 59 stdlib unittest cases
+make -C linux host-test             # 61 stdlib unittest cases
 make -C linux gui-test              # headless GTK4 + map surface smoke
 make -C linux bot-test              # fake server: path loop + auto-attack
 make -C linux clean
@@ -126,9 +126,13 @@ PYTHONPATH=linux/host python3 -m ntpl status
   stand), stands (`rest`), picks up own/unowned drops (`get 1 <charId>
   <dropId>`), auto-attacks with Retaliate priority (`ncif` + `u_s`; skill 0 =
   normal attack) and walks in three-cell legs through the client's own MoveTo
-  (`MOVE|x y`), pacing each leg by distance so the animation stays continuous. The own
-  marker is a bigger dot + a facing arrow from the last `walk` delta (the
-  protocol has no own-facing packet).
+  (`MOVE|x y`), pacing each leg by distance so the animation stays continuous.
+  **Move first** (default on) skips auto-attack while a path is active; with no
+  path the bot runs stationary combat/pickup/recovery. Map changes come from
+  `c_map <type> <mapId> <state>` (`mapId` is the **second** int) plus `at`;
+  the GUI switches immediately and clears stale entities/drops. The own marker
+  is a bigger dot + a facing arrow from the last `walk` delta (the protocol has
+  no own-facing packet).
 - **Docs**: `docs/architecture.md`, `docs/engine.md`, `docs/map.md`,
   `docs/live-session-2026-11-06.md`, `docs/hooking.md`, `docs/ipc.md`,
   `docs/linux.md`, `docs/windows.md`, `docs/development.md`,
@@ -184,7 +188,7 @@ Next:
    `u_s 0 <type> <id>` (the server reports skill 866/868 in `su`).
 2. Capture the client's own `walk`/`u_s` SEND packets (the current send hook
    sees `rest`/`sortopen`/`pulse` but not the game's movement or skills).
-3. Confirm the map id from a `c_map` packet (the UI currently defaults to 20
-   and can Auto-detect from entity positions).
+3. Map switching is live-verified for the `c_map` 20↔85 portal capture; more
+   maps will confirm the parser and A* on other grids.
 4. Reconcile `docs/protocol/` with more live captures, then extend the loop
    with path validation and combat state.

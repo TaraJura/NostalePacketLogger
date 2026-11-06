@@ -83,7 +83,8 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | Opcode | Direction | State updated |
 |---|---|---|
 | `walk` | SEND | own `x,y` |
-| `c_map` | RECV | `map_id`, clears entities |
+| `c_map` | RECV | `map_id` from the **second** int, clears entities and drops |
+| `mapout` | RECV | clears entities and drops when leaving a map |
 | `at` | RECV | `map_id`, own `x,y` (last two of the first four ints) |
 | `mv` | RECV | entity `x,y`, kind |
 | `drop` | RECV | `drops[dropId]` (item vnum, x, y, amount, owner) |

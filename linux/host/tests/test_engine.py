@@ -59,8 +59,42 @@ class EngineTests(unittest.TestCase):
         self.engine.feed(packet(Kind.RECV, "in 3 500 42 10 20 2 0"))
         self.assertEqual(len(self.engine.world.entities), 1)
 
-        world = self.engine.feed(packet(Kind.RECV, "c_map 100 0"))
+        # Live: c_map <type> <mapId> <state>; the first field is not the id.
+        world = self.engine.feed(packet(Kind.RECV, "c_map 0 100 1"))
         self.assertEqual(world.map_id, 100)
+        self.assertEqual(world.entities, {})
+
+    def test_live_map_change_sequence_keeps_new_map(self):
+        # Captured live when walking through a portal (16:28:42):
+        #   c_map 0 20 0 / mapout / at ... 85 ... / c_map 0 85 1
+        # The trailing c_map used to overwrite map_id with 0, so the UI never
+        # switched to map 85.
+        self.engine.feed(packet(Kind.RECV, "c_map 0 20 0"))
+        self.engine.feed(packet(Kind.RECV, "mapout"))
+        world = self.engine.feed(
+            packet(Kind.RECV, "at 14881134 85 6 8 2 0 13 1 -1 0 0")
+        )
+        world = self.engine.feed(packet(Kind.RECV, "c_map 0 85 1"))
+        self.assertEqual(world.map_id, 85)
+        self.assertEqual(world.position, (6, 8))
+
+        # And back again.
+        self.engine.feed(packet(Kind.RECV, "c_map 0 85 0"))
+        self.engine.feed(packet(Kind.RECV, "mapout"))
+        self.engine.feed(
+            packet(Kind.RECV, "at 14881134 20 18 190 2 0 11 1 -1 0 0")
+        )
+        world = self.engine.feed(packet(Kind.RECV, "c_map 0 20 1"))
+        self.assertEqual(world.map_id, 20)
+        self.assertEqual(world.position, (18, 190))
+
+    def test_at_map_change_clears_stale_entities(self):
+        self.engine.feed(packet(Kind.RECV, "c_map 0 20 1"))
+        self.engine.feed(packet(Kind.RECV, "in 3 500 42 10 20 2 0"))
+        world = self.engine.feed(
+            packet(Kind.RECV, "at 14881134 85 6 8 2 0 13 1 -1 0 0")
+        )
+        self.assertEqual(world.map_id, 85)
         self.assertEqual(world.entities, {})
 
     def test_at_uses_map_id_and_coordinates(self):
@@ -135,7 +169,7 @@ class EngineTests(unittest.TestCase):
         self.engine.feed(
             packet(Kind.RECV, "drop 5962 13962833 27 180 1 0 14881134")
         )
-        world = self.engine.feed(packet(Kind.RECV, "c_map 100 0"))
+        world = self.engine.feed(packet(Kind.RECV, "c_map 0 100 1"))
         self.assertEqual(world.drops, {})
 
     def test_stats(self):

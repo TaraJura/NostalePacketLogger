@@ -45,8 +45,9 @@ cells in map 20.
 
 The archive has 779 grids from 9x12 to 488x240. Map **20 (230x260, 37.3 %
 walkable)** is the current live map. The map id comes from the server's
-`c_map`/`at` packets when available (`WorldState.map_id`); otherwise the UI's
-**Auto-detect** scores every grid by the live entity positions
+`c_map`/`at` packets (`WorldState.map_id`; the id is the second `c_map`
+field). If the host attached after login and has not seen one yet, the UI
+automatically scores every grid by the live entity positions
 (`find_map_for_positions`) and selects the best.
 
 ## Parser API
@@ -86,10 +87,14 @@ grouped by function:
 
 - **Map bar** — only the live map info (id, size, walkable %). There is no Map
   ID/Load/Auto-detect/Scale/Center control: the map is selected automatically
-  (from `c_map`/`at`, or ranked by live player positions every 2 s) and uses a
-  "contain" fit: the **whole map** is scaled to the largest size that fits the
-  widget, with its aspect ratio fixed. The letterbox area is a dimmed copy of
-  the same map, so it reads as part of the map instead of black bars.
+  and uses a "contain" fit: the **whole map** is scaled to the largest size
+  that fits the widget, with its aspect ratio fixed. The letterbox area is a
+  dimmed copy of the same map, so it reads as part of the map instead of black
+  bars. On a portal crossing the server sends `c_map 0 <oldMap> 0` →
+  `mapout` → `at <charId> <newMap> …` → `c_map 0 <newMap> 1`; the GUI switches
+  on the `c_map`/`at` pair as soon as the packet arrives (the 2 s auto-map
+  tick remains only as a fallback). Note that the map id is the **second**
+  `c_map` field — the first is a type.
 - **Character** — live HP and MP bars with current/max/missing values, plus
   map/position/char id. HP and MP are fed by the server's `stat` packets.
 - **Path** — path summary, Start, Stop, Clear path, Loop.
@@ -97,7 +102,6 @@ grouped by function:
   template.
 - **Loot** — Pickup and loot radius.
 - **Recovery** — Auto-recover and the low-HP threshold.
-- **Identity** — Char ID (auto-filled from `at`/`rest`/`cond`/`tp`).
 
 The layout is responsive: wide windows show map + sidebar side by side; below
 ~1050 px the map moves above the controls. The map redraws are coalesced at
@@ -107,6 +111,7 @@ in the window header.
 
 | Control | Effect |
 |---|---|
+| Move first | with a path active, keep walking and skip auto-attack (default on) |
 | Retaliate | attack the monster that most recently hit you first, if in range |
 | Auto-recover | below the HP threshold, sit and wait for full HP, then stand |
 | Below HP % | recovery threshold (default 30) |
@@ -114,7 +119,6 @@ in the window header.
 | Skill | skill vnum (default **0** = normal/basic attack; the client sends `u_s 0 3 <monster>` and the server reports the basic skill, e.g. 866, in `su`) |
 | Range / Cooldown | attack radius and seconds between attacks |
 | Loop | repeat the path when it finishes |
-| Char ID | own char id; auto-filled |
 
 Overlays: cyan path, yellow waypoints, **gold diamonds for drops**, green
 players, blue NPCs/pets, orange monsters. The own character is a **bigger red
@@ -141,10 +145,15 @@ honest source.
    loot radius: send `get 1 <charId> <dropId>`. Each drop is tried at most
    three times; the server's `get` confirmation removes it from
    `WorldState.drops`.
-4. **Auto-attack**, if enabled and the cooldown is over: with **Retaliate** on,
-   first try the most recent `su` attacker that hit you (within 5 s); otherwise
-   pick the nearest `kind == 3` entity within range. Send `ncif 3 <id>` and the
-   skill template, and set the cooldown.
+4. **Move first / Auto-attack.** With **Move first** on (the default), a live
+   path takes priority: the bot keeps walking and skips auto-attack, so it does
+   not stop to clear every monster around the next waypoint. Turn Move first
+   off to fight along the way. With no path, Start still runs stationary
+   combat, pickup and recovery.
+   When auto-attack runs (Move first off or no path) and the cooldown is over:
+   with **Retaliate** on, first try the most recent `su` attacker that hit you
+   (within 5 s); otherwise pick the nearest `kind == 3` entity within range.
+   Send `ncif 3 <id>` and the skill template, and set the cooldown.
 5. **Walk** a multi-cell leg (three cells from the A* path, plus the final
    cell) by calling the client's own MoveTo: the GUI sends `MOVE|x y` to the
    DLL. The client pathfinds, animates and sends its own `walk` packet with
@@ -192,15 +201,16 @@ never sees the `at` packet.
 - Auto-attack targets `kind == 3` only, within **Range**. Skill **0** is the
   normal attack; the server reports the basic skill (866/868) in `su`. Skill
   866 itself is not castable and gets `cancel 0 866 -1`.
-- The map id is not always known; use Auto-detect or enter the id from a
-  `c_map` packet.
+- The map id comes from `c_map`/`at`. If the host attached after login and has
+  not seen either yet, the GUI ranks the map grids against live player
+  positions every 2 s and keeps the current map while it still fits.
 - The server may rate-limit or reject moves after many attempts; the bot stops
   after three consecutive unconfirmed moves.
 
 ## Tests
 
 ```bash
-make -C linux host-test   # 59 cases incl. synthetic NOS, A*, checksum
+make -C linux host-test   # 61 cases incl. synthetic NOS, A*, checksum
 make -C linux gui-test    # GUI + map surface + unknown-position guard
 make -C linux bot-test    # fake server: auto-attack, pickup, MOVE, rejection
 ```

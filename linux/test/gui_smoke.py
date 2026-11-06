@@ -38,6 +38,16 @@ def start_fake_server() -> int:
             b"SEND|u_s 1 2\n"
             b"RECV|stat 100 200 50 120 0 0\n"
         )
+        # A real portal crossing: the trailing c_map carries the new map id in
+        # its second field. This used to set map_id 0 and leave the UI on the
+        # old map.
+        time.sleep(0.3)
+        connection.sendall(
+            b"RECV|c_map 0 20 0\n"
+            b"RECV|mapout\n"
+            b"RECV|at 14881134 85 6 8 2 0 13 1 -1 0 0\n"
+            b"RECV|c_map 0 85 1\n"
+        )
         time.sleep(15)
         connection.close()
         listener.close()
@@ -56,6 +66,12 @@ def main() -> int:
             rows = app.store.get_n_items()
             status = app.status.get_text()
             map_ok = app.map_grid is not None and app.map_surface is not None
+            switched = (
+                app.map_grid is not None
+                and app.map_grid.map_id == 85
+                and app.engine.world.map_id == 85
+                and "85" in status
+            )
 
             # Without a known own position, rebuilding a path must not pretend
             # the first waypoint is the character (that made the bot walk away
@@ -82,12 +98,13 @@ def main() -> int:
             result["detail"] = (
                 f"rows={rows} status={status!r} map={app.map_grid.map_id if app.map_grid else None} "
                 f"surface={app.map_surface is not None} guard={guard} facing={facing} "
-                f"hp={stats.hp}/{stats.hp_max} stats_area={app.stats_area is not None}"
+                f"hp={stats.hp}/{stats.hp_max} stats_area={app.stats_area is not None} "
+                f"switched={switched}"
             )
             result["ok"] = (
                 rows >= 2
-                and status == "ready"
                 and map_ok
+                and switched
                 and guard
                 and facing == (1, 0)
                 and stats_ok
