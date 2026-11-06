@@ -148,11 +148,12 @@ class Application(Gtk.Application):
         self.map_grids: dict[int, MapGrid] = {}
         self.map_grid: MapGrid | None = None
         self.map_surface: cairo.ImageSurface | None = None
-        self.map_scale = DEFAULT_SCALE
         self.map_area = None
         self.map_scrolled = None
-        self.map_id_spin = None
-        self.map_scale_spin = None
+        self.map_page_box = None
+        self.map_box = None
+        self.sidebar_scroll = None
+        self.narrow_layout = False
         self.map_info = None
         self.skill_entry = None
         self.skill_packet_entry = None
@@ -190,7 +191,6 @@ class Application(Gtk.Application):
         self.recover_rest_at = 0.0
         self.map_redraw_scheduled = False
         self.stats_redraw_scheduled = False
-        self.last_center: tuple[int, int] | None = None
         self.bot_running = False
         self.bot_timer = None
         self._closing = False
@@ -219,11 +219,6 @@ class Application(Gtk.Application):
         clear.connect("clicked", lambda *_: self.store.remove_all())
         header.pack_start(clear)
 
-        self.follow = Gtk.ToggleButton(label="Follow")
-        self.follow.set_active(True)
-        self.follow.set_tooltip_text("Scroll to the newest packet automatically")
-        header.pack_end(self.follow)
-
         packet_page = self._build_packet_page()
         map_page = self._build_map_page()
 
@@ -245,6 +240,45 @@ class Application(Gtk.Application):
         window.present()
 
         self._ensure_map_loaded()
+        GLib.timeout_add(250, self._layout_tick)
+        GLib.timeout_add(2000, self._auto_map_tick)
+
+    def _layout_tick(self) -> bool:
+        """Reflow the Map/Bot page when the window becomes narrow.
+
+        GTK4 widgets have no width property and no size-allocate signal, so a
+        cheap 250 ms poll keeps the layout responsive without a custom
+        container. Wide: map | sidebar. Narrow: map over sidebar.
+        """
+        if self._closing:
+            return False
+        if self.window is None or self.map_page_box is None:
+            return True
+        narrow = self.window.get_width() < 1050
+        if narrow == self.narrow_layout:
+            return True
+        self.narrow_layout = narrow
+        if narrow:
+            self.map_page_box.set_orientation(Gtk.Orientation.VERTICAL)
+            if self.map_box is not None:
+                self.map_box.set_vexpand(True)
+                self.map_box.set_size_request(-1, 380)
+            if self.sidebar_scroll is not None:
+                self.sidebar_scroll.set_hexpand(True)
+                self.sidebar_scroll.set_vexpand(True)
+                self.sidebar_scroll.set_size_request(-1, 260)
+        else:
+            self.map_page_box.set_orientation(Gtk.Orientation.HORIZONTAL)
+            if self.map_box is not None:
+                self.map_box.set_vexpand(True)
+                self.map_box.set_size_request(-1, -1)
+            if self.sidebar_scroll is not None:
+                self.sidebar_scroll.set_hexpand(False)
+                self.sidebar_scroll.set_vexpand(True)
+                self.sidebar_scroll.set_size_request(360, -1)
+        if self.map_area is not None:
+            self.map_area.queue_draw()
+        return True
 
     def _build_packet_page(self):
         self.store = Gio.ListStore.new(PacketRow)
@@ -286,6 +320,11 @@ class Application(Gtk.Application):
         send_button.connect("clicked", lambda *_: self._on_send(self.send_entry))
         toolbar.append(send_button)
 
+        self.follow = Gtk.ToggleButton(label="Follow")
+        self.follow.set_active(True)
+        self.follow.set_tooltip_text("Scroll to the newest packet automatically")
+        toolbar.append(self.follow)
+
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         page.append(toolbar)
         page.append(self.scrolled)
@@ -316,30 +355,6 @@ class Application(Gtk.Application):
         map_box.set_hexpand(True)
 
         top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        top.append(Gtk.Label(label="Map ID"))
-        self.map_id_spin = Gtk.SpinButton.new_with_range(0, 100000, 1)
-        self.map_id_spin.set_value(DEFAULT_MAP_ID)
-        top.append(self.map_id_spin)
-        load = Gtk.Button(label="Load")
-        load.connect("clicked", self._on_load_map)
-        top.append(load)
-        auto = Gtk.Button(label="Auto-detect")
-        auto.set_tooltip_text(
-            "Pick the map whose walkable cells contain the live entities"
-        )
-        auto.connect("clicked", self._on_auto_map)
-        top.append(auto)
-        top.append(Gtk.Label(label="Scale"))
-        self.map_scale_spin = Gtk.SpinButton.new_with_range(1, 10, 1)
-        self.map_scale_spin.set_value(DEFAULT_SCALE)
-        self.map_scale_spin.connect("value-changed", self._on_map_scale)
-        top.append(self.map_scale_spin)
-        self.center_toggle = Gtk.ToggleButton(label="Center")
-        self.center_toggle.set_active(True)
-        self.center_toggle.set_tooltip_text(
-            "Keep the view centred on your character"
-        )
-        top.append(self.center_toggle)
         self.map_info = Gtk.Label(label="map data not loaded")
         self.map_info.set_xalign(0)
         self.map_info.set_hexpand(True)
@@ -348,19 +363,13 @@ class Application(Gtk.Application):
 
         self.map_area = Gtk.DrawingArea()
         self.map_area.set_draw_func(self._draw_map)
+        self.map_area.set_hexpand(True)
+        self.map_area.set_vexpand(True)
         click = Gtk.GestureClick()
         click.connect("pressed", self._on_map_click)
         self.map_area.add_controller(click)
-        scroll = Gtk.EventControllerScroll.new(
-            Gtk.EventControllerScrollFlags.VERTICAL
-        )
-        scroll.connect("scroll", self._on_map_scroll)
-        self.map_area.add_controller(scroll)
-        self.map_scrolled = Gtk.ScrolledWindow()
-        self.map_scrolled.set_child(self.map_area)
-        self.map_scrolled.set_vexpand(True)
-        self.map_scrolled.set_hexpand(True)
-        map_box.append(self.map_scrolled)
+        self.map_scrolled = None
+        map_box.append(self.map_area)
 
         legend = Gtk.Label()
         legend.set_markup(
@@ -521,15 +530,15 @@ class Application(Gtk.Application):
         sidebar_scroll.set_size_request(360, -1)
         sidebar_scroll.set_vexpand(True)
 
-        paned = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
-        paned.set_start_child(map_box)
-        paned.set_end_child(sidebar_scroll)
-        paned.set_resize_start_child(True)
-        paned.set_resize_end_child(False)
-        paned.set_shrink_start_child(False)
-        paned.set_position(880)
-        paned.set_wide_handle(True)
-        return paned
+        # A plain box instead of a Paned: the map shrinks with the window and
+        # the control sidebar always stays visible. Below ~1050 px the layout
+        # reflows to map-over-controls (see `_layout_tick`).
+        page.append(map_box)
+        page.append(sidebar_scroll)
+        self.map_page_box = page
+        self.map_box = map_box
+        self.sidebar_scroll = sidebar_scroll
+        return page
 
     def _install_css(self) -> None:
         provider = Gtk.CssProvider()
@@ -572,7 +581,6 @@ class Application(Gtk.Application):
             return
 
         self.map_grid = grid
-        self.map_id_spin.set_value(map_id)
         self.waypoints.clear()
         self.path_cells.clear()
         self.path_index = 0
@@ -586,7 +594,6 @@ class Application(Gtk.Application):
             f"walkable {100 * walkable / total:.1f}%"
         )
         self._set_status(f"loaded map {grid.map_id} ({grid.width}x{grid.height})")
-        self.last_center = None
         self._schedule_map_redraw()
         self._schedule_stats_redraw()
 
@@ -606,21 +613,32 @@ class Application(Gtk.Application):
         self.map_surface = surface
 
     def _update_map_size(self) -> None:
-        if self.map_grid is None or self.map_area is None:
-            return
-        self.map_scale = int(self.map_scale_spin.get_value())
-        self.map_area.set_content_width(self.map_grid.width * self.map_scale)
-        self.map_area.set_content_height(self.map_grid.height * self.map_scale)
-        self.map_area.queue_draw()
+        if self.map_area is not None:
+            self.map_area.queue_draw()
 
-    def _on_map_scale(self, _spin) -> None:
-        self._update_map_size()
+    def _map_geometry(self, width: int, height: int) -> tuple[float, float, float]:
+        """Return scale and top-left offset for a window-filling, player-centred map.
 
-    def _on_map_scroll(self, _controller, _dx: float, dy: float) -> bool:
-        step = -1 if dy > 0 else 1
-        value = int(self.map_scale_spin.get_value()) + step
-        self.map_scale_spin.set_value(max(1, min(10, value)))
-        return True
+        The map uses a "cover" fit (the larger of the two ratios), so there are
+        no black letterbox bars when the window changes shape. The view is
+        centred on the own character and clamped so the surface always covers
+        the whole widget; terrain at the outer edge is cropped.
+        """
+        if self.map_grid is None or width <= 1 or height <= 1:
+            return 1.0, 0.0, 0.0
+        scale = max(
+            width / self.map_grid.width,
+            height / self.map_grid.height,
+        )
+        scale = max(0.15, scale)
+        position = self._player_cell()
+        if position is None:
+            position = (self.map_grid.width / 2, self.map_grid.height / 2)
+        offset_x = width / 2 - (position[0] * scale + scale / 2)
+        offset_y = height / 2 - (position[1] * scale + scale / 2)
+        offset_x = min(0.0, max(width - self.map_grid.width * scale, offset_x))
+        offset_y = min(0.0, max(height - self.map_grid.height * scale, offset_y))
+        return scale, offset_x, offset_y
 
     # -- redraw scheduling ---------------------------------------------
 
@@ -635,8 +653,6 @@ class Application(Gtk.Application):
         if self.map_area is not None:
             self.map_area.queue_draw()
         self._update_char_info()
-        if self.center_toggle is not None and self.center_toggle.get_active():
-            self._center_on_player()
         return False
 
     def _schedule_stats_redraw(self) -> None:
@@ -671,25 +687,6 @@ class Application(Gtk.Application):
         if self.recovering:
             parts.append("RECOVERING")
         self.char_info.set_text(" · ".join(parts))
-
-    def _center_on_player(self) -> None:
-        position = self._player_cell()
-        if position is None or self.map_scrolled is None:
-            return
-        if position == self.last_center:
-            return
-        scale = max(1, int(self.map_scale))
-        x = position[0] * scale + scale / 2
-        y = position[1] * scale + scale / 2
-        for adjustment, center in (
-            (self.map_scrolled.get_hadjustment(), x),
-            (self.map_scrolled.get_vadjustment(), y),
-        ):
-            page = adjustment.get_page_size()
-            if page <= 0:
-                return
-            adjustment.set_value(max(0.0, center - page / 2))
-        self.last_center = position
 
     def _draw_stats(self, _area, context, width: int, height: int) -> None:
         context.set_source_rgb(0.08, 0.08, 0.08)
@@ -760,41 +757,111 @@ class Application(Gtk.Application):
         distance = max(abs(entity.x - position[0]), abs(entity.y - position[1]))
         return entity if distance <= radius else None
 
-    def _on_load_map(self, _button) -> None:
-        self._ensure_map_loaded()
-        self._select_map(int(self.map_id_spin.get_value()))
-
-    def _on_auto_map(self, _button) -> None:
-        self._ensure_map_loaded()
+    def _live_points(self) -> list[tuple[int, int]]:
+        world = self.engine.world
         points = [
             (entity.x, entity.y)
-            for entity in self.engine.world.entities.values()
-            if entity.kind in (1, 2, 3)
+            for entity in world.entities.values()
+            if entity.kind == 1
         ]
+        if world.position is not None:
+            points.append(world.position)
+        # Stable order, bounded work for the ranking.
+        return list(dict.fromkeys(points))[:48]
+
+    def _auto_map_tick(self) -> bool:
+        """Pick the map from ``c_map``/``at`` or from live player positions.
+
+        There is no Map ID / Load / Auto-detect control any more: the map
+        follows the character. A map id from the server is authoritative; when
+        the host attached after login and never saw one, rank the grids by the
+        walkable positions of players and the own character.
+        """
+        if self._closing:
+            return False
+        if not self.map_grids:
+            self._ensure_map_loaded()
+            return True
+        world = self.engine.world
+        if world.map_id is not None and world.map_id in self.map_grids:
+            if self.map_grid is None or self.map_grid.map_id != world.map_id:
+                self._select_map(world.map_id)
+                self._set_status(f"auto-selected map {world.map_id}")
+            return True
+        if self.map_grid is None:
+            fallback = (
+                DEFAULT_MAP_ID
+                if DEFAULT_MAP_ID in self.map_grids
+                else next(iter(self.map_grids))
+            )
+            self._select_map(fallback)
+            return True
+
+        points = self._live_points()
+        if len(points) < 2:
+            return True
+        walkable = sum(
+            1 for x, y in points if self.map_grid.is_walkable(x, y)
+        )
+        if walkable / len(points) >= 0.6:
+            return True
         ranked = find_map_for_positions(self.map_grids, points)
-        if not ranked:
-            self._set_status("auto-detect: no entity positions yet")
-            return
-        fraction, map_id = ranked[0]
-        self._select_map(map_id)
-        self._set_status(f"auto-detected map {map_id} ({fraction * 100:.1f}% walkable)")
+        if ranked and ranked[0][0] >= 0.6:
+            fraction, map_id = ranked[0]
+            if map_id != self.map_grid.map_id:
+                self._select_map(map_id)
+                self._set_status(
+                    f"auto-detected map {map_id} "
+                    f"({fraction * 100:.1f}% live positions)"
+                )
+        return True
 
     # -- map drawing ----------------------------------------------------
 
-    def _draw_map(self, _area, context, _width, _height) -> None:
-        context.set_source_rgb(0.08, 0.08, 0.08)
+    def _draw_map(self, _area, context, width: int, height: int) -> None:
+        # Fill the whole widget: the old ScrolledWindow left the unused part
+        # of the viewport black when the window was widened. The map keeps its
+        # aspect ratio and is centred; the surrounding canvas is a deliberate
+        # slate "blueprint" instead of a black hole.
+        context.set_source_rgb(0.13, 0.16, 0.20)
         context.paint()
+        context.set_source_rgba(1.0, 1.0, 1.0, 0.06)
+        context.set_line_width(1.0)
+        for gx in range(0, width, 64):
+            context.move_to(gx + 0.5, 0)
+            context.line_to(gx + 0.5, height)
+        for gy in range(0, height, 64):
+            context.move_to(0, gy + 0.5)
+            context.line_to(width, gy + 0.5)
+        context.stroke()
+
         if self.map_surface is None or self.map_grid is None:
             return
 
-        scale = self.map_scale
+        scale, ox, oy = self._map_geometry(width, height)
+        grid = self.map_grid
+        map_w = grid.width * scale
+        map_h = grid.height * scale
+
+        # Shadow + frame around the map.
+        context.set_source_rgba(0.0, 0.0, 0.0, 0.55)
+        context.rectangle(ox + 3, oy + 3, map_w, map_h)
+        context.fill()
+        context.set_source_rgb(0.25, 0.30, 0.36)
+        context.set_line_width(2.0)
+        context.rectangle(ox - 1, oy - 1, map_w + 2, map_h + 2)
+        context.stroke()
+
         context.save()
+        context.translate(ox, oy)
         context.scale(scale, scale)
         context.set_source_surface(self.map_surface, 0, 0)
         context.paint()
         context.restore()
 
-        grid = self.map_grid
+        # All overlays below use map pixels; translate once.
+        context.save()
+        context.translate(ox, oy)
 
         # A* path
         if self.path_cells:
@@ -897,11 +964,15 @@ class Application(Gtk.Application):
             context.arc(cx, cy, radius + max(1.5, scale * 0.3), 0, 2 * math.pi)
             context.stroke()
 
+        context.restore()
+
     def _on_map_click(self, gesture, _n_press, x, y) -> None:
-        if self.map_grid is None:
+        if self.map_grid is None or self.map_area is None:
             return
-        scale = self.map_scale
-        cell = (int(x // scale), int(y // scale))
+        scale, ox, oy = self._map_geometry(
+            self.map_area.get_width(), self.map_area.get_height()
+        )
+        cell = (int((x - ox) // scale), int((y - oy) // scale))
         if not (
             0 <= cell[0] < self.map_grid.width
             and 0 <= cell[1] < self.map_grid.height
@@ -1241,7 +1312,6 @@ class Application(Gtk.Application):
         self.pickup_ignored.clear()
         self.recovering = False
         self.recover_rest_at = 0.0
-        self.last_center = None
         if self.bot_timer is None:
             self.bot_timer = GLib.timeout_add(BOT_INTERVAL_MS, self._bot_tick)
         self._set_status("bot started")

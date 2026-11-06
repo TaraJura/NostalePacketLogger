@@ -84,8 +84,11 @@ linux/scripts/host.sh map best --log "$WINEPREFIX/drive_c/NosTalePacketLog.txt"
 map on the left and a scrollable control sidebar on the right. The layout is
 grouped by function:
 
-- **Map bar** — Map ID, Load, Auto-detect, Scale, Center, map info. The mouse
-  wheel zooms the map.
+- **Map bar** — only the live map info (id, size, walkable %). There is no Map
+  ID/Load/Auto-detect/Scale/Center control: the map is selected automatically
+  (from `c_map`/`at`, or ranked by live player positions every 2 s) and is
+  fitted to the widget with a "cover" scale. It follows the own character and
+  crops the outer terrain; there are no black letterbox bars.
 - **Character** — live HP and MP bars with current/max/missing values, plus
   map/position/char id. HP and MP are fed by the server's `stat` packets.
 - **Path** — path summary, Start, Stop, Clear path, Loop.
@@ -95,13 +98,14 @@ grouped by function:
 - **Recovery** — Auto-recover and the low-HP threshold.
 - **Identity** — Char ID (auto-filled from `at`/`rest`/`cond`/`tp`).
 
-The map redraws are coalesced at ~80 ms instead of one redraw per packet, and
-the map/`POS` view can auto-centre on the character. Right-click removes the
-last waypoint; left-click adds one.
+The layout is responsive: wide windows show map + sidebar side by side; below
+~1050 px the map moves above the controls. The map redraws are coalesced at
+~80 ms instead of one redraw per packet. Right-click removes the last waypoint;
+left-click adds one. The packet **Follow** toggle lives in the Packets tab, not
+in the window header.
 
 | Control | Effect |
 |---|---|
-| Center | keep the map scrolled to the own character |
 | Retaliate | attack the monster that most recently hit you first, if in range |
 | Auto-recover | below the HP threshold, sit and wait for full HP, then stand |
 | Below HP % | recovery threshold (default 30) |
