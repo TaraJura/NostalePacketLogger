@@ -126,10 +126,23 @@ linux/scripts/host.sh monitor --engine        # also maintain WorldState
 linux/scripts/host.sh monitor --filter walk   # only packets containing "walk"
 linux/scripts/host.sh monitor --log capture.log
 linux/scripts/host.sh send walk 19 146 0 10   # inject one packet
+linux/scripts/host.sh walk 25 117             # send a walk, wait for server tp/mv
+linux/scripts/host.sh send "rest 1 1 14881134" # sit/stand toggle
 linux/scripts/host.sh status
 linux/scripts/host.sh replay capture.log      # resend the SEND lines
 linux/scripts/host.sh gui                     # GTK4 window
+
+# reverse-engineering aids (loopback only)
+linux/scripts/host.sh scan 34 73              # find a coordinate pair in memory
+linux/scripts/host.sh find 14881134           # find a charId
+linux/scripts/host.sh read 0x07B96FA4 32      # dump memory
 ```
+
+`ntpl walk X Y` sends `walk X Y 0 <speed>` and waits for the server's
+`tp`/`mv` at that position. The character must be **standing** first: while
+sitting, the server ignores movement. The sit/stand toggle is
+`send "rest 1 1 <charId>"`; the server's authoritative state comes back as
+`rest <type> <charId> <state>` (0 = standing, 1 = sitting).
 
 Inside `monitor`, stdin accepts:
 
@@ -199,7 +212,7 @@ both.
 ## Tests
 
 ```bash
-make host-test          # 29 stdlib unit tests: protocol, engine, TCP client
+make host-test          # 35 stdlib unit tests: protocol, engine, TCP client
 make gui-test           # headless GTK4 window against a fake packet stream
 make all test-host
 ./scripts/dev-test-wine.sh 25
@@ -227,23 +240,42 @@ Because FakeGame is not the game, the expected status is
 DLL lifecycle, the transport, the status format and the command path. The hook
 paths themselves are only exercised by the real client.
 
+## Live verification (2026-11-06)
+
+The real client was running in the Gameforge prefix (the user launched it
+there); the injector targeted only `NostaleClientX.exe`, never `gfclient.exe`.
+The recommended setup is still a dedicated prefix.
+
+- Injected into the live client (PID 1216, Wine 11): both hooks `ACTIVE`,
+  `recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`, `drops recv=0`.
+- The character was sitting. `rest 1 1 14881134` toggled it; the server
+  answered `rest 1 14881134 0` (standing).
+- `walk 25 117 0 10` made the server answer `tp 1 14881134 25 117 0`; the
+  authoritative position moved from `(25,118)` to `(25,117)`. This is the
+  first confirmed packet-driven movement.
+- The client does not echo its own `mv`; `tp` is the confirmation. Some targets
+  are ignored (blocked tile, or the client/server still settling), so confirm
+  each move before sending the next one.
+- The character must be standing; sitting (`rest` state 1) blocks movement.
+
 ## Honest status
 
-- The three signatures are the ones from the original Windows build. They have
-  **not** been re-verified against the current NosTale client on this machine:
-  the game is not installed in a Wine prefix here.
-- The DLL has been run under Wine 11 and served the Python host; hooks were
-  correctly skipped when the signatures were absent.
-- `Injector.exe --all` has been run end-to-end under Wine against a fake target
-  named `NostaleClientX.exe`: process discovery, `OpenProcess`, the remote
-  `LoadLibraryA` and the DLL startup all work. It has **not** been run against
-  the real client.
+- The three signatures match the current live client. Both hooks are ACTIVE
+  and no packets are dropped in steady state.
+- `Injector.exe --all` works end-to-end against both the fake target and the
+  live client.
 - The x86 stubs pass `HookStubTest.exe`, which calls the real `hooks.S` with a
   known EDX and verifies the packet pointer, the original-call replay and the
   send trampoline.
 - GTK4 4.22 and PyGObject 3.56 are installed; the real window passes the
   headless Xvfb smoke test (`make gui-test`). It has not been opened against the
   real game.
+- The `SCAN`/`FIND`/`READ` commands are new reverse-engineering aids. `FIND`
+  located the charId record, but the live position comes from the server's
+  `tp`/`mv`, not from those addresses.
+- The client's own `walk` SEND packets are not captured by the current send
+  hook (it sees `rest`, `sortopen`, `pulse`). Injected walks are sent and the
+  server answers with `tp`; that path is what the engine uses.
 
 ## Terms of service
 

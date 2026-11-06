@@ -27,6 +27,29 @@ stat 2991 2991 3727 3727 0 99328
 
 ---
 
+## `rest` (SEND and RECV)
+
+Sit/stand toggle and its server state.
+
+**SEND** (client → server, the C key in the game):
+```
+rest 1 1 <charId>          — toggle the rest state
+```
+The server toggles on every packet: two identical packets in a row produce
+stand then sit. Send it once per desired state change.
+
+**RECV** (server → client):
+```
+rest <entityType> <charId> <state>
+rest 1 14881134 0          — standing
+rest 1 14881134 1          — sitting
+```
+
+Sitting regenerates HP/MP, but **movement is rejected while sitting**. Stand
+up before sending a `walk`.
+
+---
+
 ## `cond` (RECV)
 
 Entity condition/movement state update.
@@ -35,8 +58,8 @@ Entity condition/movement state update.
 
 **Examples**:
 ```
-cond 1 14637447 0 0 10
-    — Player 14637447 condition update, speed 10
+cond 1 14881134 0 0 10
+    — Player 14881134 condition update, speed 10 (observed live)
 ```
 
 *TODO: Decode the unknown fields (possibly buff/debuff flags, movement lock)*

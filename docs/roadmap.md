@@ -11,6 +11,9 @@ Windows.
 - Send packets back into the game.
 - Windows: injector + named pipes + WinForms GUI.
 - Linux: MinGW injector + DLL + TCP loopback + Python CLI + GTK4 GUI.
+- **Live 2026-11-06:** both hooks ACTIVE in the real client, `rest` toggled
+  sit/stand, and `walk 25 117` moved the server's authoritative position to
+  `(25,117)` (`tp 1 14881134 25 117 0`).
 
 ## Phase 2 — Protocol wiki (in progress)
 
@@ -45,13 +48,15 @@ The handlers are deliberately tolerant. Next:
 
 ## Phase 4 — Autonomous agent
 
-Not started, and not the next thing to build. It needs a trustworthy state
-model and a way to measure whether an action worked.
+The first reversible loop is now possible: `ntpl walk X Y` sends a walk and
+waits for the server's `tp`/`mv` confirmation, and `rest` controls sit/stand.
+It is not autonomous yet: a move must be confirmed before the next one, some
+tiles are rejected, and the client's own walk SEND packets are not captured.
 
 When it starts:
 
-- Start with a single, reversible loop (e.g. walk to a coordinate and verify
-  arrival), not combat.
+- Use the confirmed walk loop as the first primitive; never spam targets.
+- Stand up (`rest`) before moving; sitting is the regeneration state.
 - Keep a human-visible log of every injected packet and the state that
   motivated it.
 - Rate-limit and stop on unexpected state.
@@ -59,15 +64,17 @@ When it starts:
 
 ## Near-term engineering tasks
 
-1. **Install NosTale in a dedicated Wine prefix** and run the injector against
-   the real client. This is the gate for everything else.
-2. **Verify the signatures** on the current `NostaleClientX.exe`. If they are
-   stale, re-derive them (`docs/hooking.md`).
-3. **Capture one session** with `ntpl monitor --log` and check the file log,
-   the GUI and the engine against it.
-4. **Fix whatever the real client exposes**: calling convention surprises,
-   packet format differences, Wine quirks.
-5. **Decide the fate of the Windows tree**: keep it as the reference, or port
+1. ~~Install NosTale and run the injector against the real client~~ — done
+   2026-11-06.
+2. ~~Verify the signatures~~ — both hooks ACTIVE on the live client.
+3. **Build the closed movement loop**: `walk` → wait for `tp`/`mv` → next
+   target, with a rejected-tile list and a rate limit.
+4. **Capture the client's own `walk` SEND packets** (the current send hook sees
+   `rest`/`sortopen`/`pulse` but not walks) to learn the exact checksum/path
+   behaviour.
+5. **Reconcile the protocol wiki** with the live session (`rest`, `tp`, `cond`,
+   `stat`) and extend the engine handlers.
+6. **Decide the fate of the Windows tree**: keep it as the reference, or port
    the same TCP transport there and retire the named pipes.
 
 ## Known risks

@@ -67,6 +67,23 @@ build reported, so a host can parse it or just display it:
 means the client build does not match the signatures. Both are non-fatal: the
 DLL stays alive and keeps reporting.
 
+### Debug / reverse-engineering commands
+
+These are host → DLL only and exist so the engine can find the player's state
+without guessing at Delphi object layouts. They are loopback-only and read the
+game process's own memory.
+
+| Command | Reply | Meaning |
+|---|---|---|
+| `SCAN\|<x> <y>` | `STATUS\|SCAN <x> <y> \| 1:<addr...> \| 2:<addr...> \| 4:<addr...>` | find a coordinate pair as 1-, 2- and 4-byte integers |
+| `FIND\|<value>` | `STATUS\|FIND <value> <addr...>` | find a single 32-bit value, e.g. a charId |
+| `READ\|0x<addr> <len>` | `STATUS\|READ 0x<addr> <hex>` | dump up to 256 bytes |
+
+The scan reads committed writable pages, skips the DLL's own module and the
+worker thread's stack, and caps itself at 512 MiB so it cannot stall the game
+for long. It is a debugging tool: the authoritative player position comes from
+the server's `tp`/`mv` packets, not from these addresses.
+
 ### Backpressure
 
 Each direction has a ring of 4096 slots × 2048 bytes (8 MiB). When the ring is

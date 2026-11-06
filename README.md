@@ -20,7 +20,7 @@ shared: the transport differs, the game's packets do not.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 29 Python unit tests
+make -C linux host-test                      # 35 Python unit tests
 make -C linux gui-test                       # headless GTK4 smoke test (xvfb)
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path
@@ -56,15 +56,22 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its unit tests pass, the GTK4 window passes a headless
-smoke test, and the real injector has been run end-to-end under Wine 11 against
-a fake target named `NostaleClientX.exe`. The x86 detour stubs themselves are
-tested directly (`HookStubTest.exe` calls the real `hooks.S` and checks the
-packet pointer, the replay and the trampoline). They have **not** been verified
-against the live NosTale client yet, because the game is not installed in a
-Wine prefix on this machine. The signatures are the ones the original Windows
-build used; the first injection will tell you whether they still match
-(`linux/scripts/host.sh status`).
+The Linux port builds, its 35 unit tests pass, the GTK4 window passes a
+headless smoke test, and the real injector has been run against the **live
+NosTale client** under Wine 11:
+
+- both hooks `ACTIVE` (`recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`),
+  `drops recv=0`;
+- `rest 1 1 14881134` stood the character up; the server answered
+  `rest 1 14881134 0`;
+- `walk 25 117 0 10` made the server answer `tp 1 14881134 25 117 0`, moving
+  the authoritative position from `(25,118)` to `(25,117)`.
+
+`linux/scripts/host.sh walk X Y` sends a walk and waits for the server's
+`tp`/`mv` confirmation. The character must be **standing**: sitting blocks
+movement and is controlled by the `rest` packet. Some targets are ignored
+(blocked tile, or the client still settling), so confirm each move before
+sending the next one.
 
 Gameforge's terms of service prohibit automation. This is a tool for the
 account owner's own client; using it on a live account is their decision and

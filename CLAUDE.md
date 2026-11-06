@@ -26,12 +26,12 @@ Last checked 2026-11-06.
 |---|---|
 | `windows/` | Original MSVC/C# implementation, moved unchanged. Builds with Visual Studio; not exercised on this machine. |
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
-| Linux host tests | 29/29 pass (`make -C linux host-test`). |
+| Linux host tests | 35/35 pass (`make -C linux host-test`). |
 | x86 hook stubs | `HookStubTest.exe` (Wine) calls the real `hooks.S` detours and verifies the EDX packet pointer at `20(%ebp)`, the original-call replay and the send trampoline. Passes. |
 | GUI | Headless GTK4 smoke test passes (`make -C linux gui-test`, Xvfb): fake stream → 2 rows + STATUS in the status bar. |
 | Injector | Verified under Wine end-to-end: `Injector.exe --all` discovers a fake target named `NostaleClientX.exe`, remote `LoadLibraryA` succeeds and the DLL starts. Not yet run against the real client. |
 | Wine integration | Verified with Wine 11 + the fake target: DLL loads, listens on `127.0.0.1:47821`, host gets `STATUS`, `SEND` command path answers. Hooks correctly reported `NOT-FOUND` because the fake target is not the game. |
-| Real client | **Not tested.** NosTale is not installed in a Wine prefix here. The three signatures are inherited from the Windows build and have not been re-verified on the current client. |
+| Real client | **Verified live 2026-11-06.** Injected into PID 1216 (Wine 11): both hooks ACTIVE (`recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`), drops 0. `rest 1 1 14881134` stood the character up (`RECV rest 1 14881134 0`); `walk 25 117 0 10` made the server answer `tp 1 14881134 25 117 0`, moving the authoritative position from (25,118) to (25,117). |
 | GUI | PyGObject 3.56 / GTK 4.22 present; `ntpl.gui` imports. Not opened on a display in this environment. |
 
 ## Commands
@@ -45,7 +45,7 @@ cd ~/games/gameforge/NostalePacketLogger
 # Linux build (MinGW-w64 i686; installed via apt)
 make -C linux all test-host
 make -C linux check                 # file(1) on the three PE32 outputs
-make -C linux host-test             # 29 stdlib unittest cases
+make -C linux host-test             # 35 stdlib unittest cases
 make -C linux gui-test              # headless GTK4 smoke test (xvfb)
 make -C linux clean
 
@@ -57,7 +57,12 @@ export WINEPREFIX="$HOME/.wine-nostale"       # never the Gameforge prefix
 linux/scripts/inject.sh
 linux/scripts/host.sh status
 linux/scripts/host.sh monitor [--engine] [--filter TEXT] [--log FILE]
-linux/scripts/host.sh send "walk 19 146 0 10"
+linux/scripts/host.sh walk 25 117              # send a walk, wait for tp/mv
+linux/scripts/host.sh send "rest 1 1 14881134" # sit/stand toggle
+linux/scripts/host.sh send "walk 19 146 0 10"  # raw packet
+linux/scripts/host.sh scan 34 73               # memory debug: pair
+linux/scripts/host.sh find 14881134            # memory debug: charId
+linux/scripts/host.sh read 0x07B96FA4 32       # memory debug: dump
 linux/scripts/host.sh gui
 
 # Windows (from Windows, or WSL with the full MSBuild path)
@@ -82,8 +87,13 @@ PYTHONPATH=linux/host python3 -m ntpl status
   `WaitForSingleObject` / `GetExitCodeThread` check. Enumerates Windows PIDs by
   executable name, so it works under Wine without Linux PID mapping.
 - **Host** (`linux/host/ntpl/`): `protocol.py` (parse/encode), `client.py`
-  (TCP, retry, reader thread), `engine.py` (`WorldState`), `cli.py`, `gui.py`.
-  Standard library only outside the GUI.
+  (TCP, retry, reader thread), `engine.py` (`WorldState`; parses `mv`, `tp`,
+  `rest`, `cond`, `stat`, spawns), `cli.py` (`walk` waits for the server's
+  `tp`/`mv`), `gui.py`. Standard library only outside the GUI.
+- **Sit/stand:** `rest 1 1 <charId>` toggles; the server answers
+  `rest <type> <charId> <state>` with 0 = standing, 1 = sitting. Sitting
+  regenerates HP/MP but blocks movement, so stand before `walk`. The client
+  does not echo its own `mv`; wait for the server's `tp` after a walk.
 - **Docs**: `docs/architecture.md`, `docs/hooking.md`, `docs/ipc.md`,
   `docs/linux.md`, `docs/windows.md`, `docs/development.md`,
   `docs/roadmap.md`, `docs/troubleshooting.md`; packet wiki in
@@ -115,10 +125,23 @@ PYTHONPATH=linux/host python3 -m ntpl status
 - **Terms of service:** Gameforge prohibits automation. The owner accepts the
   account risk; do not add detection-evasion features.
 
-## Not verified / next
+## Achieved / next
 
-1. Install NosTale in a dedicated Wine prefix and run the injector.
-2. `host.sh status`: both addresses non-zero, both hooks `ACTIVE`.
-3. Capture one session, reconcile `docs/protocol/` and the engine handlers.
-4. Fix whatever the real client exposes (calling convention, packet formats,
-   Wine quirks), then update this file and the docs in the same session.
+First packet-driven game actions are confirmed on the live client:
+
+1. The injector and both hooks work in the real client.
+2. Sit/stand is controlled by `rest`.
+3. A walk packet moved the character to the requested tile (server `tp`).
+4. The engine parses the resulting `tp`/`rest`/`cond`/`stat` stream.
+
+Next:
+
+1. Make `ntpl walk` part of a closed loop: send one walk, wait for `tp`/`mv`,
+   only then send the next; do not spam targets while the client is settling.
+2. Learn which tiles the server rejects (blocked/occupied) and add a small
+   path/target check instead of blind attempts.
+3. Capture the client's own `walk` SEND packets (the current send hook sees
+   `rest`/`sortopen`/`pulse` but not the game's walks) to learn the exact
+   checksum/path behaviour.
+4. Reconcile `docs/protocol/` with the live session, then extend the engine
+   toward the autonomous loop.

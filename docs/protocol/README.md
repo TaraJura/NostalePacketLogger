@@ -41,6 +41,7 @@ See [../ipc.md](../ipc.md).
 |--------|-----|-------------|-----|
 | `stat` | RECV | HP/MP/XP update | [stats.md](stats.md) |
 | `cond` | RECV | Entity condition/state | [stats.md](stats.md) |
+| `rest` | SEND/RECV | Sit/stand toggle and state; sitting blocks movement | [stats.md](stats.md) |
 | `lev` | RECV | Level info | [stats.md](stats.md) |
 
 ### Combat
