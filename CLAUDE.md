@@ -30,15 +30,15 @@ build); the fixed build is in the repo, and the client must be restarted.
 |---|---|
 | `windows/` | Original MSVC/C# implementation, moved unchanged. Builds with Visual Studio; not exercised on this machine. |
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
-| Linux host tests | 55/55 pass (`make -C linux host-test`). |
+| Linux host tests | 58/58 pass (`make -C linux host-test`). |
 | Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live map is **20** (230x260); 100 % of 173,503 `mv` samples land on walkable `0x00` cells. |
-| Map UI / bot | GTK4 Map/Bot tab: grid + entities + A* path + loop + auto-attack; own character is a bigger dot with a facing arrow derived from the last walk delta. `make gui-test` and `make bot-test` pass. |
+| Map UI / bot | GTK4 Map/Bot tab: grid + entities + drops + A* path + loop + auto-attack + pickup; own character is a bigger dot with a facing arrow from the last walk delta. `make gui-test` and `make bot-test` pass. |
 | x86 hook stubs | `HookStubTest.exe` (Wine) calls the real `hooks.S` detours and verifies the EDX packet pointer at `20(%ebp)`, the original-call replay and the send trampoline. Passes. |
 | GUI | Headless GTK4 smoke test passes (`make -C linux gui-test`, Xvfb): fake stream → 2 rows + STATUS in the status bar. |
 | Injector | Verified under Wine end-to-end against both the fake target and the live client (PID 1216): remote `LoadLibraryA` succeeds and the DLL starts. |
 | Wine integration | Verified with Wine 11 + the fake target: DLL loads, listens on `127.0.0.1:47821`, host gets `STATUS`, `SEND` command path answers. Hooks correctly reported `NOT-FOUND` because the fake target is not the game. |
 | Real client | **Verified live 2026-11-06.** Injected into PID 1216 (Wine 11): both hooks ACTIVE (`recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`), drops 0. `rest` controls sit/stand. Movement uses the DLL's `MOVE\|x y`, which calls the client's own MoveTo (`0x565E88`): the client pathfinds, animates and sends its own `walk`; `POS` reads its local position. The GUI bot walked `(26,133)→(23,130)` as six client walk packets (no injected walks or teleports). Raw injected walks need the checksum `1 if (x+y)%3 == 1` and are not animated. |
-| Skill hook | Captures the client's own `u_s` builder at the `0x72D5B2` call site (packet in ECX); status shows `skill=ACTIVE`. Injected `u_s 866 …` is answered by the server with `cancel 0 866 -1`; the character's valid attack skill is still being captured. |
+| Skill hook | Captures the client's own `u_s` builder at the `0x72D5B2` call site (packet in ECX); status shows `skill=ACTIVE`. Normal attack is `u_s 0 3 <id>`; the server answers with `su ... 866/868 ...`. `u_s 866` itself is answered with `cancel 0 866 -1`. Live auto-attack verified. |
 | GUI | PyGObject 3.56 / GTK 4.22 present; `ntpl.gui` imports. Not opened on a display in this environment. |
 
 ## Commands
@@ -52,7 +52,7 @@ cd ~/games/gameforge/NostalePacketLogger
 # Linux build (MinGW-w64 i686; installed via apt)
 make -C linux all test-host
 make -C linux check                 # file(1) on the three PE32 outputs
-make -C linux host-test             # 55 stdlib unittest cases
+make -C linux host-test             # 58 stdlib unittest cases
 make -C linux gui-test              # headless GTK4 + map surface smoke
 make -C linux bot-test              # fake server: path loop + auto-attack
 make -C linux clean
@@ -66,7 +66,7 @@ linux/scripts/inject.sh
 linux/scripts/host.sh status
 linux/scripts/host.sh monitor [--engine] [--filter TEXT] [--log FILE]
 linux/scripts/host.sh walk 25 118              # client MoveTo; natural walk
-linux/scripts/host.sh cast 10 --target-id 5164  # basic attack (u_s 10 3 id)
+linux/scripts/host.sh cast 0 --target-id 5160   # normal attack (u_s 0 3 id)
 linux/scripts/host.sh send "rest 1 1 14881134" # sit/stand toggle
 linux/scripts/host.sh send "walk 19 146 0 10"  # raw packet
 linux/scripts/host.sh scan 34 73               # memory debug: pair
@@ -122,9 +122,11 @@ PYTHONPATH=linux/host python3 -m ntpl status
   count, id/offset index, zlib blocks; `width:int16`, `height:int16`,
   `width*height` terrain bytes; `0x00` walkable). The live map id is **20**,
   230x260. The Map/Bot tab draws the grid, takes click waypoints, computes an
-  A* path, and the bot stands (`rest`), auto-attacks (`ncif` + `u_s` template)
-  and walks one cell at a time through the client's own MoveTo (`MOVE|x y`),
-  confirming each from the client's `walk` packet/`world.position`. The own
+  A* path, and the bot stands (`rest`), picks up own/unowned drops
+  (`get 1 <charId> <dropId>`), auto-attacks (`ncif` + `u_s` template; skill 0
+  = normal attack) and walks in three-cell legs through the client's own MoveTo
+  (`MOVE|x y`), pacing each leg by distance so the animation stays continuous
+  instead of stopping after every cell. The own
   marker is a bigger dot + a facing arrow from the last `walk` delta (the
   protocol has no own-facing packet).
 - **Docs**: `docs/architecture.md`, `docs/engine.md`, `docs/map.md`,
@@ -178,8 +180,8 @@ First packet-driven game actions are confirmed on the live client:
 
 Next:
 
-1. Run the live path loop and auto-attack with the character standing and a
-   real skill vnum; lock the `u_s` field order from one live cast.
+1. Fully done: live path loop and auto-attack verified; normal attack is
+   `u_s 0 <type> <id>` (the server reports skill 866/868 in `su`).
 2. Capture the client's own `walk`/`u_s` SEND packets (the current send hook
    sees `rest`/`sortopen`/`pulse` but not the game's movement or skills).
 3. Confirm the map id from a `c_map` packet (the UI currently defaults to 20

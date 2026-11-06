@@ -20,7 +20,7 @@ shared: the transport differs, the game's packets do not.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 55 Python unit tests
+make -C linux host-test                      # 58 Python unit tests
 make -C linux gui-test                       # headless GTK4 + map smoke (xvfb)
 make -C linux bot-test                       # fake server: path loop + auto-attack
 
@@ -65,7 +65,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 55 unit tests pass, the GTK4 window and the map/bot
+The Linux port builds, its 58 unit tests pass, the GTK4 window and the map/bot
 loop pass their headless smoke tests, and the real injector has been run
 against the **live NosTale client** under Wine 11:
 
@@ -88,7 +88,8 @@ tile/entity); the bot stops after three rejected steps.
 The client's own map grids are parsed from `NostaleData/NStcData.NOS`; the live
 map is **20** (230x260) and every observed entity position is on walkable cells.
 The GTK4 **Map / Bot** tab renders the map, takes click waypoints, computes an
-A* path, and can loop it while auto-attacking nearby monsters. `map` commands
+A* path, and can loop it while auto-attacking nearby monsters and picking up
+your drops. `map` commands
 inspect/render the grids; `make bot-test` exercises the loop against a fake
 server. See [docs/map.md](docs/map.md).
 

@@ -154,17 +154,22 @@ The client's `u_s` and `ncif` builders exist in the binary:
 - `u_s ` constant at VA `0x72D630`, short `u_s` at `0x72D640`.
 - `ncif ` constant at VA `0x730370`.
 
-The exact `u_s` field order is now captured from the client's own skill hook:
+The exact `u_s` field order is now captured from the client's own skill hook.
+Two kinds of packets appeared:
 
 ```
-[SEND] ncif 3 5164
-[SEND] u_s 10 3 5164
+[SEND] u_s 0 3 5160
+[RECV] su 1 14881134 3 5160 866 ...     # normal/basic auto-attack
+[SEND] u_s 10 3 5161
+[RECV] su 1 14881134 3 5161 876 ...     # a cast skill
 ```
 
-So the prefix is `u_s <skill> <targetType> <targetId>` and the character's
-basic attack is **skill 10**. The bot's old default 866 was another player's
-skill; the server answered it with `cancel 0 866 -1` for every target.
-`ntpl cast 10 --target-id 5164 --target-type 3` is the verified command.
+So **skill 0 is the normal attack**; the server reports the character's actual
+basic-attack skill (866, or 868 for a different attack) in `su`. Skill 866 is
+not a castable `u_s` skill: `u_s 866 ...` is answered with
+`cancel 0 866 -1`. The bot now defaults to skill 0. `ntpl cast 0 --target-id
+5160 --target-type 3` is the verified normal-attack command; skill 10 is a
+different skill the client can also send.
 
 The first version of the skill hook replayed the original call and then used
 `ret`; because `Memory::Hook` patches the call site with a **JMP**, no return
@@ -173,6 +178,28 @@ capturing the packet. The stub now ends with `jmp <call_site+5>`. The game
 process exited, which is why the Gameforge client kept showing the stale
 "Ve hře" state; a game restart is needed to clear it and to inject the fixed
 DLL.
+
+### Loot
+
+The server announces ground items with
+
+```
+[RECV] drop 5193 13979116 49 169 1 0 14881134
+```
+
+(`itemVnum dropId x y amount unknown ownerCharId`; owner 0 = unowned). The
+client picks one up with
+
+```
+[SEND] get 1 14881134 13979116
+[RECV] get 1 14881134 13979116 0
+```
+
+The bot tracks `WorldState.drops` and sends `get` for its own/unowned drops
+within the GUI's Loot radius (default 3). Live verification: the drop above
+produced the `MANUAL_SEND get` and the server's four-field `get`
+confirmation at 15:57:11. It retries each drop up to three times; a server
+confirmation removes it. Distant drops are not auto-approached yet.
 
 ### Facing
 
@@ -274,10 +301,11 @@ skill packet.
   started again (or the Gameforge client is restarted).
 - The DLL (`PacketLogger9.dll`) was the crashing build; older
   `PacketLogger*.dll` copies are inert until the client restarts. The fixed
-  build reports `skill=ACTIVE` and captures `u_s 10 3 <target>`.
+  build reports `skill=ACTIVE` and captures `u_s 0 3 <target>` (normal attack)
+  as well as other cast skills.
 - The file log is `~/games/gameforge/prefix/drive_c/NosTalePacketLog.txt`.
 - The TCP server is `127.0.0.1:47821`.
-- The host test count is now 55; `make bot-test` also runs the
+- The host test count is now 58; `make bot-test` also runs the
   rejected-move regression test. The DLL in the client is `PacketLogger8.dll`
   (hooks ACTIVE, `MOVE`/`POS` available).
 
@@ -304,7 +332,7 @@ linux/scripts/host.sh map best
 # actions (confirm from the server)
 linux/scripts/host.sh send "rest 1 1 14881134"   # toggle sit/stand
 linux/scripts/host.sh walk 25 117                # waits for tp/mv
-linux/scripts/host.sh cast 10 --target-id 5164   # basic attack (u_s 10 3 id)
+linux/scripts/host.sh cast 0 --target-id 5160    # normal attack (u_s 0 3 id)
 ```
 
 ## Open items

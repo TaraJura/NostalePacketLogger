@@ -64,6 +64,7 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `x`, `y` | own position from `walk`/`at`; `position` property |
 | `facing` | last movement direction `(dx, dy)`, each -1/0/1; drives the GUI arrow; `None` until the first walk |
 | `entities` | `dict[int, Entity]` keyed by **entityId** (never vnum) |
+| `drops` | `dict[int, GroundItem]` keyed by drop id: item vnum, x, y, amount, owner char id |
 | `stats` | `CharacterStats(hp, hp_max, mp, mp_max)` from `stat` |
 | `chat` | last 200 `(type, id, message)` tuples from `say` |
 | `resting` | `True` sitting, `False` standing, `None` unknown; from `rest` |
@@ -84,6 +85,8 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `c_map` | RECV | `map_id`, clears entities |
 | `at` | RECV | `map_id`, own `x,y` (last two of the first four ints) |
 | `mv` | RECV | entity `x,y`, kind |
+| `drop` | RECV | `drops[dropId]` (item vnum, x, y, amount, owner) |
+| `get` | RECV | removes `drops[dropId]` after the server confirms a pickup |
 | `in` | RECV | player: name/charId/x/y; NPC/monster: entityId/x/y |
 | `out` | RECV | removes the entity |
 | `tp` | RECV | entity `x,y` (the server's authoritative move) |
@@ -122,7 +125,7 @@ animate a walk:
 | raw move | `SEND\|walk x y checksum speed` | probe `walk -1 -1 0 10` → server `tp`; the client may visibly teleport |
 | sit/stand | `rest 1 1 <charId>` (toggles) | `rest <type> <charId> <state>` (0 stand, 1 sit) |
 | target | `ncif <type> <id>` | no direct reply; used before `u_s` |
-| skill | `u_s …` (exact order unverified) | `su <attacker> <target> <skill> …` |
+| skill | `u_s <skill> <targetType> <targetId>`; skill 0 = normal attack | `su <attacker> <target> <skill> …` (normal attack reports 866/868) |
 
 The raw `walk` checksum is `walk_checksum(x, y)` = `1 if (x + y) % 3 == 1 else
 0`; the client's own builder uses exactly this. The client's MoveTo sends a
@@ -165,7 +168,7 @@ Drive the character:
 ```bash
 linux/scripts/host.sh walk 25 117
 linux/scripts/host.sh send "rest 1 1 14881134"   # toggle sit/stand
-linux/scripts/host.sh cast 10 --target-id 5164 --target-type 3
+linux/scripts/host.sh cast 0 --target-id 5160 --target-type 3
 ```
 
 Engine in a script:
@@ -199,8 +202,10 @@ The GUI's **Map / Bot** tab renders the grid, overlays entities and the own
 character, accepts waypoints by click, draws the A* path, and runs the bot:
 
 - stand up with `rest` when sitting;
+- pick up your own/unowned drops in the loot radius (`get 1 <charId>
+  <dropId>`);
 - auto-attack the nearest monster in range (`ncif` + a configurable `u_s`
-  template);
+  template; skill 0 is the normal attack);
 - walk one path cell at a time via the DLL's `MOVE|x y`, which runs the
   client's own pathfinding and animation; confirmation is the client's own
   `walk` packet / `world.position`.

@@ -93,7 +93,9 @@ linux/scripts/host.sh map best --log "$WINEPREFIX/drive_c/NosTalePacketLog.txt"
 | Loop | repeat the path when it finishes |
 | Start / Stop | run/stop the bot |
 | Auto-attack | attack monsters in range before the next path step |
-| Skill | skill vnum (default 10, the client's own basic attack; captured live as `u_s 10 3 <monster>`) |
+| Pickup | pick up your own/unowned drops within the loot radius |
+| Loot | pickup radius in cells (default 3) |
+| Skill | skill vnum (default **0** = normal/basic attack; the client sends `u_s 0 3 <monster>` and the server reports the basic skill, e.g. 866, in `su`) |
 | Range | attack radius in cells |
 | Cooldown | seconds between attacks |
 | Char ID | own char id; auto-filled from a `rest` packet, or enter it manually |
@@ -115,16 +117,23 @@ the arrow from movement is therefore the honest source.
 
 1. **Stand up** if `WorldState.resting` is true and the char id is known:
    `rest 1 1 <charId>` (the server toggles sit/stand; sitting blocks movement).
-2. **Auto-attack**, if enabled and the cooldown is over: pick the nearest
+2. **Pick up** if enabled and a drop owned by you (or unowned) is within the
+   loot radius: send `get 1 <charId> <dropId>`. Each drop is tried at most
+   three times; the server's `get` confirmation removes it from
+   `WorldState.drops`.
+3. **Auto-attack**, if enabled and the cooldown is over: pick the nearest
    `kind == 3` entity within the range from the own position, send
    `ncif 3 <id>` and the skill template, and set the cooldown.
-3. **Walk** the next A* cell by calling the client's own MoveTo function:
-   the GUI sends `MOVE|x y` to the DLL. The client pathfinds, animates the
-   movement and sends its own `walk` packets; the server accepts them as a
-   normal player move. The bot confirms when the engine's own position
-   (`world.position`) reaches the target. On a timeout it skips the cell
-   (blocked tile) and stops after three consecutive rejections.
-4. Repeat/loop; Stop ends the timer.
+4. **Walk** a multi-cell leg (three cells from the A* path, plus the final
+   cell) by calling the client's own MoveTo: the GUI sends `MOVE|x y` to the
+   DLL. The client pathfinds, animates and sends its own `walk` packet with
+   the leg destination; the server accepts it as a normal player move. Because
+   that packet arrives at the **start** of the animation, the bot waits
+   `0.45 s` per cell (minimum 0.35 s) before sending the next leg, so the
+   character walks continuously instead of stopping after every single cell.
+   On a timeout it skips the leg (blocked path) and stops after three
+   consecutive rejections.
+5. Repeat/loop; Stop ends the timer.
 
 The bot sends ordinary packets (`ncif`, `u_s`, `rest`) through the existing
 `PacketClient` and uses the DLL's `MOVE`/`POS` commands for movement. It never
@@ -137,7 +146,10 @@ never sees the `at` packet.
 
 - A `0x00` cell can still contain an object or entity at the pixel level; if
   the client refuses the path or the server rejects the move, the bot skips the
-  cell after the timeout.
+  leg after the timeout.
+- Leg size and pacing are constants in `gui.py` (three cells; `walk_confirm_
+  delay = 0.45 s/cell`). A very long `MOVE` makes the client jump to the
+  destination rather than animate, so keep legs short.
 - `MOVE` calls a client-build-specific function (`0x565E88`). The DLL validates
   its prologue and reports `MOVE: client build mismatch` after a client patch
   instead of crashing. `POS` reads the client's local player object
@@ -150,10 +162,15 @@ never sees the `at` packet.
   turning character. The live protocol exposes no own-facing field; `in` spawn
   directions are constant per character. If the game turns in place, the arrow
   does not change until the next move.
-- The exact `u_s` field order is still unverified. The template is editable;
+- Pickup only considers drops owned by your char id or unowned (`owner_id` 0);
+  another player's drops are skipped. The default loot radius is 3 cells; the
+  bot does not walk to distant drops by itself yet.
+- The exact `u_s` field order is still unverified beyond the verified
+  `u_s <skill> <targetType> <targetId>` prefix. The template is editable;
   capture one live cast (`su 1 <charId> ...` in the log) and adjust it.
-- Auto-attack targets `kind == 3` only; the skill vnum must be one the character
-  actually has.
+- Auto-attack targets `kind == 3` only, within **Range**. Skill **0** is the
+  normal attack; the server reports the basic skill (866/868) in `su`. Skill
+  866 itself is not castable and gets `cancel 0 866 -1`.
 - The map id is not always known; use Auto-detect or enter the id from a
   `c_map` packet.
 - The server may rate-limit or reject moves after many attempts; the bot stops
@@ -162,16 +179,17 @@ never sees the `at` packet.
 ## Tests
 
 ```bash
-make -C linux host-test   # 55 cases incl. synthetic NOS, A*, checksum
+make -C linux host-test   # 58 cases incl. synthetic NOS, A*, checksum
 make -C linux gui-test    # GUI + map surface + unknown-position guard
-make -C linux bot-test    # fake server: auto-attack, MOVE, rejection
+make -C linux bot-test    # fake server: auto-attack, pickup, MOVE, rejection
 ```
 
-The bot test sends a fake player at (25,117) on map 20 and a monster at
-(25,118); it asserts the engine sent `ncif 3 500`, `u_s 10 3 500` and
-`MOVE|26 119` (not an injected walk), and the fake client answered with its
-own `walk`. A second test makes the server silent and asserts the bot stops
-after three rejected moves.
+The bot test sends a fake player at (25,117) on map 20, a monster at
+(25,118) and a drop at the player's feet; it asserts the engine sent
+`get 1 14881134 999`, `ncif 3 500`, `u_s 0 3 500` and `MOVE|26 119` (not an
+injected walk), and the fake client answered with its own `walk`. A second
+test makes the server silent and asserts the bot stops after three rejected
+moves.
 
 ## Live status
 
@@ -181,5 +199,9 @@ after three rejected moves.
   second six-cell path `(26,133)→(23,130)` through the client's own MoveTo:
   the log contains only client `[SEND] walk` lines, no injected walks, no
   probes and no server `tp` teleports. The character animates normally.
-- The live auto-attack path (skill vnum + `u_s` layout) still needs user
-  supervision; movement is verified.
+- Live auto-attack is verified: the bot walked from `(45,184)` toward nearby
+  monsters and landed multiple `su 1 14881134 3 <id> 866 ...` hits with
+  `u_s 0 3 <id>` (2026-11-06 ~15:54). Movement and combat are both working.
+- Live pickup is verified: a drop `drop 5193 13979116 49 169 1 0 14881134`
+  produced `MANUAL_SEND get 1 14881134 13979116` and the server confirmed with
+  `RECV get 1 14881134 13979116 0` (2026-11-06 ~15:57).

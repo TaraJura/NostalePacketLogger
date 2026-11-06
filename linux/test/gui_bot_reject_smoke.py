@@ -91,6 +91,7 @@ def main() -> int:
             app.auto_attack_toggle.set_active(False)
             app.attack_walk_delay = 0.0
             app.walk_timeout = 0.15
+            app.walk_timeout_per_cell = 0.0
             app._start_bot()
             GLib.timeout_add(2000, check)
         except Exception as exc:  # noqa: BLE001 - report, do not crash GTK

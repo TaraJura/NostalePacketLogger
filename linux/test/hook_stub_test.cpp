@@ -26,6 +26,8 @@ void ntpl_on_packet_send(const char* packet);
 extern std::uintptr_t ntpl_recv_original_call;
 extern std::uintptr_t ntpl_recv_jmp_back;
 extern std::uintptr_t ntpl_send_trampoline;
+extern std::uintptr_t ntpl_skill_original_call;
+extern std::uintptr_t ntpl_skill_jmp_back;
 extern std::uintptr_t ntpl_tnt_client;
 extern std::uintptr_t ntpl_send_addr;
 
@@ -49,6 +51,8 @@ extern "C" {
 std::uintptr_t ntpl_recv_original_call = 0;
 std::uintptr_t ntpl_recv_jmp_back = 0;
 std::uintptr_t ntpl_send_trampoline = 0;
+std::uintptr_t ntpl_skill_original_call = 0;
+std::uintptr_t ntpl_skill_jmp_back = 0;
 std::uintptr_t ntpl_tnt_client = 0;
 std::uintptr_t ntpl_send_addr = 0;
 

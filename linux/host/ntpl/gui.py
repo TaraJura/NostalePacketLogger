@@ -23,7 +23,7 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango
 
 from .client import ConnectionLost, PacketClient
-from .engine import Engine, Entity
+from .engine import Engine, Entity, GroundItem
 from .mapdata import (
     DEFAULT_NSTC,
     MapDataError,
@@ -161,9 +161,12 @@ class Application(Gtk.Application):
         self.char_entry = None
         self.auto_attack_toggle = None
         self.loop_toggle = None
+        self.pickup_toggle = None
+        self.loot_range = None
 
         self.waypoints: list[tuple[int, int]] = []
         self.path_cells: list[tuple[int, int]] = []
+        self.bot_goals: list[tuple[int, int]] = []
         self.path_index = 0
         self.pending_target: tuple[int, int] | None = None
         self.pending_since = 0.0
@@ -174,6 +177,15 @@ class Application(Gtk.Application):
         self.rejected_walks = 0
         self.attack_walk_delay = ATTACK_WALK_DELAY
         self.walk_timeout = 3.0
+        self.walk_timeout_per_cell = 2.5
+        # The client sends one walk packet per MOVE with the destination, so
+        # the packet arrives before the animation finishes. Wait roughly this
+        # long per cell before sending the next leg.
+        self.walk_confirm_delay = 0.45
+        self.pending_distance = 0
+        self.pickup_cooldown_until = 0.0
+        self.pickup_attempts: dict[int, int] = {}
+        self.pickup_ignored: dict[int, float] = {}
         self.bot_running = False
         self.bot_timer = None
         self._closing = False
@@ -332,13 +344,24 @@ class Application(Gtk.Application):
 
         self.auto_attack_toggle = Gtk.ToggleButton(label="Auto-attack")
         bottom.append(self.auto_attack_toggle)
+        self.pickup_toggle = Gtk.ToggleButton(label="Pickup")
+        self.pickup_toggle.set_active(True)
+        self.pickup_toggle.set_tooltip_text(
+            "Pick up your own drops within the loot range"
+        )
+        bottom.append(self.pickup_toggle)
+        bottom.append(Gtk.Label(label="Loot"))
+        self.loot_range = Gtk.SpinButton.new_with_range(1, 10, 1)
+        self.loot_range.set_value(3)
+        self.loot_range.set_tooltip_text("pickup radius in cells")
+        bottom.append(self.loot_range)
         bottom.append(Gtk.Label(label="Skill"))
         self.skill_entry = Gtk.Entry()
         self.skill_entry.set_width_chars(6)
-        # The client's own basic attack is skill 10 (captured live:
-        # `u_s 10 3 <monster>`). 866 was another player's skill and the
-        # server answered it with `cancel 0 866 -1`.
-        self.skill_entry.set_text("10")
+        # The basic/normal attack is `u_s 0 3 <monster>`; the server reports
+        # the character's basic skill as 866 (or 868 for a different attack)
+        # in the `su` response. 866 is not a castable `u_s` skill.
+        self.skill_entry.set_text("0")
         self.skill_entry.set_tooltip_text("skill vnum sent to the server")
         bottom.append(self.skill_entry)
         bottom.append(Gtk.Label(label="Range"))
@@ -881,6 +904,24 @@ class Application(Gtk.Application):
             self._request_position()
             self._set_status("locating character; press Start again")
             return
+        # The client's MoveTo already does the pathfinding and animation. Give
+        # it a multi-cell leg per call instead of one cell: a per-cell MOVE
+        # starts and stops the walk every few hundred ms, which looks robotic.
+        # Three cells per MOVE is short enough that the client animates it and
+        # long enough that the movement is continuous.
+        if self.path_cells:
+            self.bot_goals = [
+                self.path_cells[i] for i in range(2, len(self.path_cells), 3)
+            ]
+            if (
+                not self.bot_goals
+                or self.bot_goals[-1] != self.path_cells[-1]
+            ):
+                self.bot_goals.append(self.path_cells[-1])
+        elif self.waypoints:
+            self.bot_goals = list(self.waypoints)
+        else:
+            self.bot_goals = []
         self.bot_running = True
         self.path_index = 0
         self.pending_target = None
@@ -888,6 +929,9 @@ class Application(Gtk.Application):
         self.attack_cooldown_until = 0.0
         self.walk_not_before = 0.0
         self.rejected_walks = 0
+        self.pickup_cooldown_until = 0.0
+        self.pickup_attempts.clear()
+        self.pickup_ignored.clear()
         if self.bot_timer is None:
             self.bot_timer = GLib.timeout_add(BOT_INTERVAL_MS, self._bot_tick)
         self._set_status("bot started")
@@ -902,7 +946,7 @@ class Application(Gtk.Application):
 
     def _advance_path(self) -> None:
         self.path_index += 1
-        if self.path_index >= len(self.path_cells):
+        if self.path_index >= len(self.bot_goals):
             if self.loop_toggle is not None and self.loop_toggle.get_active():
                 self.path_index = 0
             else:
@@ -925,8 +969,30 @@ class Application(Gtk.Application):
                 best_distance = distance
         return best
 
+    def _nearest_drop(self, radius: int) -> GroundItem | None:
+        position = self._player_cell()
+        char_id = self._char_id()
+        if position is None or char_id is None:
+            return None
+        px, py = position
+        now = time.monotonic()
+        best: GroundItem | None = None
+        best_distance = radius + 1
+        for drop in self.engine.world.drops.values():
+            if drop.owner_id not in (0, char_id):
+                continue
+            if self.pickup_attempts.get(drop.drop_id, 0) >= 3:
+                continue
+            if self.pickup_ignored.get(drop.drop_id, 0.0) > now:
+                continue
+            distance = max(abs(drop.x - px), abs(drop.y - py))
+            if distance <= radius and distance < best_distance:
+                best = drop
+                best_distance = distance
+        return best
+
     def _skill_packet(self, target_id: int) -> str:
-        skill = self.skill_entry.get_text().strip() or "10"
+        skill = self.skill_entry.get_text().strip() or "0"
         template = (
             self.skill_packet_entry.get_text().strip()
             or "u_s {skill} {type} {target}"
@@ -958,7 +1024,10 @@ class Application(Gtk.Application):
                 and self.last_move[0] == 1
                 and (self.last_move[2], self.last_move[3]) == self.pending_target
             )
-            if confirmed:
+            ready_at = self.pending_since + max(
+                0.35, self.pending_distance * self.walk_confirm_delay
+            )
+            if confirmed and now >= ready_at:
                 self._set_status(f"arrived at {self.pending_target}")
                 self.pending_target = None
                 self.rejected_walks = 0
@@ -987,6 +1056,26 @@ class Application(Gtk.Application):
             return True
 
         if (
+            self.pickup_toggle is not None
+            and self.pickup_toggle.get_active()
+            and char_id is not None
+            and now >= self.pickup_cooldown_until
+        ):
+            drop = self._nearest_drop(int(self.loot_range.get_value()))
+            if drop is not None:
+                if self._send(f"get 1 {char_id} {drop.drop_id}"):
+                    attempts = self.pickup_attempts.get(drop.drop_id, 0) + 1
+                    self.pickup_attempts[drop.drop_id] = attempts
+                    if attempts >= 3:
+                        self.pickup_ignored[drop.drop_id] = now + 15.0
+                    self.pickup_cooldown_until = now + 0.6
+                    self._set_status(
+                        f"pickup {drop.item_vnum} x{drop.amount} "
+                        f"({drop.drop_id})"
+                    )
+                return True
+
+        if (
             self.auto_attack_toggle is not None
             and self.auto_attack_toggle.get_active()
             and now >= self.attack_cooldown_until
@@ -1004,12 +1093,12 @@ class Application(Gtk.Application):
                 self._set_status(f"attack {monster.entity_id}: {packet}")
                 return True
 
-        if not self.path_cells:
+        if not self.bot_goals:
             self._set_status("path finished")
             self._stop_bot()
             return False
 
-        if self.path_index >= len(self.path_cells):
+        if self.path_index >= len(self.bot_goals):
             if self.loop_toggle.get_active():
                 self.path_index = 0
             else:
@@ -1017,15 +1106,31 @@ class Application(Gtk.Application):
                 self._stop_bot()
                 return False
 
+        target = self.bot_goals[self.path_index]
+        current = self._player_cell()
+        if current is not None and current == target:
+            self._advance_path()
+            return True
+
         if now < self.walk_not_before:
             return True
 
-        target = self.path_cells[self.path_index]
         if self._client_move(target[0], target[1]):
             self.pending_target = target
             self.pending_since = now
-            self.pending_until = now + self.walk_timeout
-            self._set_status(f"walking to {target}")
+            # A whole leg takes ~1 s per cell. Give the client enough time to
+            # finish it instead of sending a new MOVE on every 200 ms tick.
+            distance = 0
+            if current is not None:
+                distance = max(abs(target[0] - current[0]),
+                               abs(target[1] - current[1]))
+            timeout = min(
+                60.0,
+                max(self.walk_timeout, distance * self.walk_timeout_per_cell),
+            )
+            self.pending_distance = distance
+            self.pending_until = now + timeout
+            self._set_status(f"walking to {target} ({distance} cells)")
         return True
 
     def do_shutdown(self) -> None:

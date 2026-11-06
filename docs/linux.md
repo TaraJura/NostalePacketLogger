@@ -131,7 +131,7 @@ linux/scripts/host.sh monitor --filter walk   # only packets containing "walk"
 linux/scripts/host.sh monitor --log capture.log
 linux/scripts/host.sh send walk 19 146 0 10   # inject one packet
 linux/scripts/host.sh walk 25 117             # client MoveTo; natural walk
-linux/scripts/host.sh cast 10 --target-id 5164  # basic attack (u_s 10 3 id)
+linux/scripts/host.sh cast 0 --target-id 5160   # normal attack (u_s 0 3 id)
 linux/scripts/host.sh send "rest 1 1 14881134" # sit/stand toggle
 linux/scripts/host.sh status
 linux/scripts/host.sh replay capture.log      # resend the SEND lines
@@ -229,7 +229,7 @@ both.
 ## Tests
 
 ```bash
-make host-test          # 55 stdlib unit tests: protocol, engine, map, checksum
+make host-test          # 58 stdlib unit tests: protocol, engine, map, checksum
 
 make gui-test           # headless GTK4 window + map surface against a fake stream
 make bot-test           # fake server: auto-attack, MOVE, rejection

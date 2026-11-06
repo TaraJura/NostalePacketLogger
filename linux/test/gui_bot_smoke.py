@@ -5,7 +5,7 @@ a monster at (25,118). The GUI loads the real map, starts the bot with a short
 path, and the test checks that the bot sent:
 
     ncif 3 500          (select the monster)
-    u_s 10 3 500        (auto-attack with the basic skill 10)
+    u_s 0 3 500         (auto-attack: u_s 0 = normal/basic attack)
     walk 25 118 0 10    (first path cell)
 
 The fake server answers each walk with a server `tp`, so the path loop advances
@@ -56,6 +56,7 @@ class FakeServer:
             b"STATUS|ready\n"
             b"RECV|at 14881134 20 25 117 0 0 0 0 0 0 0\n"
             b"RECV|mv 3 500 25 118 10\n"
+            b"RECV|drop 1046 999 25 117 1 0 14881134\n"
         )
 
         buffer = b""
@@ -71,7 +72,16 @@ class FakeServer:
                 line, buffer = buffer.split(b"\n", 1)
                 text = line.decode("utf-8", "replace")
                 self.received.append(text)
-                if text == "POS":
+                if text.startswith("SEND|get "):
+                    parts = text.split()
+                    if len(parts) >= 4:
+                        try:
+                            self.connection.sendall(
+                                f"RECV|get 1 {parts[2]} {parts[3]} 0\n".encode()
+                            )
+                        except OSError:
+                            return
+                elif text == "POS":
                     try:
                         self.connection.sendall(
                             b"STATUS|POS 25 117 14881134\n"
@@ -120,7 +130,7 @@ def main() -> int:
             app.path_cells = [(26, 119)]
             app.loop_toggle.set_active(False)
             app.auto_attack_toggle.set_active(True)
-            app.skill_entry.set_text("10")
+            app.skill_entry.set_text("0")
             app.attack_cooldown.set_value(10)
             app.attack_walk_delay = 0.1
             app.walk_timeout = 0.5
@@ -136,10 +146,13 @@ def main() -> int:
             lines = list(server.received)
             has_ncif = any("SEND|ncif 3 500" in line for line in lines)
             has_skill = any(
-                line.startswith("SEND|u_s") and "10 3 500" in line
+                line.startswith("SEND|u_s") and "0 3 500" in line
                 for line in lines
             )
             has_move = any(line == "MOVE|26 119" for line in lines)
+            has_get = any(
+                line == "SEND|get 1 14881134 999" for line in lines
+            )
             # Movement must go through the client's own MoveTo, not through
             # an injected walk packet (that only teleports after a server tp).
             no_injected_walk = not any(
@@ -162,13 +175,14 @@ def main() -> int:
                 has_ncif
                 and has_skill
                 and has_move
+                and has_get
                 and no_injected_walk
                 and ordered
             )
             result["detail"] = (
                 f"ncif={has_ncif} skill={has_skill} move={has_move} "
-                f"no_injected_walk={no_injected_walk} "
-                f"skill_before_move={ordered} lines={lines[-10:]}"
+                f"pickup={has_get} no_injected_walk={no_injected_walk} "
+                f"skill_before_move={ordered} lines={lines[-12:]}"
             )
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"check exception: {exc!r}"

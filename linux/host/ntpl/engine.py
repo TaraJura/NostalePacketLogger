@@ -31,6 +31,18 @@ class Entity:
 
 
 @dataclass
+class GroundItem:
+    """An item lying on the ground (`drop`) or just picked up (`get`)."""
+
+    drop_id: int
+    item_vnum: int
+    x: int
+    y: int
+    amount: int = 1
+    owner_id: int = 0
+
+
+@dataclass
 class CharacterStats:
     hp: int = 0
     hp_max: int = 0
@@ -47,6 +59,7 @@ class WorldState:
     # +x is right, +y is down on the map. None until the first walk.
     facing: tuple[int, int] | None = None
     entities: dict[int, Entity] = field(default_factory=dict)
+    drops: dict[int, GroundItem] = field(default_factory=dict)
     stats: CharacterStats = field(default_factory=CharacterStats)
     chat: deque[tuple[int, int, str]] = field(default_factory=lambda: deque(maxlen=200))
     resting: bool | None = None
@@ -94,6 +107,34 @@ def _on_map(world: WorldState, packet: Packet) -> None:
     if ids:
         world.map_id = ids[0]
         world.entities.clear()
+        world.drops.clear()
+
+
+def _on_drop(world: WorldState, packet: Packet) -> None:
+    # drop <itemVnum> <dropId> <x> <y> <amount> <unknown> <ownerCharId>
+    # Live: drop 1046 13961541 29 180 635 0 14881134
+    values = packet.ints(7)
+    if not values:
+        return
+    item_vnum, drop_id, x, y, amount = values[:5]
+    owner_id = values[6]
+    world.drops[drop_id] = GroundItem(
+        drop_id=drop_id,
+        item_vnum=item_vnum,
+        x=x,
+        y=y,
+        amount=amount,
+        owner_id=owner_id,
+    )
+
+
+def _on_get(world: WorldState, packet: Packet) -> None:
+    # get <type> <charId> <dropId> <unknown>  (RECV, after a pickup)
+    # The client also sends a shorter `get <type> <charId> <dropId>`; only the
+    # server's confirmation removes the item.
+    values = packet.ints(4)
+    if values:
+        world.drops.pop(values[2], None)
 
 
 def _on_position(world: WorldState, packet: Packet) -> None:
@@ -288,6 +329,8 @@ class Engine:
                 "c_map": _on_map,       # RECV: map change
                 "at": _on_position,     # RECV: position after map load
                 "mv": _on_move,         # RECV: entity movement
+                "drop": _on_drop,       # RECV: item dropped on the ground
+                "get": _on_get,         # RECV: pickup confirmation
                 "in": _on_spawn,        # RECV: entity spawned
                 "out": _on_despawn,     # RECV: entity despawned
                 "tp": _on_teleport,     # RECV: entity teleported / server position

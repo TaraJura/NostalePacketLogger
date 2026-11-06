@@ -52,7 +52,7 @@ sudo apt install python3-gi gir1.2-gtk-4.0
 From `linux/`:
 
 ```bash
-make host-test      # 55 unittest cases
+make host-test      # 58 unittest cases
 make gui-test       # headless GTK4 window + map smoke test (xvfb)
 make bot-test       # path loop + auto-attack against a fake server (xvfb)
 ```

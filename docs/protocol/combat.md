@@ -30,22 +30,29 @@ Use a skill on a target.
 
 The client's builder concatenates the constant `u_s ` with numeric fields
 (found in the binary at VA `0x72D630`; the short `u_s` form is at `0x72D640`).
-A real client cast captured by the skill hook on 2026-11-06:
+Real client packets captured by the skill hook on 2026-11-06:
 
 ```
-u_s 10 3 5164
-    — basic attack (skill 10) on monster 5164
+u_s 0 3 5160
+    — normal/basic attack on monster 5160; the server answered
+      su 1 14881134 3 5160 866 ...
+u_s 10 3 5161
+    — a different (cast) skill; the server answered su 1 14881134 3 5161 876 ...
 ```
 
-The server echoes `cancel 0 <skill> -1` when the skill is not usable, and
-`su 1 <charId> 3 <target> <skill> ...` when it is. `<skill> <targetType>
-<targetId>` is therefore the verified prefix; later fields are still unknown.
+So **skill 0 is the normal auto-attack**; the server reports the character's
+actual basic-attack skill (866 here) in `su`. Skill 866 is not a castable
+`u_s` skill: sending `u_s 866 ...` is answered with `cancel 0 866 -1`. The
+server also sends `cancel 0 <skill> -1` when a cast skill is not usable.
+`<skill> <targetType> <targetId>` is the verified prefix; later fields are
+still unknown.
 
 `ntpl cast` defaults to `u_s <skillVnum> <targetType> <targetId>`:
 
 ```bash
-linux/scripts/host.sh cast 10 --target-id 5164 --target-type 3
-linux/scripts/host.sh cast --packet "u_s 10 3 5164"
+linux/scripts/host.sh cast 0 --target-id 5160 --target-type 3   # normal attack
+linux/scripts/host.sh cast 10 --target-id 5161 --target-type 3  # other skill
+linux/scripts/host.sh cast --packet "u_s 0 3 5160"
 ```
 
 The character must be **standing** (sitting blocks actions), the target must be

@@ -106,6 +106,38 @@ class EngineTests(unittest.TestCase):
         world = self.engine.feed(packet(Kind.RECV, "out 1 7"))
         self.assertNotIn(7, world.entities)
 
+    def test_drop_and_get(self):
+        # Live: drop 1046 13961541 29 180 635 0 14881134
+        world = self.engine.feed(
+            packet(Kind.RECV, "drop 1046 13961541 29 180 635 0 14881134")
+        )
+        drop = world.drops[13961541]
+        self.assertEqual(
+            (drop.item_vnum, drop.x, drop.y, drop.amount, drop.owner_id),
+            (1046, 29, 180, 635, 14881134),
+        )
+        world = self.engine.feed(
+            packet(Kind.RECV, "get 1 14881134 13961541 0")
+        )
+        self.assertNotIn(13961541, world.drops)
+
+    def test_get_send_does_not_remove_drop(self):
+        self.engine.feed(
+            packet(Kind.RECV, "drop 5962 13962833 27 180 1 0 14881134")
+        )
+        world = self.engine.feed(
+            packet(Kind.SEND, "get 1 14881134 13962833")
+        )
+        # Only the server's four-field `get` confirmation removes it.
+        self.assertIn(13962833, world.drops)
+
+    def test_map_change_clears_drops(self):
+        self.engine.feed(
+            packet(Kind.RECV, "drop 5962 13962833 27 180 1 0 14881134")
+        )
+        world = self.engine.feed(packet(Kind.RECV, "c_map 100 0"))
+        self.assertEqual(world.drops, {})
+
     def test_stats(self):
         world = self.engine.feed(packet(Kind.RECV, "stat 100 200 50 120"))
         self.assertEqual(
