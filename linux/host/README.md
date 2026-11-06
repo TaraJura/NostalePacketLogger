@@ -56,7 +56,7 @@ sudo apt install python3-gi gir1.2-gtk-4.0
 From `linux/`:
 
 ```bash
-make host-test      # 83 unittest cases
+make host-test      # 84 unittest cases
 make gui-test       # headless GTK4: map switch, tooltips, toggles, recovery banner
 make bot-test       # 5 smokes: combat, rules/config, spell order, rejection, recovery
 ```

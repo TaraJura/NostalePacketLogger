@@ -207,12 +207,13 @@ touching the UI.
 - `spells.py` — `NSgtdData.NOS` container reader, nibble decode, Skill.dat
   parser and `vnum → SpellInfo` catalog.
 - `monsternames.py` — `load_skill_descriptions` provides the readable names.
-- `linux/host/tests/test_botconfig.py` — schema round trip, clamping, errors.
+- `linux/host/tests/test_botconfig.py` — schema round trip, clamping, errors,
+  and preservation of spell-rule order/conditions.
 - `linux/host/tests/test_spells.py` — parser, self target, known live spells.
 - `linux/test/gui_bot_rules_smoke.py` — fake server with two monsters: filter
   selects vnum 200 and ignores the nearer vnum 201; HP 40 % triggers a spell
-  rule (`u_s 7 3 500`), no basic attack; catalog/picker, MP/range gating and
-  save/load.
+  rule (867 → slot 1, `u_s 1 3 500`), no basic attack; catalog/picker dialog,
+  vnum→slot mapping, MP/range gating and save/load.
 - `linux/test/gui_spell_order_smoke.py` — scanned spells 876 (Holy Hammer,
   90 s cooldown) and 866 (Holy Attack): 876 must cast first, then 866 twice
   while 876 is on cooldown; no basic attack.

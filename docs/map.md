@@ -332,7 +332,7 @@ never sees the `at` packet.
 ## Tests
 
 ```bash
-make -C linux host-test   # 83 cases incl. synthetic NOS, 8-way A*, checksum, config
+make -C linux host-test   # 84 cases incl. synthetic NOS, 8-way A*, checksum, config
 make -C linux gui-test    # GUI + map surface + tooltips + unknown-position guard
 make -C linux bot-test    # 5 fake-server smokes: combat, rules, rejection, recovery
 ```

@@ -234,7 +234,7 @@ both.
 ## Tests
 
 ```bash
-make host-test          # 83 stdlib unit tests: protocol, engine, map, config, spells
+make host-test          # 84 stdlib unit tests: protocol, engine, map, config, spells
 
 make gui-test           # headless GTK4 window + map surface against a fake stream
 make bot-test           # 5 fake-server smokes: combat, rules/config, spell order, rejection, recovery

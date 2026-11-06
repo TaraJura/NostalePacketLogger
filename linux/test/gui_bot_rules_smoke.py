@@ -25,7 +25,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import GLib
+from gi.repository import GLib, Gtk
 
 from ntpl.botconfig import SpellRule
 from ntpl.engine import Entity
@@ -248,6 +248,32 @@ def main() -> int:
                 and far is None
             )
 
+            def find_listbox(widget):
+                if isinstance(widget, Gtk.ListBox):
+                    return widget
+                child = widget.get_first_child()
+                while child is not None:
+                    found = find_listbox(child)
+                    if found is not None:
+                        return found
+                    child = child.get_next_sibling()
+                return None
+
+            app._ensure_spells_loaded()
+            app._open_spell_picker(lambda spell: None)
+            picker = app.spell_picker_window
+            picker_dialog_ok = False
+            if picker is not None:
+                listbox = find_listbox(picker)
+                rows = 0
+                if listbox is not None:
+                    child = listbox.get_first_child()
+                    while child is not None:
+                        rows += 1
+                        child = child.get_next_sibling()
+                picker_dialog_ok = rows >= 1
+                picker.close()
+
             result["ok"] = (
                 has_target
                 and has_spell
@@ -263,6 +289,7 @@ def main() -> int:
                 and unknown_ok
                 and config_ok
                 and spell_rules_ok
+                and picker_dialog_ok
             )
             result["detail"] = (
                 f"target={has_target} spell={has_spell} "
@@ -272,7 +299,8 @@ def main() -> int:
                 f"catalog={catalog_ok} "
                 f"self_spell={self_spell_ok} picker={picker_ok} "
                 f"unknown={unknown_ok} config={config_ok} "
-                f"spell_rules={spell_rules_ok} lines={lines[-10:]}"
+                f"spell_rules={spell_rules_ok} "
+                f"picker_dialog={picker_dialog_ok} lines={lines[-10:]}"
             )
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"check exception: {exc!r}"

@@ -183,6 +183,7 @@ class Application(Gtk.Application):
         self.spell_rows: list[dict] = []
         self.spell_last_cast: dict[int, float] = {}
         self.config_info = None
+        self.spell_picker_window = None
         self.map_surface: cairo.ImageSurface | None = None
         self.map_area = None
         self.map_scrolled = None
@@ -1042,10 +1043,20 @@ class Application(Gtk.Application):
         if self.window is None:
             return
         self._ensure_spells_loaded()
+        if self.spell_picker_window is not None:
+            self.spell_picker_window.close()
         window = Gtk.Window(title="Choose spell")
+        window.set_application(self)
         window.set_transient_for(self.window)
         window.set_modal(True)
         window.set_default_size(640, 620)
+        self.spell_picker_window = window
+
+        def clear_picker(*_args):
+            self.spell_picker_window = None
+            return False
+
+        window.connect("close-request", clear_picker)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         box.set_margin_top(8)
@@ -1148,7 +1159,7 @@ class Application(Gtk.Application):
                     f"cast {spell.cast_time:g}s"
                 )
                 row.connect(
-                    "activated",
+                    "activate",
                     lambda _row, chosen=spell: (
                         on_pick(chosen),
                         window.close(),
@@ -1174,6 +1185,8 @@ class Application(Gtk.Application):
         refresh()
 
         def wait_loaded() -> bool:
+            if not window.get_visible():
+                return False
             if not self.spells_loaded:
                 return True
             refresh()

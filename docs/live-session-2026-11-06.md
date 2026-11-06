@@ -324,7 +324,7 @@ skill packet.
 ```bash
 # build and unit tests
 make -C linux all test-host
-make -C linux host-test        # 83 cases
+make -C linux host-test        # 84 cases
 make -C linux gui-test         # headless GTK4 + map surface
 make -C linux bot-test         # 5 smokes: combat, rules/config, spell order, rejection, recovery
 
@@ -478,7 +478,7 @@ shortcut and the no-corner-cutting rule.
 
 ### Verification and state
 
-- **83 host tests**, `make gui-test` (map switch, tooltips, toggle classes,
+- **84 host tests**, `make gui-test` (map switch, tooltips, toggle classes,
   recovery banner), and **5 bot smokes** (combat, target filter + spell rules
   + config round-trip, rejected walks, recovery) pass.
 - Headless rules smoke: two monsters (vnum 201 nearer, vnum 200 farther),

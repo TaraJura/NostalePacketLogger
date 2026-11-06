@@ -74,6 +74,44 @@ class BotConfigTests(unittest.TestCase):
         self.assertEqual(rule.cooldown, 0.0)
         self.assertEqual(rule.target, "monster")
 
+    def test_spell_rule_order_and_conditions_are_preserved(self):
+        config = BotConfig(
+            spell_rules=[
+                SpellRule(
+                    spell=876,
+                    subject="always",
+                    cooldown=90,
+                    target="monster",
+                ),
+                SpellRule(
+                    spell=867,
+                    subject="my_hp",
+                    comparator="below",
+                    threshold=50,
+                    cooldown=3,
+                    target="self",
+                ),
+                SpellRule(
+                    spell=866,
+                    subject="always",
+                    cooldown=1,
+                    target="monster",
+                ),
+            ]
+        )
+        loaded = BotConfig.from_dict(config.to_dict())
+        self.assertEqual(
+            [rule.spell for rule in loaded.spell_rules], [876, 867, 866]
+        )
+        self.assertEqual(
+            [rule.subject for rule in loaded.spell_rules],
+            ["always", "my_hp", "always"],
+        )
+        self.assertEqual(
+            [rule.target for rule in loaded.spell_rules],
+            ["monster", "self", "monster"],
+        )
+
     def test_invalid_json_raises_config_error(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "bot.json"

@@ -20,7 +20,7 @@ shared: the transport differs, the game's packets do not.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 83 Python unit tests
+make -C linux host-test                      # 84 Python unit tests
 make -C linux gui-test                       # headless GTK4 + map smoke (xvfb)
 make -C linux bot-test                       # 5 fake-server bot smokes
 
@@ -67,7 +67,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 83 unit tests pass, the GTK4 window and five bot
+The Linux port builds, its 84 unit tests pass, the GTK4 window and five bot
 smoke tests pass, and the real injector has been run against the **live
 NosTale client** under Wine 11:
 
