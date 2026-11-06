@@ -20,7 +20,7 @@ shared: the transport differs, the game's packets do not.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 35 Python unit tests
+make -C linux host-test                      # 37 Python unit tests
 make -C linux gui-test                       # headless GTK4 smoke test (xvfb)
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path

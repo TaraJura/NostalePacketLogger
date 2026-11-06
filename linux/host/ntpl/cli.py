@@ -205,6 +205,95 @@ def cmd_send(args: argparse.Namespace) -> int:
     return 0
 
 
+# --------------------------------------------------------------------- cast
+
+
+def build_cast_packet(
+    skill: int,
+    target_type: int = 3,
+    target_id: int | None = None,
+    x: int | None = None,
+    y: int | None = None,
+) -> str:
+    """Default u_s layout: u_s <skill> <targetType> <targetId> [x y].
+
+    The client's own builder concatenates the "u_s " prefix with numeric
+    fields; the exact order is not fully verified yet. Use --packet to send a
+    literal packet when the live client shows a different layout.
+    """
+    fields = [str(skill), str(target_type)]
+    if target_id is not None:
+        fields.append(str(target_id))
+    if x is not None and y is not None:
+        fields.extend([str(x), str(y)])
+    return "u_s " + " ".join(fields)
+
+
+def cmd_cast(args: argparse.Namespace) -> int:
+    """Use a skill on a target and wait for the server's `su` confirmation."""
+    client = _connect(args)
+    if client is None:
+        return 2
+
+    if args.packet:
+        packet = args.packet
+    elif args.skill is not None:
+        packet = build_cast_packet(
+            args.skill, args.target_type, args.target_id, args.x, args.y
+        )
+    else:
+        print("ntpl: give a skill vnum or --packet", file=sys.stderr)
+        client.close()
+        return 2
+
+    deadline = time.monotonic() + args.timeout
+    try:
+        if args.stand:
+            # The character cannot cast while sitting.
+            client.send_packet(f"rest 1 1 {args.stand}")
+        if not args.no_select and args.target_id is not None:
+            client.send_packet(f"ncif {args.target_type} {args.target_id}")
+        client.send_packet(packet)
+        print("sent:", packet)
+
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            message = client.recv(timeout=remaining)
+            if message is None:
+                continue
+            if message.kind is Kind.STATUS:
+                print(message.payload)
+                if "send failed" in message.payload.lower():
+                    return 1
+                continue
+            if message.kind is not Kind.RECV:
+                continue
+
+            used = Packet.from_message(message)
+            if used.opcode != "su":
+                continue
+            values = used.ints(5)
+            if not values:
+                continue
+            _attacker_type, _attacker_id, _target_type, target_id, skill = values
+            if args.target_id is not None and target_id != args.target_id:
+                continue
+            if args.skill is not None and skill != args.skill:
+                continue
+            print("confirmed:", used.text)
+            return 0
+    except (ConnectionLost, ProtocolError, ValueError) as exc:
+        print(f"ntpl: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        client.close()
+
+    print("ntpl: no su confirmation for the skill", file=sys.stderr)
+    return 1
+
+
 # --------------------------------------------------------------------- walk
 
 
@@ -476,6 +565,25 @@ def build_parser() -> argparse.ArgumentParser:
     monitor.add_argument("--engine", action="store_true", help="keep a WorldState in sync")
     monitor.add_argument("--no-color", action="store_true")
     monitor.set_defaults(handler=cmd_monitor)
+
+    cast = sub.add_parser(
+        "cast", help="use a skill (experimental u_s layout; --packet overrides)"
+    )
+    _add_connection(cast)
+    cast.add_argument("skill", type=int, nargs="?", help="skill vnum")
+    cast.add_argument("--target-type", type=int, default=3)
+    cast.add_argument("--target-id", type=int)
+    cast.add_argument("--x", type=int)
+    cast.add_argument("--y", type=int)
+    cast.add_argument(
+        "--no-select", action="store_true", help="do not send ncif before u_s"
+    )
+    cast.add_argument(
+        "--stand", type=int, metavar="CHAR_ID", help="toggle rest (sit/stand) first"
+    )
+    cast.add_argument("--packet", default=None, help="literal packet override")
+    cast.add_argument("--timeout", type=float, default=4.0)
+    cast.set_defaults(handler=cmd_cast)
 
     walk = sub.add_parser(
         "walk", help="send a walk and wait for the server's position update"

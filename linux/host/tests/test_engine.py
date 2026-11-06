@@ -97,6 +97,24 @@ class EngineTests(unittest.TestCase):
         world = self.engine.feed(packet(Kind.RECV, "cond 1 14881134 0 0 10"))
         self.assertEqual(world.entities[14881134].speed, 10)
 
+    def test_skill_used_event(self):
+        # Real packet observed in the live log.
+        world = self.engine.feed(
+            packet(
+                Kind.RECV,
+                "su 1 14877915 3 5180 866 9 11 4401 0 0 0 0 6507 0 0 0 4140",
+            )
+        )
+        event = world.combat[-1]
+        self.assertEqual(event["attacker_id"], 14877915)
+        self.assertEqual(event["target_id"], 5180)
+        self.assertEqual(event["skill"], 866)
+        self.assertEqual(world.last_skill, 866)
+
+    def test_target_selection(self):
+        world = self.engine.feed(packet(Kind.SEND, "ncif 3 5180"))
+        self.assertEqual(world.target_id, 5180)
+
     def test_malformed_packets_do_not_raise(self):
         for text in ("stat x y z", "mv", "in", "say only-two", "walk"):
             self.engine.feed(packet(Kind.RECV, text))

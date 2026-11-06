@@ -43,7 +43,7 @@ sudo apt install python3-gi gir1.2-gtk-4.0
 | `protocol.py` | `TYPE|PAYLOAD` line protocol, `Message`, `Packet`, port from `NTPL_PORT` |
 | `client.py` | TCP connect with retries, line reassembly, send, reader thread |
 | `engine.py` | `WorldState` (map, position, entities, stats, chat) fed by packets |
-| `cli.py` | `monitor`, `send`, `status`, `replay`, `gui` |
+| `cli.py` | `monitor`, `walk`, `cast`, `send`, `status`, `replay`, `gui` |
 | `gui.py` | GTK4 window; optional import |
 
 ## Tests
@@ -51,7 +51,7 @@ sudo apt install python3-gi gir1.2-gtk-4.0
 From `linux/`:
 
 ```bash
-make host-test      # 35 unittest cases
+make host-test      # 37 unittest cases
 make gui-test       # headless GTK4 smoke test (xvfb)
 ```
 

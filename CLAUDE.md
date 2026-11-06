@@ -26,7 +26,7 @@ Last checked 2026-11-06.
 |---|---|
 | `windows/` | Original MSVC/C# implementation, moved unchanged. Builds with Visual Studio; not exercised on this machine. |
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
-| Linux host tests | 35/35 pass (`make -C linux host-test`). |
+| Linux host tests | 37/37 pass (`make -C linux host-test`). |
 | x86 hook stubs | `HookStubTest.exe` (Wine) calls the real `hooks.S` detours and verifies the EDX packet pointer at `20(%ebp)`, the original-call replay and the send trampoline. Passes. |
 | GUI | Headless GTK4 smoke test passes (`make -C linux gui-test`, Xvfb): fake stream → 2 rows + STATUS in the status bar. |
 | Injector | Verified under Wine end-to-end: `Injector.exe --all` discovers a fake target named `NostaleClientX.exe`, remote `LoadLibraryA` succeeds and the DLL starts. Not yet run against the real client. |
@@ -45,7 +45,7 @@ cd ~/games/gameforge/NostalePacketLogger
 # Linux build (MinGW-w64 i686; installed via apt)
 make -C linux all test-host
 make -C linux check                 # file(1) on the three PE32 outputs
-make -C linux host-test             # 35 stdlib unittest cases
+make -C linux host-test             # 37 stdlib unittest cases
 make -C linux gui-test              # headless GTK4 smoke test (xvfb)
 make -C linux clean
 
@@ -58,6 +58,7 @@ linux/scripts/inject.sh
 linux/scripts/host.sh status
 linux/scripts/host.sh monitor [--engine] [--filter TEXT] [--log FILE]
 linux/scripts/host.sh walk 25 117              # send a walk, wait for tp/mv
+linux/scripts/host.sh cast 866 --target-id 5180 # use a skill (u_s; experimental)
 linux/scripts/host.sh send "rest 1 1 14881134" # sit/stand toggle
 linux/scripts/host.sh send "walk 19 146 0 10"  # raw packet
 linux/scripts/host.sh scan 34 73               # memory debug: pair
@@ -94,6 +95,12 @@ PYTHONPATH=linux/host python3 -m ntpl status
   `rest <type> <charId> <state>` with 0 = standing, 1 = sitting. Sitting
   regenerates HP/MP but blocks movement, so stand before `walk`. The client
   does not echo its own `mv`; wait for the server's `tp` after a walk.
+- **Combat:** the server sends `su <attackerType> <attackerId> <targetType>
+  <targetId> <skillVnum> ...` for every hit; the engine records the first five
+  fields. `ntpl cast <skill> --target-id <id>` sends `ncif` then a default
+  `u_s <skill> <targetType> <targetId>` and waits for `su`. The exact `u_s`
+  field order is not verified yet; use `--packet` to send a literal packet
+  captured from the live client.
 - **Docs**: `docs/architecture.md`, `docs/hooking.md`, `docs/ipc.md`,
   `docs/linux.md`, `docs/windows.md`, `docs/development.md`,
   `docs/roadmap.md`, `docs/troubleshooting.md`; packet wiki in
@@ -140,8 +147,8 @@ Next:
    only then send the next; do not spam targets while the client is settling.
 2. Learn which tiles the server rejects (blocked/occupied) and add a small
    path/target check instead of blind attempts.
-3. Capture the client's own `walk` SEND packets (the current send hook sees
-   `rest`/`sortopen`/`pulse` but not the game's walks) to learn the exact
-   checksum/path behaviour.
+3. Capture the client's own `walk`/`u_s` SEND packets (the current send hook
+   sees `rest`/`sortopen`/`pulse` but not the game's movement or skills) to
+   learn the exact checksum and `u_s` field order.
 4. Reconcile `docs/protocol/` with the live session, then extend the engine
-   toward the autonomous loop.
+   toward the autonomous loop (walk + cast + verify).

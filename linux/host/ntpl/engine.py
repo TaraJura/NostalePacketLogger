@@ -47,6 +47,9 @@ class WorldState:
     stats: CharacterStats = field(default_factory=CharacterStats)
     chat: deque[tuple[int, int, str]] = field(default_factory=lambda: deque(maxlen=200))
     resting: bool | None = None
+    target_id: int | None = None
+    last_skill: int | None = None
+    combat: deque[dict] = field(default_factory=lambda: deque(maxlen=100))
     last_packet: Packet | None = None
 
     @property
@@ -186,6 +189,37 @@ def _on_condition(world: WorldState, packet: Packet) -> None:
     entity.speed = speed
 
 
+def _on_select(world: WorldState, packet: Packet) -> None:
+    # ncif <entityType> <entityId> -- target selection (SEND).
+    values = packet.ints(2)
+    if values:
+        world.target_id = values[1]
+
+
+def _on_skill_used(world: WorldState, packet: Packet) -> None:
+    # su <attackerType> <attackerId> <targetType> <targetId> <skillVnum> ...
+    # Live example:
+    #   su 1 14877915 3 5180 866 9 11 4401 0 0 0 0 6507 0 0 0 4140
+    # The damage/HP fields after the first five are not decoded yet, so the
+    # event keeps the raw arguments as well.
+    values = packet.ints(5)
+    if not values:
+        return
+    attacker_type, attacker_id, target_type, target_id, skill = values
+    world.last_skill = skill
+    world.combat.append(
+        {
+            "attacker_type": attacker_type,
+            "attacker_id": attacker_id,
+            "target_type": target_type,
+            "target_id": target_id,
+            "skill": skill,
+            "args": tuple(packet.args),
+            "text": packet.text,
+        }
+    )
+
+
 def _on_stats(world: WorldState, packet: Packet) -> None:
     values = packet.ints(4)  # <hp> <hpMax> <mp> <mpMax>
     if values:
@@ -224,6 +258,8 @@ class Engine:
                 "tp": _on_teleport,     # RECV: entity teleported / server position
                 "rest": _on_rest,       # RECV: sit/stand state
                 "cond": _on_condition,  # RECV: entity speed/state
+                "ncif": _on_select,     # SEND: target selection
+                "su": _on_skill_used,   # RECV: a skill hit
                 "stat": _on_stats,      # RECV: own hp/mp
                 "say": _on_chat,        # RECV and SEND: chat
             }

@@ -127,6 +127,7 @@ linux/scripts/host.sh monitor --filter walk   # only packets containing "walk"
 linux/scripts/host.sh monitor --log capture.log
 linux/scripts/host.sh send walk 19 146 0 10   # inject one packet
 linux/scripts/host.sh walk 25 117             # send a walk, wait for server tp/mv
+linux/scripts/host.sh cast 866 --target-id 5180 # use a skill (experimental u_s)
 linux/scripts/host.sh send "rest 1 1 14881134" # sit/stand toggle
 linux/scripts/host.sh status
 linux/scripts/host.sh replay capture.log      # resend the SEND lines
@@ -212,7 +213,7 @@ both.
 ## Tests
 
 ```bash
-make host-test          # 35 stdlib unit tests: protocol, engine, TCP client
+make host-test          # 37 stdlib unit tests: protocol, engine, TCP client
 make gui-test           # headless GTK4 window against a fake packet stream
 make all test-host
 ./scripts/dev-test-wine.sh 25
