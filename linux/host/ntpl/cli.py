@@ -170,10 +170,12 @@ def cmd_send(args: argparse.Namespace) -> int:
     if client is None:
         return 2
 
+    confirmed = False
+    failed = False
     try:
         client.send_packet(packet)
         # Give the DLL a moment to answer with STATUS|Sent: ...
-        deadline = time.monotonic() + 1.0
+        deadline = time.monotonic() + args.timeout
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -183,13 +185,113 @@ def cmd_send(args: argparse.Namespace) -> int:
                 break
             if message.kind is Kind.STATUS:
                 print(message.payload)
+                if message.payload.startswith("Sent:"):
+                    confirmed = True
+                    break
+                if "send failed" in message.payload.lower():
+                    failed = True
+                    break
     except (ConnectionLost, ProtocolError, ValueError) as exc:
         print(f"ntpl: {exc}", file=sys.stderr)
         return 2
     finally:
         client.close()
 
+    if failed:
+        return 1
+    if not confirmed:
+        print("ntpl: the DLL never confirmed the send", file=sys.stderr)
+        return 1
     return 0
+
+
+# --------------------------------------------------------------------- walk
+
+
+def cmd_walk(args: argparse.Namespace) -> int:
+    """Send one walk and wait for the server's position update.
+
+    The client does not reliably echo its own movement, but the server answers
+    an accepted walk with ``tp <type> <id> <x> <y> ...`` (observed live) or
+    ``mv``. This command exists so the engine can act and verify, not just fire
+    packets into the dark.
+
+    The character must be standing. While sitting the server ignores movement;
+    send ``rest 1 1 <charId>`` to toggle the sit state first.
+    """
+    client = _connect(args)
+    if client is None:
+        return 2
+
+    target = (args.x, args.y)
+    deadline = time.monotonic() + args.timeout
+    try:
+        client.send_packet(f"walk {args.x} {args.y} 0 {args.speed}")
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            message = client.recv(timeout=remaining)
+            if message is None:
+                continue
+            if message.kind is Kind.STATUS:
+                print(message.payload)
+                if "send failed" in message.payload.lower():
+                    return 1
+                continue
+            if message.kind is Kind.RECV:
+                packet = Packet.from_message(message)
+                if packet.opcode not in ("tp", "mv"):
+                    continue
+                values = packet.ints(5) if packet.opcode == "mv" else packet.ints(4)
+                if values and len(values) >= 4 and values[0] == 1:
+                    if (values[2], values[3]) == target:
+                        print(f"confirmed: {packet.text}")
+                        return 0
+    except (ConnectionLost, ProtocolError, ValueError) as exc:
+        print(f"ntpl: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        client.close()
+
+    print("ntpl: no server position update for the walk", file=sys.stderr)
+    return 1
+
+
+# --------------------------------------------------------------------- scan
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    """Find an (x, y) pair in the game's writable memory.
+
+    The DLL searches for byte, int16 and int32 pairs. This is how the engine
+    locates the player's position after sending a walk: the client predicts the
+    move locally, so the target coordinates appear in memory even though it
+    never receives its own ``mv``.
+    """
+    client = _connect(args)
+    if client is None:
+        return 2
+
+    deadline = time.monotonic() + args.timeout
+    try:
+        client.send_raw(f"SCAN|{args.x} {args.y}")
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                print("ntpl: no SCAN reply", file=sys.stderr)
+                return 1
+            message = client.recv(timeout=remaining)
+            if message is None:
+                continue
+            if message.kind is Kind.STATUS and message.payload.startswith("SCAN "):
+                print(message.payload)
+                return 0
+    except (ConnectionLost, ProtocolError) as exc:
+        print(f"ntpl: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        client.close()
 
 
 # ------------------------------------------------------------------- status
@@ -278,6 +380,68 @@ def cmd_replay(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------- gui
 
 
+# --------------------------------------------------------------------- find
+
+
+def cmd_find(args: argparse.Namespace) -> int:
+    """Find a 32-bit value in game memory (usually a character/entity id)."""
+    client = _connect(args)
+    if client is None:
+        return 2
+
+    deadline = time.monotonic() + args.timeout
+    try:
+        client.send_raw(f"FIND|{args.value}")
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                print("ntpl: no FIND reply", file=sys.stderr)
+                return 1
+            message = client.recv(timeout=remaining)
+            if message is None:
+                continue
+            if message.kind is Kind.STATUS and message.payload.startswith("FIND "):
+                print(message.payload)
+                return 0
+    except (ConnectionLost, ProtocolError) as exc:
+        print(f"ntpl: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        client.close()
+
+
+# --------------------------------------------------------------------- read
+
+
+def cmd_read(args: argparse.Namespace) -> int:
+    """Dump game memory returned by SCAN, without a debugger attached."""
+    client = _connect(args)
+    if client is None:
+        return 2
+
+    deadline = time.monotonic() + args.timeout
+    try:
+        client.send_raw(f"READ|0x{args.address:X} {args.length}")
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                print("ntpl: no READ reply", file=sys.stderr)
+                return 1
+            message = client.recv(timeout=remaining)
+            if message is None:
+                continue
+            if message.kind is Kind.STATUS and (
+                message.payload.startswith("READ ") or message.payload == "READ failed"
+            ):
+                print(message.payload)
+                return 0 if message.payload.startswith("READ ") else 1
+    except (ConnectionLost, ProtocolError) as exc:
+        print(f"ntpl: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        client.close()
+
+
 def cmd_gui(args: argparse.Namespace) -> int:
     try:
         from .gui import run_gui
@@ -313,15 +477,46 @@ def build_parser() -> argparse.ArgumentParser:
     monitor.add_argument("--no-color", action="store_true")
     monitor.set_defaults(handler=cmd_monitor)
 
+    walk = sub.add_parser(
+        "walk", help="send a walk and wait for the server's position update"
+    )
+    _add_connection(walk)
+    walk.add_argument("x", type=int)
+    walk.add_argument("y", type=int)
+    walk.add_argument("--speed", type=int, default=10)
+    walk.add_argument("--timeout", type=float, default=6.0)
+    walk.set_defaults(handler=cmd_walk)
+
     send = sub.add_parser("send", help="inject one packet")
     _add_connection(send)
     send.add_argument("packet", nargs="+", help="e.g. walk 19 146 0 10")
+    send.add_argument("--timeout", type=float, default=2.0)
     send.set_defaults(handler=cmd_send)
 
     status = sub.add_parser("status", help="show hook state")
     _add_connection(status)
     status.add_argument("--timeout", type=float, default=3.0)
     status.set_defaults(handler=cmd_status)
+
+    scan = sub.add_parser("scan", help="find an (x,y) pair in game memory")
+    _add_connection(scan)
+    scan.add_argument("x", type=int)
+    scan.add_argument("y", type=int)
+    scan.add_argument("--timeout", type=float, default=20.0)
+    scan.set_defaults(handler=cmd_scan)
+
+    find = sub.add_parser("find", help="find a 32-bit value in game memory")
+    _add_connection(find)
+    find.add_argument("value", type=lambda s: int(s, 0))
+    find.add_argument("--timeout", type=float, default=20.0)
+    find.set_defaults(handler=cmd_find)
+
+    read = sub.add_parser("read", help="dump game memory (reverse engineering)")
+    _add_connection(read)
+    read.add_argument("address", type=lambda s: int(s, 0))
+    read.add_argument("length", type=int, nargs="?", default=64)
+    read.add_argument("--timeout", type=float, default=5.0)
+    read.set_defaults(handler=cmd_read)
 
     replay = sub.add_parser("replay", help="resend SEND packets from a log")
     _add_connection(replay)

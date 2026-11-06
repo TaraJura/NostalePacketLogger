@@ -27,6 +27,7 @@ class Entity:
     name: str = ""
     x: int = 0
     y: int = 0
+    speed: int = 0
 
 
 @dataclass
@@ -45,6 +46,7 @@ class WorldState:
     entities: dict[int, Entity] = field(default_factory=dict)
     stats: CharacterStats = field(default_factory=CharacterStats)
     chat: deque[tuple[int, int, str]] = field(default_factory=lambda: deque(maxlen=200))
+    resting: bool | None = None
     last_packet: Packet | None = None
 
     @property
@@ -71,9 +73,11 @@ def _on_map(world: WorldState, packet: Packet) -> None:
 
 
 def _on_position(world: WorldState, packet: Packet) -> None:
-    coords = packet.ints(2)
-    if coords:
-        world.x, world.y = coords
+    # at <charId> <mapId> <x> <y> <direction> ...
+    values = packet.ints(4)
+    if values:
+        world.map_id = values[1]
+        world.x, world.y = values[2], values[3]
 
 
 def _on_move(world: WorldState, packet: Packet) -> None:
@@ -88,11 +92,59 @@ def _on_move(world: WorldState, packet: Packet) -> None:
 
 
 def _on_spawn(world: WorldState, packet: Packet) -> None:
-    values = packet.ints(2)  # <type> <id> ...
-    if not values:
+    args = packet.args
+    if not args:
         return
-    kind, entity_id = values
-    world.entities.setdefault(entity_id, Entity(entity_id, kind))
+
+    try:
+        kind = int(args[0])
+    except ValueError:
+        return
+
+    if kind == 1:
+        # in 1 <name> - <charId> <x> <y> <direction> ...
+        # The name may contain spaces, so split on the " - " separator instead
+        # of assuming a fixed field index.
+        try:
+            _, rest = packet.text.split(" ", 1)
+            _, rest = rest.split(" ", 1)
+            name, tail = rest.split(" - ", 1)
+            values = tail.split()
+            char_id = int(values[0])
+            x = int(values[1])
+            y = int(values[2])
+        except (ValueError, IndexError):
+            return
+
+        entity = world.entities.get(char_id)
+        if entity is None:
+            entity = Entity(char_id, kind)
+            world.entities[char_id] = entity
+        entity.name = name
+        entity.x = x
+        entity.y = y
+        return
+
+    if kind in (2, 3):
+        # in <type> <vnum> <entityId> <x> <y> ...
+        # The entity is keyed by entityId, never by vnum: two NPCs can share a
+        # vnum, and mv/out use the entityId.
+        if len(args) < 5:
+            return
+        try:
+            entity_id = int(args[2])
+            x = int(args[3])
+            y = int(args[4])
+        except ValueError:
+            return
+
+        entity = world.entities.get(entity_id)
+        if entity is None:
+            entity = Entity(entity_id, kind)
+            world.entities[entity_id] = entity
+        entity.kind = kind
+        entity.x = x
+        entity.y = y
 
 
 def _on_despawn(world: WorldState, packet: Packet) -> None:
@@ -109,6 +161,29 @@ def _on_teleport(world: WorldState, packet: Packet) -> None:
     entity = world.entities.setdefault(entity_id, Entity(entity_id, kind))
     entity.x = x
     entity.y = y
+
+
+def _on_rest(world: WorldState, packet: Packet) -> None:
+    # rest <entityType> <entityId> <state>; observed live: 1 = sitting,
+    # 0 = standing. Movement is rejected by the server while sitting.
+    values = packet.ints(3)
+    if not values:
+        return
+    kind, entity_id, state = values
+    entity = world.entities.setdefault(entity_id, Entity(entity_id, kind))
+    entity.kind = kind
+    world.resting = state == 1
+
+
+def _on_condition(world: WorldState, packet: Packet) -> None:
+    # cond <entityType> <entityId> <unknown> <unknown> <speed>
+    values = packet.ints(5)
+    if not values:
+        return
+    kind, entity_id, _unknown1, _unknown2, speed = values
+    entity = world.entities.setdefault(entity_id, Entity(entity_id, kind))
+    entity.kind = kind
+    entity.speed = speed
 
 
 def _on_stats(world: WorldState, packet: Packet) -> None:
@@ -146,7 +221,9 @@ class Engine:
                 "mv": _on_move,         # RECV: entity movement
                 "in": _on_spawn,        # RECV: entity spawned
                 "out": _on_despawn,     # RECV: entity despawned
-                "tp": _on_teleport,     # RECV: entity teleported
+                "tp": _on_teleport,     # RECV: entity teleported / server position
+                "rest": _on_rest,       # RECV: sit/stand state
+                "cond": _on_condition,  # RECV: entity speed/state
                 "stat": _on_stats,      # RECV: own hp/mp
                 "say": _on_chat,        # RECV and SEND: chat
             }

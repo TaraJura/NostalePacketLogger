@@ -51,7 +51,7 @@ sudo apt install python3-gi gir1.2-gtk-4.0
 From `linux/`:
 
 ```bash
-make host-test      # 29 unittest cases
+make host-test      # 35 unittest cases
 make gui-test       # headless GTK4 smoke test (xvfb)
 ```
 
