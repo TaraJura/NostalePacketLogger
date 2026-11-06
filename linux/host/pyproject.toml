@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ntpl"
+version = "0.1.0"
+description = "Native host for the NosTale Packet Logger (TCP client, CLI, GTK4 GUI)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "TaraJura" }]
+keywords = ["nostale", "packet", "wine", "linux"]
+classifiers = [
+    "Environment :: Console",
+    "Environment :: X11 Applications :: GTK",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Games/Entertainment",
+]
+
+# The core library, CLI and TCP client use only the standard library.
+dependencies = []
+
+[project.optional-dependencies]
+# On Ubuntu install these with apt instead of pip; PyGObject needs the system
+# GTK4 typelibs. This extra exists so `pip install .[gui]` is still meaningful
+# on distributions that ship the development headers.
+gui = ["PyGObject>=3.42"]
+
+[project.scripts]
+ntpl = "ntpl.cli:main"
+
+[tool.setuptools]
+packages = ["ntpl"]
