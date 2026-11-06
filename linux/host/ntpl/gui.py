@@ -22,6 +22,17 @@ gi.require_version("Gdk", "4.0")
 
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango
 
+from .botconfig import (
+    COMPARATORS,
+    MONSTER_MODES,
+    SPELL_TARGETS,
+    SUBJECTS,
+    BotConfig,
+    ConfigError,
+    SpellRule,
+    load_config,
+    save_config,
+)
 from .client import ConnectionLost, PacketClient
 from .engine import Engine, Entity, GroundItem
 from .mapdata import (
@@ -33,7 +44,7 @@ from .mapdata import (
     load_nstc,
     terrain_rgb,
 )
-from .monsternames import load_monster_names
+from .monsternames import load_monster_names, load_skill_descriptions
 from .spawnlog import load_spawns
 from .protocol import Kind, Packet, ProtocolError
 
@@ -151,11 +162,22 @@ class Application(Gtk.Application):
         self.map_grids: dict[int, MapGrid] = {}
         self.map_grid: MapGrid | None = None
         self.monster_names: dict[int, str] = {}
+        self.spell_descriptions: dict[int, str] = {}
         self.monster_names_loaded = False
         self.log_file = log_file or os.environ.get("NTPL_LOG")
         self.log_vnums: dict[int, int] = {}
         self.log_names: dict[int, str] = {}
         self.spawns_loaded = False
+        self.target_mode = None
+        self.target_search = None
+        self.target_list = None
+        self.target_info = None
+        self.target_vnum_entry = None
+        self.target_vnums: set[int] = set()
+        self.spell_rules_box = None
+        self.spell_rows: list[dict] = []
+        self.spell_last_cast: dict[int, float] = {}
+        self.config_info = None
         self.map_surface: cairo.ImageSurface | None = None
         self.map_area = None
         self.map_scrolled = None
@@ -412,6 +434,7 @@ class Application(Gtk.Application):
         self.char_info = Gtk.Label(label="position unknown")
         self.char_info.set_xalign(0)
         self.char_info.set_wrap(True)
+        self.char_info.set_max_width_chars(38)
         self.char_info.add_css_class("dim-label")
         char_box.append(self.char_info)
         sidebar.append(self._frame("Character", char_box))
@@ -421,6 +444,7 @@ class Application(Gtk.Application):
         self.path_info = Gtk.Label(label="no path")
         self.path_info.set_xalign(0)
         self.path_info.set_wrap(True)
+        self.path_info.set_max_width_chars(38)
         path_box.append(self.path_info)
         path_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         start = Gtk.Button(label="Start")
@@ -476,6 +500,10 @@ class Application(Gtk.Application):
                 self.skill_entry,
                 Gtk.Label(label="Range"),
                 self.attack_range,
+            )
+        )
+        combat_box.append(
+            self._field_row(
                 Gtk.Label(label="Cooldown"),
                 self.attack_cooldown,
             )
@@ -487,6 +515,81 @@ class Application(Gtk.Application):
         )
         combat_box.append(self.skill_packet_entry)
         sidebar.append(self._frame("Combat", combat_box))
+
+        # Targets: restrict auto-attack to selected monster templates.
+        target_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.target_mode = Gtk.DropDown.new_from_strings(
+            ["All monsters", "Only selected", "All except selected"]
+        )
+        self.target_mode.set_selected(0)
+        self.target_mode.set_tooltip_text(
+            "Filter auto-attack by monster template (vnum)"
+        )
+        target_box.append(
+            self._field_row(Gtk.Label(label="Attack"), self.target_mode)
+        )
+        self.target_search = Gtk.SearchEntry()
+        self.target_search.set_placeholder_text("Search monster name or vnum")
+        self.target_search.connect(
+            "search-changed", lambda *_: self._refresh_target_list()
+        )
+        target_box.append(self.target_search)
+
+        self.target_list = Gtk.ListBox()
+        self.target_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.target_list.set_activate_on_single_click(False)
+        target_scroll = Gtk.ScrolledWindow()
+        target_scroll.set_child(self.target_list)
+        target_scroll.set_policy(
+            Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
+        )
+        target_scroll.set_min_content_height(150)
+        target_scroll.set_max_content_height(220)
+        target_box.append(target_scroll)
+
+        add_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.target_vnum_entry = Gtk.Entry()
+        self.target_vnum_entry.set_width_chars(8)
+        self.target_vnum_entry.set_placeholder_text("vnum")
+        add_vnum = Gtk.Button(label="Add vnum")
+        add_vnum.connect("clicked", lambda *_: self._add_target_vnum())
+        clear_targets = Gtk.Button(label="Clear")
+        clear_targets.connect("clicked", lambda *_: self._clear_targets())
+        add_row.append(self.target_vnum_entry)
+        add_row.append(add_vnum)
+        add_row.append(clear_targets)
+        target_box.append(add_row)
+
+        self.target_info = Gtk.Label(label="no targets selected")
+        self.target_info.set_xalign(0)
+        self.target_info.set_wrap(True)
+        self.target_info.set_max_width_chars(38)
+        self.target_info.add_css_class("dim-label")
+        target_box.append(self.target_info)
+        sidebar.append(self._frame("Targets", target_box))
+
+        # Spells: conditional cast rules, evaluated top to bottom.
+        spell_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.spell_rules_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=6
+        )
+        spell_box.append(self.spell_rules_box)
+        add_spell = Gtk.Button(label="Add spell rule")
+        add_spell.connect("clicked", lambda *_: self._add_spell_rule())
+        spell_box.append(add_spell)
+        spell_hint = Gtk.Label(
+            label=(
+                "Rules are checked in order; the first matching rule wins. "
+                "No match falls back to Skill in Combat. HP/MP are your "
+                "current percentages."
+            )
+        )
+        spell_hint.set_xalign(0)
+        spell_hint.set_wrap(True)
+        spell_hint.set_max_width_chars(34)
+        spell_hint.add_css_class("dim-label")
+        spell_box.append(spell_hint)
+        sidebar.append(self._frame("Spells", spell_box))
 
         # Loot.
         loot_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -525,6 +628,26 @@ class Application(Gtk.Application):
         )
         sidebar.append(self._frame("Recovery", recover_box))
 
+        # Configuration: export/import every bot setting as JSON.
+        config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        config_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        save_button = Gtk.Button(label="Save config…")
+        save_button.set_tooltip_text("Export every bot setting as JSON")
+        save_button.connect("clicked", self._on_save_config_clicked)
+        load_button = Gtk.Button(label="Load config…")
+        load_button.set_tooltip_text("Import a bot configuration from JSON")
+        load_button.connect("clicked", self._on_load_config_clicked)
+        config_row.append(save_button)
+        config_row.append(load_button)
+        config_box.append(config_row)
+        self.config_info = Gtk.Label(label="not saved yet")
+        self.config_info.set_xalign(0)
+        self.config_info.set_wrap(True)
+        self.config_info.set_max_width_chars(38)
+        self.config_info.add_css_class("dim-label")
+        config_box.append(self.config_info)
+        sidebar.append(self._frame("Configuration", config_box))
+
         hint = Gtk.Label(
             label=(
                 "Click the map to add waypoints; Start walks the A* path. "
@@ -534,6 +657,7 @@ class Application(Gtk.Application):
         )
         hint.set_xalign(0)
         hint.set_wrap(True)
+        hint.set_max_width_chars(42)
         hint.add_css_class("dim-label")
         sidebar.append(hint)
 
@@ -541,6 +665,10 @@ class Application(Gtk.Application):
         sidebar_scroll.set_child(sidebar)
         sidebar_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         sidebar_scroll.set_size_request(360, -1)
+        # Explicit False (not just the default) stops the expand flag from
+        # propagating up from a wide child; without it GTK gave the sidebar
+        # half of the extra window width and shrank the map.
+        sidebar_scroll.set_hexpand(False)
         sidebar_scroll.set_vexpand(True)
 
         # A plain box instead of a Paned: the map shrinks with the window and
@@ -568,11 +696,15 @@ class Application(Gtk.Application):
     # -- map data -------------------------------------------------------
 
     def _ensure_monster_names(self) -> None:
-        """Load the client's vnum → monster-name table once."""
+        """Load the client's vnum → monster/skill text tables once."""
         if self.monster_names_loaded:
             return
         self.monster_names_loaded = True
         self.monster_names = load_monster_names()
+        self.spell_descriptions = load_skill_descriptions()
+        if self.target_list is not None:
+            self._refresh_target_list()
+            self._update_target_info()
 
     def _ensure_spawns_loaded(self) -> None:
         """Backfill entity → vnum/name from the DLL's session log.
@@ -585,6 +717,528 @@ class Application(Gtk.Application):
             return
         self.spawns_loaded = True
         self.log_vnums, self.log_names = load_spawns(self.log_file)
+
+    # -- target filter --------------------------------------------------
+
+    def _current_monster_mode(self) -> str:
+        if self.target_mode is None:
+            return "all"
+        index = self.target_mode.get_selected()
+        if 0 <= index < len(MONSTER_MODES):
+            return MONSTER_MODES[index]
+        return "all"
+
+    def _monster_vnum(self, entity: Entity) -> int:
+        return entity.vnum or self.log_vnums.get(entity.entity_id, 0)
+
+    def _monster_allowed(self, entity: Entity) -> bool:
+        mode = self._current_monster_mode()
+        if mode == "all":
+            return True
+        vnum = self._monster_vnum(entity)
+        if mode == "only":
+            return vnum in self.target_vnums
+        return vnum not in self.target_vnums
+
+    def _update_target_info(self) -> None:
+        if self.target_info is None:
+            return
+        known = len(self.monster_names)
+        self.target_info.set_text(
+            f"{len(self.target_vnums)} selected · {known} known monsters"
+            + ("" if known else " (add vnums manually)")
+        )
+
+    def _refresh_target_list(self) -> None:
+        if self.target_list is None:
+            return
+        while (child := self.target_list.get_first_child()) is not None:
+            self.target_list.remove(child)
+
+        query = (
+            self.target_search.get_text().strip().lower()
+            if self.target_search is not None
+            else ""
+        )
+        rows: list[tuple[int, str]] = []
+        if query:
+            matches = [
+                (vnum, name)
+                for vnum, name in self.monster_names.items()
+                if query in name.lower()
+                or str(vnum) == query
+                or query in str(vnum)
+            ]
+            matches.sort(
+                key=lambda item: (
+                    0 if str(item[0]) == query else 1,
+                    item[1].lower(),
+                    item[0],
+                )
+            )
+            rows = matches[:60]
+        else:
+            rows = [
+                (vnum, self.monster_names.get(vnum, f"vnum {vnum}"))
+                for vnum in sorted(self.target_vnums)
+            ]
+            rows += [
+                (vnum, name)
+                for vnum, name in sorted(self.monster_names.items())
+                if vnum not in self.target_vnums
+            ][:40]
+
+        if not rows:
+            empty = Gtk.Label(label="no matching monsters")
+            empty.add_css_class("dim-label")
+            empty.set_xalign(0)
+            row = Gtk.ListBoxRow()
+            row.set_child(empty)
+            row.set_selectable(False)
+            row.set_activatable(False)
+            self.target_list.append(row)
+            return
+
+        for vnum, name in rows:
+            check = Gtk.CheckButton(label=f"{name} ({vnum})")
+            check.set_active(vnum in self.target_vnums)
+            check.set_tooltip_text(f"monster vnum {vnum}")
+            check.connect(
+                "toggled",
+                lambda button, value=vnum: self._on_target_toggled(
+                    value, button
+                ),
+            )
+            row = Gtk.ListBoxRow()
+            row.set_child(check)
+            row.set_selectable(False)
+            row.set_activatable(False)
+            self.target_list.append(row)
+
+    def _on_target_toggled(self, vnum: int, button: Gtk.CheckButton) -> None:
+        if button.get_active():
+            self.target_vnums.add(vnum)
+        else:
+            self.target_vnums.discard(vnum)
+        self._update_target_info()
+
+    def _add_target_vnum(self) -> None:
+        if self.target_vnum_entry is None:
+            return
+        text = self.target_vnum_entry.get_text().strip()
+        try:
+            vnum = int(text)
+        except ValueError:
+            self._set_status("target vnum must be a number")
+            return
+        if vnum <= 0:
+            self._set_status("target vnum must be positive")
+            return
+        self.target_vnums.add(vnum)
+        self.target_vnum_entry.set_text("")
+        self._refresh_target_list()
+        self._update_target_info()
+
+    def _clear_targets(self) -> None:
+        self.target_vnums.clear()
+        if self.target_search is not None:
+            self.target_search.set_text("")
+        self._refresh_target_list()
+        self._update_target_info()
+
+    # -- spell rules ----------------------------------------------------
+
+    def _spell_desc_text(self, spell: int) -> str:
+        if spell <= 0:
+            return "basic attack"
+        return self.spell_descriptions.get(spell, "unknown spell")
+
+    def _update_spell_desc(self, info: dict) -> None:
+        text = info["spell"].get_text().strip()
+        try:
+            spell = int(text) if text else 0
+        except ValueError:
+            info["desc"].set_text("invalid spell vnum")
+            info["desc"].set_tooltip_text(None)
+            return
+        description = self._spell_desc_text(spell)
+        info["desc"].set_text(description)
+        info["desc"].set_tooltip_text(description)
+
+    def _add_spell_rule(self, rule: SpellRule | None = None) -> None:
+        if self.spell_rules_box is None:
+            return
+        rule = rule or SpellRule()
+        container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        container.set_margin_top(4)
+        container.set_margin_bottom(4)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        enabled = Gtk.CheckButton()
+        enabled.set_active(rule.enabled)
+        enabled.set_tooltip_text("enable this rule")
+        spell = Gtk.Entry()
+        spell.set_width_chars(5)
+        spell.set_max_width_chars(6)
+        spell.set_text(str(rule.spell))
+        spell.set_tooltip_text("spell vnum")
+        desc = Gtk.Label()
+        desc.set_xalign(0)
+        desc.set_hexpand(True)
+        desc.set_max_width_chars(18)
+        desc.set_ellipsize(Pango.EllipsizeMode.END)
+        desc.add_css_class("dim-label")
+        up = Gtk.Button(label="↑")
+        up.set_tooltip_text("higher priority")
+        down = Gtk.Button(label="↓")
+        down.set_tooltip_text("lower priority")
+        remove = Gtk.Button(label="×")
+        remove.set_tooltip_text("remove rule")
+        for widget in (enabled, spell, desc, up, down, remove):
+            header.append(widget)
+        container.append(header)
+
+        condition = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        subject = Gtk.DropDown.new_from_strings(["My HP %", "My MP %"])
+        subject_index = (
+            SUBJECTS.index(rule.subject) if rule.subject in SUBJECTS else 0
+        )
+        subject.set_selected(subject_index)
+        comparator = Gtk.DropDown.new_from_strings(["below", "above"])
+        comparator_index = (
+            COMPARATORS.index(rule.comparator)
+            if rule.comparator in COMPARATORS
+            else 0
+        )
+        comparator.set_selected(comparator_index)
+        threshold = Gtk.SpinButton.new_with_range(0, 100, 5)
+        threshold.set_value(rule.threshold)
+        threshold.set_tooltip_text("percentage threshold")
+        condition.append(subject)
+        condition.append(comparator)
+        condition.append(threshold)
+        condition.append(Gtk.Label(label="%"))
+        container.append(condition)
+
+        timing = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        cooldown = Gtk.SpinButton.new_with_range(0, 300, 1)
+        cooldown.set_value(rule.cooldown)
+        cooldown.set_tooltip_text("seconds before this rule may fire again")
+        target = Gtk.DropDown.new_from_strings(["Monster", "Self"])
+        target_index = (
+            SPELL_TARGETS.index(rule.target)
+            if rule.target in SPELL_TARGETS
+            else 0
+        )
+        target.set_selected(target_index)
+        timing.append(Gtk.Label(label="Cooldown"))
+        timing.append(cooldown)
+        timing.append(Gtk.Label(label="s"))
+        timing.append(Gtk.Label(label="Target"))
+        timing.append(target)
+        container.append(timing)
+
+        info = {
+            "box": container,
+            "enabled": enabled,
+            "spell": spell,
+            "desc": desc,
+            "subject": subject,
+            "comparator": comparator,
+            "threshold": threshold,
+            "cooldown": cooldown,
+            "target": target,
+        }
+        self.spell_rows.append(info)
+        self.spell_rules_box.append(container)
+
+        spell.connect("changed", lambda *_: self._update_spell_desc(info))
+        enabled.connect("toggled", lambda *_: self._reset_spell_timers())
+        up.connect("clicked", lambda *_: self._move_spell_rule(info, -1))
+        down.connect("clicked", lambda *_: self._move_spell_rule(info, 1))
+        remove.connect("clicked", lambda *_: self._remove_spell_rule(info))
+        self._update_spell_desc(info)
+
+    def _remove_spell_rule(self, info: dict) -> None:
+        if info not in self.spell_rows:
+            return
+        self.spell_rows.remove(info)
+        parent = info["box"].get_parent()
+        if parent is not None:
+            parent.remove(info["box"])
+        self._reset_spell_timers()
+
+    def _move_spell_rule(self, info: dict, delta: int) -> None:
+        try:
+            index = self.spell_rows.index(info)
+        except ValueError:
+            return
+        new_index = index + delta
+        if not (0 <= new_index < len(self.spell_rows)):
+            return
+        self.spell_rows[index], self.spell_rows[new_index] = (
+            self.spell_rows[new_index],
+            self.spell_rows[index],
+        )
+        sibling = (
+            self.spell_rows[new_index - 1]["box"]
+            if new_index > 0
+            else None
+        )
+        self.spell_rules_box.reorder_child_after(info["box"], sibling)
+        self._reset_spell_timers()
+
+    def _clear_spell_rules(self) -> None:
+        for info in list(self.spell_rows):
+            self._remove_spell_rule(info)
+        self._reset_spell_timers()
+
+    def _reset_spell_timers(self) -> None:
+        self.spell_last_cast.clear()
+
+    def _collect_spell_rules(self) -> list[SpellRule]:
+        rules: list[SpellRule] = []
+        for info in self.spell_rows:
+            text = info["spell"].get_text().strip()
+            try:
+                spell = int(text) if text else 0
+            except ValueError:
+                spell = 0
+            subject_index = info["subject"].get_selected()
+            comparator_index = info["comparator"].get_selected()
+            target_index = info["target"].get_selected()
+            rules.append(
+                SpellRule(
+                    enabled=info["enabled"].get_active(),
+                    spell=max(0, spell),
+                    subject=(
+                        SUBJECTS[subject_index]
+                        if 0 <= subject_index < len(SUBJECTS)
+                        else "my_hp"
+                    ),
+                    comparator=(
+                        COMPARATORS[comparator_index]
+                        if 0 <= comparator_index < len(COMPARATORS)
+                        else "below"
+                    ),
+                    threshold=info["threshold"].get_value(),
+                    cooldown=info["cooldown"].get_value(),
+                    target=(
+                        SPELL_TARGETS[target_index]
+                        if 0 <= target_index < len(SPELL_TARGETS)
+                        else "monster"
+                    ),
+                )
+            )
+        return rules
+
+    def _spell_condition_met(self, rule: SpellRule) -> bool:
+        stats = self.engine.world.stats
+        if rule.subject == "my_mp":
+            if stats.mp_max <= 0:
+                return False
+            percent = 100.0 * stats.mp / stats.mp_max
+        else:
+            if stats.hp_max <= 0:
+                return False
+            percent = 100.0 * stats.hp / stats.hp_max
+        if rule.comparator == "above":
+            return percent > rule.threshold
+        return percent < rule.threshold
+
+    def _select_spell_rule(
+        self,
+        now: float,
+        monster: Entity | None,
+        char_id: int | None,
+    ) -> tuple[int, SpellRule] | None:
+        for index, rule in enumerate(self._collect_spell_rules()):
+            if not rule.enabled or rule.spell <= 0:
+                continue
+            if now < self.spell_last_cast.get(index, 0.0) + rule.cooldown:
+                continue
+            if rule.target == "self" and char_id is None:
+                continue
+            if rule.target == "monster" and monster is None:
+                continue
+            if self._spell_condition_met(rule):
+                return index, rule
+        return None
+
+    def _cast_spell(
+        self,
+        index: int,
+        rule: SpellRule,
+        monster: Entity | None,
+        char_id: int | None,
+        now: float,
+    ) -> bool:
+        if rule.target == "self":
+            if char_id is None:
+                return False
+            target_type, target_id = 1, char_id
+        else:
+            if monster is None:
+                return False
+            target_type, target_id = 3, monster.entity_id
+            self._send(f"ncif 3 {monster.entity_id}")
+        packet = self._skill_packet(
+            target_id, skill=rule.spell, target_type=target_type
+        )
+        self._send(packet)
+        cooldown = float(self.attack_cooldown.get_value())
+        self.attack_cooldown_until = now + cooldown
+        self.walk_not_before = now + self.attack_walk_delay
+        self.spell_last_cast[index] = now
+        self._set_status(f"spell {rule.spell}: {packet}")
+        return True
+
+    # -- configuration --------------------------------------------------
+
+    def _collect_config(self) -> BotConfig:
+        return BotConfig(
+            auto_attack=bool(
+                self.auto_attack_toggle is not None
+                and self.auto_attack_toggle.get_active()
+            ),
+            retaliate=bool(
+                self.retaliate_toggle is not None
+                and self.retaliate_toggle.get_active()
+            ),
+            move_first=bool(
+                self.move_first_toggle is not None
+                and self.move_first_toggle.get_active()
+            ),
+            skill=self._entry_int(self.skill_entry, 0),
+            skill_template=(
+                self.skill_packet_entry.get_text().strip()
+                or "u_s {skill} {type} {target}"
+            ),
+            attack_range=int(self.attack_range.get_value()),
+            attack_cooldown=float(self.attack_cooldown.get_value()),
+            pickup=bool(
+                self.pickup_toggle is not None
+                and self.pickup_toggle.get_active()
+            ),
+            loot_range=int(self.loot_range.get_value()),
+            recover=bool(
+                self.recover_toggle is not None
+                and self.recover_toggle.get_active()
+            ),
+            low_hp_pct=float(self.low_hp_pct.get_value()),
+            loop=bool(
+                self.loop_toggle is not None
+                and self.loop_toggle.get_active()
+            ),
+            monster_mode=self._current_monster_mode(),
+            monster_vnums=sorted(v for v in self.target_vnums if v > 0),
+            spell_rules=self._collect_spell_rules(),
+        )
+
+    @staticmethod
+    def _entry_int(entry, default: int) -> int:
+        if entry is None:
+            return default
+        try:
+            return int(entry.get_text().strip() or default)
+        except ValueError:
+            return default
+
+    def _apply_config(self, config: BotConfig) -> None:
+        if self.bot_running:
+            self._stop_bot()
+        self.auto_attack_toggle.set_active(config.auto_attack)
+        self.retaliate_toggle.set_active(config.retaliate)
+        self.move_first_toggle.set_active(config.move_first)
+        self.skill_entry.set_text(str(config.skill))
+        self.skill_packet_entry.set_text(config.skill_template)
+        self.attack_range.set_value(config.attack_range)
+        self.attack_cooldown.set_value(config.attack_cooldown)
+        self.pickup_toggle.set_active(config.pickup)
+        self.loot_range.set_value(config.loot_range)
+        self.recover_toggle.set_active(config.recover)
+        self.low_hp_pct.set_value(config.low_hp_pct)
+        self.loop_toggle.set_active(config.loop)
+
+        mode_index = (
+            MONSTER_MODES.index(config.monster_mode)
+            if config.monster_mode in MONSTER_MODES
+            else 0
+        )
+        self.target_mode.set_selected(mode_index)
+        self.target_vnums = {v for v in config.monster_vnums if v > 0}
+        if self.target_search is not None:
+            self.target_search.set_text("")
+        self._refresh_target_list()
+        self._update_target_info()
+
+        self._clear_spell_rules()
+        for rule in config.spell_rules:
+            self._add_spell_rule(rule)
+        self._reset_spell_timers()
+        self.attack_cooldown_until = 0.0
+        self.walk_not_before = 0.0
+        self.pending_target = None
+
+    def _save_config_to(self, path: str) -> bool:
+        try:
+            save_config(path, self._collect_config())
+        except ConfigError as exc:
+            self._set_status(str(exc))
+            if self.config_info is not None:
+                self.config_info.set_text(str(exc))
+            return False
+        name = os.path.basename(path)
+        self._set_status(f"config saved: {path}")
+        if self.config_info is not None:
+            self.config_info.set_text(f"saved {name}")
+        return True
+
+    def _load_config_from(self, path: str) -> bool:
+        try:
+            config = load_config(path)
+        except ConfigError as exc:
+            self._set_status(str(exc))
+            if self.config_info is not None:
+                self.config_info.set_text(str(exc))
+            return False
+        self._apply_config(config)
+        name = os.path.basename(path)
+        self._set_status(f"config loaded: {path}")
+        if self.config_info is not None:
+            self.config_info.set_text(f"loaded {name}")
+        return True
+
+    def _on_save_config_clicked(self, _button) -> None:
+        if self.window is None:
+            return
+        dialog = Gtk.FileDialog(title="Save bot configuration")
+        dialog.set_initial_name("ntpl-bot.json")
+        dialog.save(self.window, None, self._on_save_config_result)
+
+    def _on_save_config_result(self, dialog, result) -> None:
+        try:
+            file = dialog.save_finish(result)
+        except GLib.Error:
+            return
+        path = file.get_path()
+        if path:
+            self._save_config_to(path)
+
+    def _on_load_config_clicked(self, _button) -> None:
+        if self.window is None:
+            return
+        dialog = Gtk.FileDialog(title="Load bot configuration")
+        dialog.open(self.window, None, self._on_load_config_result)
+
+    def _on_load_config_result(self, dialog, result) -> None:
+        try:
+            file = dialog.open_finish(result)
+        except GLib.Error:
+            return
+        path = file.get_path()
+        if path:
+            self._load_config_from(path)
 
     def _ensure_map_loaded(self) -> None:
         if self.map_grids:
@@ -779,6 +1433,8 @@ class Application(Gtk.Application):
             return None
         entity = world.entities.get(world.last_attacker_id)
         if entity is None or entity.kind != 3:
+            return None
+        if not self._monster_allowed(entity):
             return None
         position = self._player_cell()
         if position is None:
@@ -1528,6 +2184,8 @@ class Application(Gtk.Application):
         for entity in self.engine.world.entities.values():
             if entity.kind != 3:
                 continue
+            if not self._monster_allowed(entity):
+                continue
             distance = max(abs(entity.x - px), abs(entity.y - py))
             if distance <= radius and distance < best_distance:
                 best = entity
@@ -1556,14 +2214,24 @@ class Application(Gtk.Application):
                 best_distance = distance
         return best
 
-    def _skill_packet(self, target_id: int) -> str:
-        skill = self.skill_entry.get_text().strip() or "0"
+    def _skill_packet(
+        self,
+        target_id: int,
+        skill: int | str | None = None,
+        target_type: int = 3,
+    ) -> str:
+        if skill is None:
+            skill = self.skill_entry.get_text().strip() or "0"
+        else:
+            skill = str(skill)
         template = (
             self.skill_packet_entry.get_text().strip()
             or "u_s {skill} {type} {target}"
         )
         try:
-            return template.format(skill=skill, type=3, target=target_id)
+            return template.format(
+                skill=skill, type=target_type, target=target_id
+            )
         except (KeyError, ValueError):
             return template
 
@@ -1696,25 +2364,38 @@ class Application(Gtk.Application):
                 monster = self._retaliation_target(radius)
             if monster is None:
                 monster = self._nearest_monster(radius)
-            if monster is not None:
-                if now >= self.attack_cooldown_until:
-                    self._send(f"ncif 3 {monster.entity_id}")
-                    packet = self._skill_packet(monster.entity_id)
-                    self._send(packet)
-                    cooldown = float(self.attack_cooldown.get_value())
-                    self.attack_cooldown_until = now + cooldown
-                    # Do not walk inside the skill animation: the server drops
-                    # the walk and the bot would skip the whole path.
-                    self.walk_not_before = now + self.attack_walk_delay
-                    self._set_status(
-                        f"attack {monster.entity_id}: {packet}"
-                    )
+
+            selected = self._select_spell_rule(now, monster, char_id)
+            rule_index, rule = (
+                selected if selected is not None else (None, None)
+            )
+            if rule is not None and now >= self.attack_cooldown_until:
+                if self._cast_spell(
+                    rule_index, rule, monster, char_id, now
+                ):
                     return True
-                if not move_first:
-                    # Clear-the-area mode: stay on this position until the
-                    # nearby monsters are dead. Move first keeps walking
-                    # between attacks instead.
-                    return True
+
+            if (
+                rule is None
+                and monster is not None
+                and now >= self.attack_cooldown_until
+            ):
+                self._send(f"ncif 3 {monster.entity_id}")
+                packet = self._skill_packet(monster.entity_id)
+                self._send(packet)
+                cooldown = float(self.attack_cooldown.get_value())
+                self.attack_cooldown_until = now + cooldown
+                # Do not walk inside the skill animation: the server drops
+                # the walk and the bot would skip the whole path.
+                self.walk_not_before = now + self.attack_walk_delay
+                self._set_status(f"attack {monster.entity_id}: {packet}")
+                return True
+
+            if monster is not None and not move_first:
+                # Clear-the-area mode: stay on this position until the
+                # nearby monsters are dead. Move first keeps walking
+                # between attacks instead.
+                return True
 
         if not self.bot_goals:
             # Stationary mode: combat/pickup/recovery continue until Stop.

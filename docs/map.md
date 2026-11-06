@@ -157,8 +157,18 @@ grouped by function:
 - **Path** — path summary, Start, Stop, Clear path, Loop.
 - **Combat** — Auto-attack, Retaliate, Skill, Range, Cooldown and the skill
   template.
+- **Targets** — monster filter: all monsters, only the selected templates, or
+  all except the selected ones. Search the client's monster table by name or
+  vnum, or add a vnum manually.
+- **Spells** — ordered conditional cast rules (spell vnum, My HP/MP above or
+  below a %, cooldown, monster/self target). The first matching rule wins;
+  otherwise the **Skill** in Combat is the fallback.
 - **Loot** — Pickup and loot radius.
 - **Recovery** — Auto-recover and the low-HP threshold.
+- **Configuration** — Save/Load the whole bot configuration as JSON.
+
+See [bot-config.md](bot-config.md) for the target filter, spell-rule semantics
+and the export/import schema.
 
 The layout is responsive: wide windows show map + sidebar side by side; below
 ~1050 px the map moves above the controls. The map redraws are coalesced at
@@ -176,6 +186,9 @@ in the window header.
 | Skill | skill vnum (default **0** = normal/basic attack; the client sends `u_s 0 3 <monster>` and the server reports the basic skill, e.g. 866, in `su`) |
 | Range / Cooldown | attack radius and seconds between attacks |
 | Loop | repeat the path when it finishes |
+| Targets | all / only selected / all except selected monster templates (`vnum`); Retaliate respects the same filter |
+| Spell rule | spell vnum + My HP/MP below/above threshold + cooldown + Monster/Self target; first matching rule wins |
+| Save/Load config | export/import the toggles, numbers, target list and spell rules as JSON |
 
 Hovering a map marker shows a tooltip: **You** with char id, position and map;
 a **Player** with name, char id, position and distance; a **Monster/NPC** with
@@ -218,8 +231,12 @@ honest source.
    Start still runs stationary combat, pickup and recovery.
    Target choice: with **Retaliate** on, first try the most recent `su`
    attacker that hit you (within 5 s); otherwise pick the nearest `kind == 3`
-   entity within range. Send `ncif 3 <id>` and the skill template, and set the
-   cooldown.
+   entity within range. Both paths apply the **Targets** filter.
+   Spell rules are evaluated before the basic attack: the first enabled rule
+   whose HP/MP condition is true and whose per-rule cooldown is over is cast
+   on the monster or on yourself; if none matches, the **Skill** from Combat
+   is used (`0` = basic attack). Monster casts send `ncif 3 <id>` plus the
+   skill template; self casts use target type 1 and the char id.
 5. **Walk** a multi-cell leg (three cells from the A* path, plus the final
    cell) by calling the client's own MoveTo: the GUI sends `MOVE|x y` to the
    DLL. The client pathfinds, animates and sends its own `walk` packet with
@@ -267,6 +284,16 @@ never sees the `at` packet.
 - Auto-attack targets `kind == 3` only, within **Range**. Skill **0** is the
   normal attack; the server reports the basic skill (866/868) in `su`. Skill
   866 itself is not castable and gets `cancel 0 866 -1`.
+- The Targets filter compares the monster **template vnum** (from `in`, with
+  the DLL-log backfill). In "only selected" mode an entity whose vnum cannot
+  be resolved is skipped; in "all except selected" it is allowed because it
+  cannot be on the exclusion list.
+- Spell rules require **Auto-attack** to be on. The recovery check runs first:
+  below the Auto-recover threshold the bot sits, so a heal rule with a lower
+  threshold never fires while recovery is active. Self-target rules use the
+  current char id and send `u_s <spell> 1 <charId>`. Spell descriptions shown
+  in the rule editor come from the client's `_code_<lang>_Skill.txt`; they are
+  tooltip text, not guaranteed spell names.
 - The map id comes from `c_map`/`at`. If the host attached after login and has
   not seen either yet, the GUI ranks the map grids against live player
   positions every 2 s and keeps the current map while it still fits.
@@ -276,9 +303,9 @@ never sees the `at` packet.
 ## Tests
 
 ```bash
-make -C linux host-test   # 70 cases incl. synthetic NOS, A*, checksum
-make -C linux gui-test    # GUI + map surface + unknown-position guard
-make -C linux bot-test    # fake server: auto-attack, pickup, MOVE, rejection
+make -C linux host-test   # 76 cases incl. synthetic NOS, A*, checksum, config
+make -C linux gui-test    # GUI + map surface + tooltips + unknown-position guard
+make -C linux bot-test    # 4 fake-server smokes: combat, rules, rejection, recovery
 ```
 
 The bot test sends a fake player at (25,117) on map 20, a monster at
@@ -286,7 +313,12 @@ The bot test sends a fake player at (25,117) on map 20, a monster at
 `get 1 14881134 999`, `ncif 3 500`, `u_s 0 3 500` and `MOVE|26 119` (not an
 injected walk), and the fake client answered with its own `walk`. A second
 test makes the server silent and asserts the bot stops after three rejected
-moves.
+moves. The third test sits the bot at full HP to verify the sit/stand recovery
+loop. The rules smoke presents two monsters (vnum 201 nearer, vnum 200
+farther), allows only vnum 200, sets HP to 40 % and a spell rule (spell 7, my
+HP below 50 %), then asserts `ncif 3 500` + `u_s 7 3 500`, no traffic to 501,
+no basic attack, and that save/load restores the config. See
+[bot-config.md](bot-config.md).
 
 ## Live status
 

@@ -118,7 +118,11 @@ def decrypt_text_dat(data: bytes) -> bytes:
 
 
 def parse_monster_text(text: str) -> dict[int, str]:
-    """Parse the decrypted ``_code_<lang>_monster.txt`` text."""
+    """Parse a decrypted ``_code_<lang>_<table>.txt`` text table.
+
+    Both the monster and skill tables use the same ``zts<id>e<TAB><text>``
+    record shape; the function name is kept for the monster table callers.
+    """
     names: dict[int, str] = {}
     for record in re.split(r"[\r\n]+", text):
         match = _RECORD.match(record)
@@ -158,12 +162,9 @@ def _read_archive_entries(data: bytes) -> dict[str, bytes]:
     return entries
 
 
-def load_monster_names(path: str | Path | None = None) -> dict[int, str]:
-    """Load the vnum → monster-name table.
-
-    Returns an empty dict when the archive or the monster table is missing;
-    callers can then fall back to the entity id.
-    """
+def _load_text_table(
+    suffix: str, path: str | Path | None = None
+) -> dict[int, str]:
     source = Path(path) if path is not None else default_lang_path()
     try:
         data = source.read_bytes()
@@ -175,12 +176,31 @@ def load_monster_names(path: str | Path | None = None) -> dict[int, str]:
     except MonsterNameError:
         return {}
 
-    text = None
     for name, content in entries.items():
-        if name.endswith("_monster.txt"):
-            text = content
-            break
-    if text is None:
-        return {}
+        if name.lower().endswith(suffix):
+            return parse_monster_text(
+                content.decode("cp1252", "replace")
+            )
+    return {}
 
-    return parse_monster_text(text.decode("cp1252", "replace"))
+
+def load_monster_names(path: str | Path | None = None) -> dict[int, str]:
+    """Load the vnum → monster-name table.
+
+    Returns an empty dict when the archive or the monster table is missing;
+    callers can then fall back to the entity id.
+    """
+    return _load_text_table("_monster.txt", path)
+
+
+def load_skill_descriptions(
+    path: str | Path | None = None,
+) -> dict[int, str]:
+    """Load the vnum → skill text/description table.
+
+    ``_code_<lang>_Skill.txt`` is the client's skill tooltip text (for
+    example skill 10 is a strength-course description, 876 a Spell Gun
+    description). It is used as a hint next to the spell vnum in the rule
+    editor. A missing table yields an empty dict.
+    """
+    return _load_text_table("_skill.txt", path)

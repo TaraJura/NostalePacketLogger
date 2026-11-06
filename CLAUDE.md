@@ -30,10 +30,10 @@ build); the fixed build is in the repo, and the client must be restarted.
 |---|---|
 | `windows/` | Original MSVC/C# implementation, moved unchanged. Builds with Visual Studio; not exercised on this machine. |
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
-| Linux host tests | 70/70 pass (`make -C linux host-test`). |
+| Linux host tests | 76/76 pass (`make -C linux host-test`). |
 | Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live map is **20** (230x260); 100 % of 173,503 `mv` samples land on walkable `0x00` cells. |
 | Monster names | `NSlangData_UK.NOS` / `_code_uk_monster.txt` parsed by `monsternames.py` (nibble codec + archive reader): 2,795 `vnum → name` entries. The live `in 3 206 5122 ...` spawn is entity 5122, Angry Queen Bee (vnum 206); map tooltips use the name. `spawnlog.py` backfills entities that spawned before the host attached from the DLL's `C:\NosTalePacketLog.txt` (`[RECV] in ...` lines). |
-| Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), automatic whole-map (contain-fit) view with no manual map/scale/center controls, **immediate map switch** from `c_map`/`at` (the map id is the second `c_map` field), structured sidebar (Character HP/MP bars, Path, Combat, Loot, Recovery), drops + A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover + **Move first** (attack while progressing; off = clear the area), bigger own dot + facing arrow, and hover tooltips for players/monsters/NPCs/drops. `make gui-test` and `make bot-test` pass. |
+| Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), automatic whole-map (contain-fit) view with no manual map/scale/center controls, **immediate map switch** from `c_map`/`at` (the map id is the second `c_map` field), structured sidebar (Character HP/MP bars, Path, Combat, Targets, Spells, Loot, Recovery, Configuration), drops + A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover + **Move first** (attack while progressing; off = clear the area), monster target filters (all/only/except by vnum), ordered conditional spell rules (my HP/MP below/above %, cooldown, monster/self), JSON save/load of the whole bot config, bigger own dot + facing arrow, and hover tooltips for players/monsters/NPCs/drops. `make gui-test` and `make bot-test` (4 smokes) pass. |
 | x86 hook stubs | `HookStubTest.exe` (Wine) calls the real `hooks.S` detours and verifies the EDX packet pointer at `20(%ebp)`, the original-call replay and the send trampoline. Passes. |
 | GUI | Headless GTK4 smoke test passes (`make -C linux gui-test`, Xvfb): fake stream → 2 rows + STATUS in the status bar. |
 | Injector | Verified under Wine end-to-end against both the fake target and the live client (PID 1216): remote `LoadLibraryA` succeeds and the DLL starts. |
@@ -53,7 +53,7 @@ cd ~/games/gameforge/NostalePacketLogger
 # Linux build (MinGW-w64 i686; installed via apt)
 make -C linux all test-host
 make -C linux check                 # file(1) on the three PE32 outputs
-make -C linux host-test             # 70 stdlib unittest cases
+make -C linux host-test             # 76 stdlib unittest cases
 make -C linux gui-test              # headless GTK4 + map surface smoke
 make -C linux bot-test              # fake server: path loop + auto-attack
 make -C linux clean
@@ -108,10 +108,11 @@ PYTHONPATH=linux/host python3 -m ntpl status
   (`NStcData.NOS` grids, A*, map ranking), `monsternames.py`
   (`NSlangData_*.NOS` language archive, nibble text codec, `vnum → monster
   name`), `spawnlog.py` (entity id → vnum/player name from the DLL session
-  log, for spawns that happened before the host connected), `cli.py` (`walk`
-  waits for the server's `tp`/`mv`; `cast` waits for `su`), `gui.py` (packet
-  table + Map/Bot tab). Standard library only outside the GUI (PyGObject +
-  pycairo for the window).
+  log, for spawns that happened before the host connected), `botconfig.py`
+  (JSON bot configuration: target filters, spell rules, validation and atomic
+  save/load), `cli.py` (`walk` waits for the server's `tp`/`mv`; `cast` waits
+  for `su`), `gui.py` (packet table + Map/Bot tab). Standard library only
+  outside the GUI (PyGObject + pycairo for the window).
 - **Sit/stand:** `rest 1 1 <charId>` toggles; the server answers
   `rest <type> <charId> <state>` with 0 = standing, 1 = sitting. Sitting
   regenerates HP/MP but blocks movement, so stand before `walk`. The client
@@ -133,13 +134,19 @@ PYTHONPATH=linux/host python3 -m ntpl status
   (`MOVE|x y`), pacing each leg by distance so the animation stays continuous.
   **Move first** (default on) attacks while a path is active and walks on
   between attacks; with it off the bot clears nearby monsters before moving.
+  **Targets** filters by monster template vnum (all / only selected / all
+  except selected); **Spells** evaluates ordered rules by my HP% or MP%
+  (below/above threshold, per-rule cooldown, monster or self target) before
+  falling back to the Skill field. The whole configuration is JSON
+  save/load (see [docs/bot-config.md](docs/bot-config.md)).
   With no path the bot runs stationary combat/pickup/recovery. Map changes come from
   `c_map <type> <mapId> <state>` (`mapId` is the **second** int) plus `at`;
   the GUI switches immediately and clears stale entities/drops. The own marker
   is a bigger dot + a facing arrow from the last `walk` delta (the protocol has
   no own-facing packet).
 - **Docs**: `docs/architecture.md`, `docs/engine.md`, `docs/map.md`,
-  `docs/live-session-2026-11-06.md`, `docs/hooking.md`, `docs/ipc.md`,
+  `docs/bot-config.md`, `docs/live-session-2026-11-06.md`, `docs/hooking.md`,
+  `docs/ipc.md`,
   `docs/linux.md`, `docs/windows.md`, `docs/development.md`,
   `docs/roadmap.md`, `docs/troubleshooting.md`; packet wiki in
   `docs/protocol/`.

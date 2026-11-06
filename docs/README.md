@@ -5,6 +5,7 @@
 | [architecture.md](architecture.md) | you want the whole picture: components, data flow, why the DLL stays Windows code, Windows vs Linux |
 | [engine.md](engine.md) | you are writing a host, bot or automation: Python API, `WorldState`, handlers, CLI commands, confirmations |
 | [map.md](map.md) | maps, walkability, A*, the Map/Bot tab, path loop and auto-attack |
+| [bot-config.md](bot-config.md) | monster target filters, conditional spell rules, JSON export/import |
 | [handoff-2026-11-06.md](handoff-2026-11-06.md) | **read after a reboot**: current state, why Gameforge shows "Ve hře", exact reinjection + auto-attack test procedure |
 | [live-session-2026-11-06.md](live-session-2026-11-06.md) | what was verified on the running client, the bugs fixed, the mechanics learned, open items |
 | [hooking.md](hooking.md) | you need to understand or repair the in-game detours, signatures, assembly stubs, packet injection |
@@ -24,7 +25,7 @@ the host differ, the game's packets do not.
 - **Windows tree (`windows/`)** — the original working implementation. Injector
   + DLL + WinForms GUI, named pipes.
 - **Linux tree (`linux/`)** — MinGW DLL + TCP loopback + Python CLI + GTK4 GUI
-  + state engine. Builds cleanly, **70 host tests pass**, the GTK4 window
+  + state engine. Builds cleanly, **76 host tests pass**, the GTK4 window
   passes a headless smoke test, and the DLL has been verified against the
   **live NosTale client** under Wine 11: both hooks ACTIVE, drops 0,
   sit/stand via `rest`, and natural movement through the client's own MoveTo
@@ -37,7 +38,9 @@ the host differ, the game's packets do not.
   The GTK4 Map/Bot tab renders the grid, draws A* paths, runs a path loop and
   can auto-attack nearby monsters (Retaliate prioritises the one hitting you),
   pick up your drops, and sit to recover below a configurable HP %. The UI has
-  live HP/MP bars and a structured sidebar. `make gui-test` and `make bot-test`
-  pass; live auto-attack (`u_s 0 3 <id>` → `su ... 866 ...`) and pickup
-  (`get 1 <charId> <dropId>` → server `get`) were verified.
-  See [map.md](map.md).
+  live HP/MP bars, a structured sidebar, monster target filters and conditional
+  spell rules; the whole configuration can be saved/loaded as JSON.
+  `make gui-test` and `make bot-test` pass (4 bot smokes); live auto-attack
+  (`u_s 0 3 <id>` → `su ... 866 ...`) and pickup (`get 1 <charId> <dropId>` →
+  server `get`) were verified. See [map.md](map.md) and
+  [bot-config.md](bot-config.md).

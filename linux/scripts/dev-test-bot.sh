@@ -22,5 +22,6 @@ run() {
 }
 
 run gui_bot_smoke.py
+run gui_bot_rules_smoke.py
 run gui_bot_reject_smoke.py
 run gui_recover_smoke.py

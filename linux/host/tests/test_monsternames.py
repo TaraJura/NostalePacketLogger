@@ -4,6 +4,7 @@ from ntpl.monsternames import (
     decrypt_text_dat,
     default_lang_path,
     load_monster_names,
+    load_skill_descriptions,
     parse_monster_text,
 )
 
@@ -52,6 +53,11 @@ class InstalledLanguageDataTests(unittest.TestCase):
         self.assertEqual(names.get(1), "Baby Fox")
         self.assertEqual(names.get(200), "Mountain Turtle")
         self.assertEqual(names.get(206), "Angry Queen Bee")
+
+    def test_loads_skill_descriptions(self):
+        skills = load_skill_descriptions()
+        self.assertGreater(len(skills), 1000)
+        self.assertIn("Spell Gun", skills.get(876, ""))
 
 
 if __name__ == "__main__":
