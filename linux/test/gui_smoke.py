@@ -47,6 +47,9 @@ def start_fake_server() -> int:
             b"RECV|mapout\n"
             b"RECV|at 14881134 85 6 8 2 0 13 1 -1 0 0\n"
             b"RECV|c_map 0 85 1\n"
+            b"RECV|in 1 Tester - 123 7 8 2 0 0 0\n"
+            b"RECV|in 3 206 500 8 9 2 100 100 0 0 0 -1 0 0 -1 - 0 -1 "
+            b"0 0 0 0 0 0 0 0 0 0 0 1 0\n"
         )
         time.sleep(15)
         connection.close()
@@ -71,6 +74,29 @@ def main() -> int:
                 and app.map_grid.map_id == 85
                 and app.engine.world.map_id == 85
                 and "85" in status
+            )
+
+            def tip(cell):
+                scale, dx, dy = app._map_geometry(
+                    app.map_area.get_width(), app.map_area.get_height()
+                )
+                return app._map_tooltip_text(
+                    dx + (cell[0] + 0.5) * scale,
+                    dy + (cell[1] + 0.5) * scale,
+                )
+
+            own_tip = tip((6, 8))
+            player_tip = tip((7, 8))
+            monster_tip = tip((8, 9))
+            tooltips_ok = (
+                own_tip is not None
+                and own_tip.startswith("You")
+                and player_tip is not None
+                and "Player Tester" in player_tip
+                and "char id 123" in player_tip
+                and monster_tip is not None
+                and "Monster #500" in monster_tip
+                and "vnum 206" in monster_tip
             )
 
             # Without a known own position, rebuilding a path must not pretend
@@ -99,7 +125,10 @@ def main() -> int:
                 f"rows={rows} status={status!r} map={app.map_grid.map_id if app.map_grid else None} "
                 f"surface={app.map_surface is not None} guard={guard} facing={facing} "
                 f"hp={stats.hp}/{stats.hp_max} stats_area={app.stats_area is not None} "
-                f"switched={switched}"
+                f"switched={switched} tooltips={tooltips_ok} "
+                f"size={app.map_area.get_width()}x{app.map_area.get_height()} "
+                f"entities={len(app.engine.world.entities)} "
+                f"tips={own_tip!r}/{player_tip!r}/{monster_tip!r}"
             )
             result["ok"] = (
                 rows >= 2
@@ -108,13 +137,21 @@ def main() -> int:
                 and guard
                 and facing == (1, 0)
                 and stats_ok
+                and tooltips_ok
             )
         except Exception as exc:  # noqa: BLE001 - report, do not crash GTK
             result["detail"] = f"exception: {exc!r}"
         app.quit()
         return False
 
-    GLib.timeout_add(1500, check)
+    def show_map() -> bool:
+        # The map page must be visible (and allocated) before hover
+        # tooltips can be tested against real widget coordinates.
+        app.notebook.set_current_page(1)
+        GLib.timeout_add(500, check)
+        return False
+
+    GLib.timeout_add(1000, show_map)
     app.run([])
 
     print("GUI SMOKE:", "PASS" if result["ok"] else "FAIL", result["detail"])

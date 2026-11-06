@@ -24,6 +24,7 @@ from .protocol import Packet
 class Entity:
     entity_id: int
     kind: int = 0          # 1 = player, 2 = pet/partner/NPC, 3 = monster/NPC
+    vnum: int = 0          # NPC/monster template id from `in`, 0 for players
     name: str = ""
     x: int = 0
     y: int = 0
@@ -232,6 +233,10 @@ def _on_spawn(world: WorldState, packet: Packet) -> None:
             entity = Entity(entity_id, kind)
             world.entities[entity_id] = entity
         entity.kind = kind
+        try:
+            entity.vnum = int(args[1])
+        except ValueError:
+            pass
         entity.x = x
         entity.y = y
 

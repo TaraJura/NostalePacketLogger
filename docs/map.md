@@ -120,6 +120,12 @@ in the window header.
 | Range / Cooldown | attack radius and seconds between attacks |
 | Loop | repeat the path when it finishes |
 
+Hovering a map marker shows a tooltip: **You** with char id, position and map;
+a **Player** with name, char id, position and distance; a **Monster/NPC** with
+entity id, template vnum, position and distance (plus “attacking you” for the
+last attacker); and a **drop** with item vnum, amount, drop id, owner and
+distance.
+
 Overlays: cyan path, yellow waypoints, **gold diamonds for drops**, green
 players, blue NPCs/pets, orange monsters. The own character is a **bigger red
 dot with a white ring and a red facing arrow**. The arrow follows the last
@@ -212,7 +218,7 @@ never sees the `at` packet.
 ## Tests
 
 ```bash
-make -C linux host-test   # 61 cases incl. synthetic NOS, A*, checksum
+make -C linux host-test   # 62 cases incl. synthetic NOS, A*, checksum
 make -C linux gui-test    # GUI + map surface + unknown-position guard
 make -C linux bot-test    # fake server: auto-attack, pickup, MOVE, rejection
 ```

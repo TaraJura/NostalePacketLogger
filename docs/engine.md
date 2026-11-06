@@ -75,8 +75,8 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `combat` | last 100 combat events (`attacker`, `target`, `skill`, raw args) |
 | `last_packet` | the most recently fed `Packet` |
 
-`Entity` holds `entity_id`, `kind` (1 player, 2 pet/NPC, 3 monster), `name`,
-`x`, `y`, `speed`.
+`Entity` holds `entity_id`, `kind` (1 player, 2 pet/NPC, 3 monster), `vnum`
+(the template id from `in`, 0 for players), `name`, `x`, `y`, `speed`.
 
 ## Handlers
 

@@ -118,6 +118,19 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(entity.name, "Guder")
         self.assertEqual((entity.kind, entity.x, entity.y), (1, 105, 23))
 
+    def test_monster_spawn_records_template_vnum(self):
+        # Live: in 3 206 5122 132 182 ...
+        world = self.engine.feed(
+            packet(
+                Kind.RECV,
+                "in 3 206 5122 132 182 2 100 100 0 0 0 -1 0 0 -1 - 0 -1 0",
+            )
+        )
+        entity = world.entities[5122]
+        self.assertEqual(
+            (entity.kind, entity.vnum, entity.x, entity.y), (3, 206, 132, 182)
+        )
+
     def test_npc_spawn_is_keyed_by_entity_id_not_vnum(self):
         # Two NPCs may share a vnum; mv/out use the entity id.
         line = "in 2 2557 2230354 104 24 2 96 100 0 0 3 4165102 1 0 2379 Graham"

@@ -364,6 +364,8 @@ class Application(Gtk.Application):
         self.map_area.set_draw_func(self._draw_map)
         self.map_area.set_hexpand(True)
         self.map_area.set_vexpand(True)
+        self.map_area.set_has_tooltip(True)
+        self.map_area.connect("query-tooltip", self._on_map_query_tooltip)
         click = Gtk.GestureClick()
         click.connect("pressed", self._on_map_click)
         self.map_area.add_controller(click)
@@ -1003,6 +1005,118 @@ class Application(Gtk.Application):
             return
         self.waypoints.append(cell)
         self._rebuild_path()
+
+    # -- map tooltips ---------------------------------------------------
+
+    def _map_cell_screen(self, x: int, y: int) -> tuple[float, float]:
+        scale, ox, oy = self._map_geometry(
+            self.map_area.get_width(), self.map_area.get_height()
+        )
+        return ox + (x + 0.5) * scale, oy + (y + 0.5) * scale
+
+    def _own_tooltip_text(self, own: tuple[int, int]) -> str:
+        world = self.engine.world
+        lines = ["You"]
+        char_id = self._char_id()
+        if char_id is not None:
+            lines.append(f"char id {char_id}")
+        lines.append(f"position {own[0]}, {own[1]}")
+        if world.map_id is not None:
+            lines.append(f"map {world.map_id}")
+        return "\n".join(lines)
+
+    def _entity_tooltip_text(self, entity: Entity) -> str:
+        labels = {1: "Player", 2: "NPC/pet", 3: "Monster"}
+        label = labels.get(entity.kind, "Entity")
+        if entity.kind == 1 and entity.name:
+            title = f"{label} {entity.name}"
+        else:
+            title = f"{label} #{entity.entity_id}"
+        lines = [title]
+        if entity.kind == 1:
+            lines.append(f"char id {entity.entity_id}")
+        elif entity.vnum:
+            lines.append(f"vnum {entity.vnum}")
+        lines.append(f"position {entity.x}, {entity.y}")
+        own = self._player_cell()
+        if own is not None:
+            distance = max(abs(entity.x - own[0]), abs(entity.y - own[1]))
+            lines.append(f"distance {distance}")
+        if self.engine.world.last_attacker_id == entity.entity_id:
+            lines.append("attacking you")
+        return "\n".join(lines)
+
+    def _drop_tooltip_text(self, drop: GroundItem) -> str:
+        title = f"Drop item {drop.item_vnum}"
+        if drop.amount > 1:
+            title += f" x{drop.amount}"
+        lines = [title, f"drop id {drop.drop_id}"]
+        own = self._player_cell()
+        lines.append(f"position {drop.x}, {drop.y}")
+        if own is not None:
+            distance = max(abs(drop.x - own[0]), abs(drop.y - own[1]))
+            lines.append(f"distance {distance}")
+        if drop.owner_id:
+            owner = "you" if drop.owner_id == self._char_id() else str(drop.owner_id)
+            lines.append(f"owner {owner}")
+        else:
+            lines.append("unowned")
+        return "\n".join(lines)
+
+    def _map_tooltip_text(self, x: float, y: float) -> str | None:
+        """Describe the own marker, entity or drop under a widget point."""
+        if self.map_grid is None or self.map_area is None:
+            return None
+        width = self.map_area.get_width()
+        height = self.map_area.get_height()
+        if width <= 1 or height <= 1:
+            return None
+        scale, _ox, _oy = self._map_geometry(width, height)
+        radius = max(9.0, scale * 1.2)
+        best: tuple[float, str] | None = None
+
+        own = self._player_cell()
+        if own is not None:
+            cx, cy = self._map_cell_screen(*own)
+            distance = math.hypot(x - cx, y - cy)
+            if distance <= radius:
+                best = (distance, self._own_tooltip_text(own))
+
+        world = self.engine.world
+        for entity in world.entities.values():
+            if not (
+                0 <= entity.x < self.map_grid.width
+                and 0 <= entity.y < self.map_grid.height
+            ):
+                continue
+            # The own marker above is already covered; do not add its raw
+            # entity a second time.
+            if entity.entity_id == world.self_id:
+                continue
+            cx, cy = self._map_cell_screen(entity.x, entity.y)
+            distance = math.hypot(x - cx, y - cy)
+            if distance <= radius and (best is None or distance < best[0]):
+                best = (distance, self._entity_tooltip_text(entity))
+
+        for drop in world.drops.values():
+            if not (
+                0 <= drop.x < self.map_grid.width
+                and 0 <= drop.y < self.map_grid.height
+            ):
+                continue
+            cx, cy = self._map_cell_screen(drop.x, drop.y)
+            distance = math.hypot(x - cx, y - cy)
+            if distance <= radius and (best is None or distance < best[0]):
+                best = (distance, self._drop_tooltip_text(drop))
+
+        return best[1] if best is not None else None
+
+    def _on_map_query_tooltip(self, _widget, x, y, _keyboard_mode, tooltip):
+        text = self._map_tooltip_text(x, y)
+        if not text:
+            return False
+        tooltip.set_text(text)
+        return True
 
     def _clear_path(self) -> None:
         self.waypoints.clear()

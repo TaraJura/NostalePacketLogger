@@ -24,7 +24,7 @@ the host differ, the game's packets do not.
 - **Windows tree (`windows/`)** — the original working implementation. Injector
   + DLL + WinForms GUI, named pipes.
 - **Linux tree (`linux/`)** — MinGW DLL + TCP loopback + Python CLI + GTK4 GUI
-  + state engine. Builds cleanly, **61 host tests pass**, the GTK4 window
+  + state engine. Builds cleanly, **62 host tests pass**, the GTK4 window
   passes a headless smoke test, and the DLL has been verified against the
   **live NosTale client** under Wine 11: both hooks ACTIVE, drops 0,
   sit/stand via `rest`, and natural movement through the client's own MoveTo
