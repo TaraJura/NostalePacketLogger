@@ -90,7 +90,12 @@ _ntpl_hook_skill:
     popal
     popfl
     call    *_ntpl_skill_original_call
-    ret
+    /*
+     * The call site was replaced with a JMP, not a CALL, so the original
+     * return address is not on the stack. Replay the call and then jump to
+     * the instruction after the call site explicitly.
+     */
+    jmp     *_ntpl_skill_jmp_back
 
 /* ------------------------------------------------------------ game send --
  * void ntpl_game_send(char* packet)

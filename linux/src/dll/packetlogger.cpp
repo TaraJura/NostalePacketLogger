@@ -55,6 +55,7 @@ std::uintptr_t ntpl_recv_original_call = 0;
 std::uintptr_t ntpl_recv_jmp_back = 0;
 std::uintptr_t ntpl_send_trampoline = 0;
 std::uintptr_t ntpl_skill_original_call = 0;
+std::uintptr_t ntpl_skill_jmp_back = 0;
 std::uintptr_t ntpl_tnt_client = 0;
 std::uintptr_t ntpl_send_addr = 0;
 
@@ -163,6 +164,7 @@ bool initialize(Queue* recv, Queue* send, Status& status) {
             g_status.skill_found = true;
             g_status.skill_addr = call_addr;
             ntpl_skill_original_call = target;
+            ntpl_skill_jmp_back = call_addr + 5;
             std::memcpy(g_skill_original,
                         reinterpret_cast<const void*>(call_addr),
                         sizeof(g_skill_original));

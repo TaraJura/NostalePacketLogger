@@ -26,18 +26,26 @@ Damage/HP positions are not decoded yet; the engine keeps the raw args.
 
 Use a skill on a target.
 
-**Format**: `u_s <unknown> <targetType> <targetId> ...`
+**Format**: `u_s <skillVnum> <targetType> <targetId> ...`
 
 The client's builder concatenates the constant `u_s ` with numeric fields
 (found in the binary at VA `0x72D630`; the short `u_s` form is at `0x72D640`).
-The exact field order is not verified on the live server yet.
+A real client cast captured by the skill hook on 2026-11-06:
 
-`ntpl cast` defaults to `u_s <skillVnum> <targetType> <targetId>` and can send
-a literal packet with `--packet` once the live client shows the real layout:
+```
+u_s 10 3 5164
+    — basic attack (skill 10) on monster 5164
+```
+
+The server echoes `cancel 0 <skill> -1` when the skill is not usable, and
+`su 1 <charId> 3 <target> <skill> ...` when it is. `<skill> <targetType>
+<targetId>` is therefore the verified prefix; later fields are still unknown.
+
+`ntpl cast` defaults to `u_s <skillVnum> <targetType> <targetId>`:
 
 ```bash
-linux/scripts/host.sh cast 866 --target-id 5180 --target-type 3
-linux/scripts/host.sh cast --packet "u_s 866 3 5180"
+linux/scripts/host.sh cast 10 --target-id 5164 --target-type 3
+linux/scripts/host.sh cast --packet "u_s 10 3 5164"
 ```
 
 The character must be **standing** (sitting blocks actions), the target must be

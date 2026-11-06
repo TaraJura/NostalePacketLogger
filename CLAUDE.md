@@ -62,7 +62,7 @@ linux/scripts/inject.sh
 linux/scripts/host.sh status
 linux/scripts/host.sh monitor [--engine] [--filter TEXT] [--log FILE]
 linux/scripts/host.sh walk 25 118              # client MoveTo; natural walk
-linux/scripts/host.sh cast 866 --target-id 5180 # use a skill (u_s; experimental)
+linux/scripts/host.sh cast 10 --target-id 5164  # basic attack (u_s 10 3 id)
 linux/scripts/host.sh send "rest 1 1 14881134" # sit/stand toggle
 linux/scripts/host.sh send "walk 19 146 0 10"  # raw packet
 linux/scripts/host.sh scan 34 73               # memory debug: pair

@@ -61,6 +61,7 @@ extern std::uintptr_t ntpl_recv_original_call;
 extern std::uintptr_t ntpl_recv_jmp_back;
 extern std::uintptr_t ntpl_send_trampoline;
 extern std::uintptr_t ntpl_skill_original_call;
+extern std::uintptr_t ntpl_skill_jmp_back;
 extern std::uintptr_t ntpl_tnt_client;
 extern std::uintptr_t ntpl_send_addr;
 }

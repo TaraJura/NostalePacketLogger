@@ -165,7 +165,7 @@ Drive the character:
 ```bash
 linux/scripts/host.sh walk 25 117
 linux/scripts/host.sh send "rest 1 1 14881134"   # toggle sit/stand
-linux/scripts/host.sh cast 866 --target-id 5180 --target-type 3
+linux/scripts/host.sh cast 10 --target-id 5164 --target-type 3
 ```
 
 Engine in a script:

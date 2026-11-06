@@ -93,7 +93,7 @@ linux/scripts/host.sh map best --log "$WINEPREFIX/drive_c/NosTalePacketLog.txt"
 | Loop | repeat the path when it finishes |
 | Start / Stop | run/stop the bot |
 | Auto-attack | attack monsters in range before the next path step |
-| Skill | skill vnum (default 866, the vnum seen in the live `su` log) |
+| Skill | skill vnum (default 10, the client's own basic attack; captured live as `u_s 10 3 <monster>`) |
 | Range | attack radius in cells |
 | Cooldown | seconds between attacks |
 | Char ID | own char id; auto-filled from a `rest` packet, or enter it manually |
@@ -168,7 +168,7 @@ make -C linux bot-test    # fake server: auto-attack, MOVE, rejection
 ```
 
 The bot test sends a fake player at (25,117) on map 20 and a monster at
-(25,118); it asserts the engine sent `ncif 3 500`, `u_s 866 3 500` and
+(25,118); it asserts the engine sent `ncif 3 500`, `u_s 10 3 500` and
 `MOVE|26 119` (not an injected walk), and the fake client answered with its
 own `walk`. A second test makes the server silent and asserts the bot stops
 after three rejected moves.

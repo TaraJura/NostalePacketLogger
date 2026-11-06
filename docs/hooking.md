@@ -148,8 +148,14 @@ _ntpl_hook_skill:
     popal
     popfl
     call    *_ntpl_skill_original_call
-    ret
+    jmp     *_ntpl_skill_jmp_back     # NOT `ret`: the hook is a JMP, so no
+                                      # return address was pushed
 ```
+
+`Memory::Hook` replaces the call with a **JMP**; the original return address is
+not on the stack. The stub must therefore replay the call and jump back to the
+instruction after the call site explicitly. A `ret` here crashes the client the
+next time it uses a skill.
 
 The status line reports it as `skill=ACTIVE` (or `NOT-FOUND` after a patch).
 Use this hook to learn the client's exact `u_s` field order and skill vnums

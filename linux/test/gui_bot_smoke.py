@@ -5,7 +5,7 @@ a monster at (25,118). The GUI loads the real map, starts the bot with a short
 path, and the test checks that the bot sent:
 
     ncif 3 500          (select the monster)
-    u_s ... 866 ... 500 (auto-attack with the configured skill)
+    u_s 10 3 500        (auto-attack with the basic skill 10)
     walk 25 118 0 10    (first path cell)
 
 The fake server answers each walk with a server `tp`, so the path loop advances
@@ -120,7 +120,7 @@ def main() -> int:
             app.path_cells = [(26, 119)]
             app.loop_toggle.set_active(False)
             app.auto_attack_toggle.set_active(True)
-            app.skill_entry.set_text("866")
+            app.skill_entry.set_text("10")
             app.attack_cooldown.set_value(10)
             app.attack_walk_delay = 0.1
             app.walk_timeout = 0.5
@@ -136,7 +136,7 @@ def main() -> int:
             lines = list(server.received)
             has_ncif = any("SEND|ncif 3 500" in line for line in lines)
             has_skill = any(
-                line.startswith("SEND|u_s") and "866" in line and "500" in line
+                line.startswith("SEND|u_s") and "10 3 500" in line
                 for line in lines
             )
             has_move = any(line == "MOVE|26 119" for line in lines)

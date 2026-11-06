@@ -335,7 +335,10 @@ class Application(Gtk.Application):
         bottom.append(Gtk.Label(label="Skill"))
         self.skill_entry = Gtk.Entry()
         self.skill_entry.set_width_chars(6)
-        self.skill_entry.set_text("866")
+        # The client's own basic attack is skill 10 (captured live:
+        # `u_s 10 3 <monster>`). 866 was another player's skill and the
+        # server answered it with `cancel 0 866 -1`.
+        self.skill_entry.set_text("10")
         self.skill_entry.set_tooltip_text("skill vnum sent to the server")
         bottom.append(self.skill_entry)
         bottom.append(Gtk.Label(label="Range"))
@@ -923,7 +926,7 @@ class Application(Gtk.Application):
         return best
 
     def _skill_packet(self, target_id: int) -> str:
-        skill = self.skill_entry.get_text().strip() or "866"
+        skill = self.skill_entry.get_text().strip() or "10"
         template = (
             self.skill_packet_entry.get_text().strip()
             or "u_s {skill} {type} {target}"

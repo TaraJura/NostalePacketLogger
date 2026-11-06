@@ -154,10 +154,25 @@ The client's `u_s` and `ncif` builders exist in the binary:
 - `u_s ` constant at VA `0x72D630`, short `u_s` at `0x72D640`.
 - `ncif ` constant at VA `0x730370`.
 
-The exact `u_s` field order is **not verified** on the live server yet.
-`ntpl cast` defaults to `u_s <skill> <targetType> <targetId>` and accepts
-`--packet` for a literal captured form. A live cast while the user watches the
-log is the remaining step.
+The exact `u_s` field order is now captured from the client's own skill hook:
+
+```
+[SEND] ncif 3 5164
+[SEND] u_s 10 3 5164
+```
+
+So the prefix is `u_s <skill> <targetType> <targetId>` and the character's
+basic attack is **skill 10**. The bot's old default 866 was another player's
+skill; the server answered it with `cancel 0 866 -1` for every target.
+`ntpl cast 10 --target-id 5164 --target-type 3` is the verified command.
+
+The first version of the skill hook replayed the original call and then used
+`ret`; because `Memory::Hook` patches the call site with a **JMP**, no return
+address was on the stack and the client crashed at 15:32:29 right after
+capturing the packet. The stub now ends with `jmp <call_site+5>`. The game
+process exited, which is why the Gameforge client kept showing the stale
+"Ve hře" state; a game restart is needed to clear it and to inject the fixed
+DLL.
 
 ### Facing
 
@@ -252,9 +267,14 @@ skill packet.
 - Character `14881134`; after the final live bot run the position was
   `(23,130)`, standing. Movement now goes through the client's own MoveTo, so
   the local and server positions stay in sync without teleport corrections.
-- The DLL (`PacketLogger5.dll`) remained loaded in the client with hooks
-  active; older `PacketLogger*.dll` copies from the re-injection tests are
-  inert until the client restarts.
+- The game process **exited at 15:32:29** when the first skill-hook build used
+  `ret` after a JMP-patched call. The fixed build is in `linux/build`; the
+  client must be restarted, then the fixed DLL injected under a new filename.
+  The Gameforge client still shows the stale "Ve hře" state until the game is
+  started again (or the Gameforge client is restarted).
+- The DLL (`PacketLogger9.dll`) was the crashing build; older
+  `PacketLogger*.dll` copies are inert until the client restarts. The fixed
+  build reports `skill=ACTIVE` and captures `u_s 10 3 <target>`.
 - The file log is `~/games/gameforge/prefix/drive_c/NosTalePacketLog.txt`.
 - The TCP server is `127.0.0.1:47821`.
 - The host test count is now 55; `make bot-test` also runs the
@@ -284,7 +304,7 @@ linux/scripts/host.sh map best
 # actions (confirm from the server)
 linux/scripts/host.sh send "rest 1 1 14881134"   # toggle sit/stand
 linux/scripts/host.sh walk 25 117                # waits for tp/mv
-linux/scripts/host.sh cast 866 --target-id 5180  # waits for su (u_s format pending)
+linux/scripts/host.sh cast 10 --target-id 5164   # basic attack (u_s 10 3 id)
 ```
 
 ## Open items
