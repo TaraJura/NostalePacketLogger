@@ -99,6 +99,10 @@ change priority; the number on the left shows the current order.
 
 Data-driven checks before a cast:
 
+- **range**: basic attacks use the Skill field's skill range (default basic
+  attack 866 = 11 cells) even when the UI Range is larger. Out-of-range
+  attacks are not sent; the status bar reports the distance and the bot walks
+  the path instead. Use a longer-range spell rule or walk closer.
 - **MP**: if `DATA[8] > current MP`, the rule is skipped (next rule may fit).
 - **range**: a monster spell is skipped when the target is farther than
   `TARGET[2]` (`DATA[11]`) cells.
@@ -216,4 +220,7 @@ touching the UI.
   vnum→slot mapping, MP/range gating and save/load.
 - `linux/test/gui_spell_order_smoke.py` — scanned spells 876 (Holy Hammer,
   90 s cooldown) and 866 (Holy Attack): 876 must cast first, then 866 twice
-  while 876 is on cooldown; no basic attack.
+  while 876 is on cooldown; no raw vnums.
+- `linux/test/gui_out_of_range_smoke.py` — UI Range 40, monster 35 cells
+  away, basic skill range 11: no ncif/u_s is sent and the status shows the
+  out-of-range target.

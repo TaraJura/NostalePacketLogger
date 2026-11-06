@@ -301,9 +301,14 @@ never sees the `at` packet.
   produced `su ... 876` live. Self-target rules use `u_s <slot> 1 <charId>`;
   live `u_s 7 1 14881134` → `su ... 873` (Group Healing). The template is
   editable.
-- Auto-attack targets `kind == 3` only, within **Range**. Skill **0** is the
-  normal attack; the server reports the basic skill (866/868) in `su`. Skill
-  866 itself is not castable and gets `cancel 0 866 -1`.
+- Auto-attack targets `kind == 3` only, within **Range**. The actual attack
+  range is also capped by the skill's scanned Skill.dat range: the basic
+  attack (866) has range 11, so a target farther away is **not attacked**
+  even if the UI Range is larger. Out-of-range casts only play the client
+  animation; the server rejects/self-targets them. The status bar explains
+  the distance. Use a longer-range spell rule or walk closer. Skill **0** is
+  the normal attack; the server reports the basic skill (866/868) in `su`.
+  Skill 866 itself is not castable and gets `cancel 0 866 -1`.
 - The Targets filter compares the monster **template vnum** (from `in`, with
   the DLL-log backfill). In "only selected" mode an entity whose vnum cannot
   be resolved is skipped; in "all except selected" it is allowed because it
@@ -334,7 +339,7 @@ never sees the `at` packet.
 ```bash
 make -C linux host-test   # 84 cases incl. synthetic NOS, 8-way A*, checksum, config
 make -C linux gui-test    # GUI + map surface + tooltips + unknown-position guard
-make -C linux bot-test    # 5 fake-server smokes: combat, rules, rejection, recovery
+make -C linux bot-test    # 6 fake-server smokes: combat, rules, spell order, out-of-range, rejection, recovery
 ```
 
 The bot test sends a fake player at (25,117) on map 20, a monster at
@@ -346,7 +351,9 @@ moves. The third test sits the bot at full HP to verify the sit/stand recovery
 loop. The rules smoke presents two monsters (vnum 201 nearer, vnum 200
 farther), allows only vnum 200, sets HP to 40 % and a spell rule (spell 7, my
 HP below 50 %), then asserts `ncif 3 500` + `u_s 7 3 500`, no traffic to 501,
-no basic attack, and that save/load restores the config. See
+no basic attack, and that save/load restores the config. The out-of-range
+smoke sets UI Range 40 with a monster 35 cells away and asserts no `ncif`/`u_s`
+is sent and the status says “not attacking”. See
 [bot-config.md](bot-config.md).
 
 ## Live status

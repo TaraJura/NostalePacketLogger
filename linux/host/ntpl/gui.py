@@ -2661,6 +2661,7 @@ class Application(Gtk.Application):
         self.recovering = False
         self.recover_rest_at = 0.0
         self.unknown_warn_at = 0.0
+        self.out_of_range_warn_at = 0.0
         if self.bot_timer is None:
             self.bot_timer = GLib.timeout_add(BOT_INTERVAL_MS, self._bot_tick)
         self._set_status("bot started")
@@ -2906,13 +2907,34 @@ class Application(Gtk.Application):
                 ):
                     return True
 
+            basic = self._entry_int(self.skill_entry, 0)
+            basic_info = (
+                self.spells.get(basic) if basic > 0 else self.spells.get(866)
+            )
+            basic_range = float(radius)
+            if basic_info is not None and basic_info.range > 0:
+                # The UI Range may be larger than the actual skill (the
+                # server rejects or self-targets out-of-range attacks).
+                basic_range = min(basic_range, float(basic_info.range))
+            basic_distance = None
+            standing_at = self._player_cell()
+            if monster is not None and standing_at is not None:
+                basic_distance = max(
+                    abs(monster.x - standing_at[0]),
+                    abs(monster.y - standing_at[1]),
+                )
+            basic_in_range = (
+                monster is not None
+                and basic_distance is not None
+                and basic_distance <= basic_range
+            )
             if (
                 rule is None
                 and monster is not None
+                and basic_in_range
                 and now >= self.attack_cooldown_until
             ):
                 self._send(f"ncif 3 {monster.entity_id}")
-                basic = self._entry_int(self.skill_entry, 0)
                 packet = self._skill_packet(
                     monster.entity_id,
                     skill=self._skill_send_id(basic) if basic > 0 else 0,
@@ -2926,7 +2948,23 @@ class Application(Gtk.Application):
                 self._set_status(f"attack {monster.entity_id}: {packet}")
                 return True
 
-            if monster is not None and not move_first:
+            if (
+                rule is None
+                and monster is not None
+                and not basic_in_range
+                and now >= self.out_of_range_warn_at
+            ):
+                self._set_status(
+                    f"monster {monster.entity_id} is {basic_distance} cells "
+                    f"away; basic range {basic_range:g} — not attacking"
+                )
+                self.out_of_range_warn_at = now + 10.0
+
+            if (
+                monster is not None
+                and not move_first
+                and (rule is not None or basic_in_range)
+            ):
                 # Clear-the-area mode: stay on this position until the
                 # nearby monsters are dead. Move first keeps walking
                 # between attacks instead.

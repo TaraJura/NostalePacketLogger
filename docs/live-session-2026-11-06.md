@@ -326,7 +326,7 @@ skill packet.
 make -C linux all test-host
 make -C linux host-test        # 84 cases
 make -C linux gui-test         # headless GTK4 + map surface
-make -C linux bot-test         # 5 smokes: combat, rules/config, spell order, rejection, recovery
+make -C linux bot-test         # 6 smokes: combat, rules/config, spell order, out-of-range, rejection, recovery
 
 # with the game running
 export WINEPREFIX=/home/novakj/games/gameforge/prefix
@@ -479,7 +479,7 @@ shortcut and the no-corner-cutting rule.
 ### Verification and state
 
 - **84 host tests**, `make gui-test` (map switch, tooltips, toggle classes,
-  recovery banner), and **5 bot smokes** (combat, target filter + spell rules
+  recovery banner), and **6 bot smokes** (combat, target filter + spell rules
   + config round-trip, rejected walks, recovery) pass.
 - Headless rules smoke: two monsters (vnum 201 nearer, vnum 200 farther),
   allow only 200, HP 40 %, rule spell 7 below 50 % → `ncif 3 500` +

@@ -58,7 +58,7 @@ From `linux/`:
 ```bash
 make host-test      # 84 unittest cases
 make gui-test       # headless GTK4: map switch, tooltips, toggles, recovery banner
-make bot-test       # 5 smokes: combat, rules/config, spell order, rejection, recovery
+make bot-test       # 6 smokes: combat, rules/config, spell order, out-of-range, rejection, recovery
 ```
 
 The tests start a fake TCP server, so they need neither the DLL nor Wine. The

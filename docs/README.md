@@ -46,6 +46,6 @@ the host differ, the game's packets do not.
   scanned from `NSgtdData.NOS` → `Skill.dat` (Always/HP/MP conditions, MP,
   range, cast time, cooldown); the whole configuration can be saved/loaded as
   JSON. `make gui-test` and `make
-  bot-test` pass (5 bot smokes, including the spell rotation). See
+  bot-test` pass (6 bot smokes, including the spell rotation). See
   [map.md](map.md) and
   [bot-config.md](bot-config.md).

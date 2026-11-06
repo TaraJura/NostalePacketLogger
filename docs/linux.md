@@ -237,7 +237,7 @@ both.
 make host-test          # 84 stdlib unit tests: protocol, engine, map, config, spells
 
 make gui-test           # headless GTK4 window + map surface against a fake stream
-make bot-test           # 5 fake-server smokes: combat, rules/config, spell order, rejection, recovery
+make bot-test           # 6 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, recovery
 make all test-host
 ./scripts/dev-test-wine.sh 25
 ```
