@@ -5,6 +5,7 @@
 | [architecture.md](architecture.md) | you want the whole picture: components, data flow, why the DLL stays Windows code, Windows vs Linux |
 | [engine.md](engine.md) | you are writing a host, bot or automation: Python API, `WorldState`, handlers, CLI commands, confirmations |
 | [map.md](map.md) | maps, walkability, A*, the Map/Bot tab, path loop and auto-attack |
+| [handoff-2026-11-06.md](handoff-2026-11-06.md) | **read after a reboot**: current state, why Gameforge shows "Ve hře", exact reinjection + auto-attack test procedure |
 | [live-session-2026-11-06.md](live-session-2026-11-06.md) | what was verified on the running client, the bugs fixed, the mechanics learned, open items |
 | [hooking.md](hooking.md) | you need to understand or repair the in-game detours, signatures, assembly stubs, packet injection |
 | [ipc.md](ipc.md) | you are writing a host, a bot, or another front end and need the wire protocol |

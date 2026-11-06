@@ -50,6 +50,8 @@ Start with [docs/architecture.md](docs/architecture.md), then:
   commands and action confirmations
 - [docs/map.md](docs/map.md) — `NStcData` maps, walkability, A*, the Map/Bot
   tab, path loop and auto-attack
+- [docs/handoff-2026-11-06.md](docs/handoff-2026-11-06.md) — current state and
+  the exact post-reboot reinjection + auto-attack test procedure
 - [docs/live-session-2026-11-06.md](docs/live-session-2026-11-06.md) — what was
   verified on the running client, the bugs fixed and the open items
 - [docs/hooking.md](docs/hooking.md) — how the detours, patterns and assembly

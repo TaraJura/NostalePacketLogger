@@ -20,7 +20,11 @@ client setup in the parent directory; use a separate Wine prefix.
 
 ## Status
 
-Last checked 2026-11-06.
+Last checked 2026-11-06. **After a reboot, start with
+[`docs/handoff-2026-11-06.md`](docs/handoff-2026-11-06.md)**: it has the
+current state and the exact reinjection/auto-attack test procedure. The game
+process is not running (it exited at 15:32:29 after the first skill-hook
+build); the fixed build is in the repo, and the client must be restarted.
 
 | What | State |
 |---|---|
