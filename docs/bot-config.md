@@ -64,6 +64,10 @@ Self rules require the char id and send:
 u_s <spell> 1 <charId>
 ```
 
+The monster shape (`u_s <spell> 3 <id>`) matches the live client captures.
+The self-target shape (target type 1 + char id) is the protocol-consistent
+guess; verify one benign self cast live before relying on a timed buff/heal.
+
 If no rule matches, the bot uses the **Skill** field from Combat (0 = normal
 attack). Recovery runs before spell rules: below **Auto-recover → Below HP %**
 the bot sits and waits for full HP, so a heal rule with a lower threshold does
