@@ -49,8 +49,12 @@ def main() -> int:
         try:
             rows = app.store.get_n_items()
             status = app.status.get_text()
-            result["detail"] = f"rows={rows} status={status!r}"
-            result["ok"] = rows >= 2 and status == "ready"
+            map_ok = app.map_grid is not None and app.map_surface is not None
+            result["detail"] = (
+                f"rows={rows} status={status!r} map={app.map_grid.map_id if app.map_grid else None} "
+                f"surface={app.map_surface is not None}"
+            )
+            result["ok"] = rows >= 2 and status == "ready" and map_ok
         except Exception as exc:  # noqa: BLE001 - report, do not crash GTK
             result["detail"] = f"exception: {exc!r}"
         app.quit()

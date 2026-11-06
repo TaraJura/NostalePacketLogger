@@ -90,10 +90,14 @@ class EngineTests(unittest.TestCase):
     def test_rest_state(self):
         world = self.engine.feed(packet(Kind.RECV, "rest 1 14881134 1"))
         self.assertTrue(world.resting)
+        self.assertEqual(world.self_id, 14881134)
         world = self.engine.feed(packet(Kind.RECV, "rest 1 14881134 0"))
         self.assertFalse(world.resting)
 
-    def test_condition_sets_speed(self):
+    def test_condition_sets_speed_without_creating_ghost(self):
+        world = self.engine.feed(packet(Kind.RECV, "cond 1 14881134 0 0 10"))
+        self.assertNotIn(14881134, world.entities)
+        self.engine.feed(packet(Kind.RECV, "tp 1 14881134 10 10 0"))
         world = self.engine.feed(packet(Kind.RECV, "cond 1 14881134 0 0 10"))
         self.assertEqual(world.entities[14881134].speed, 10)
 

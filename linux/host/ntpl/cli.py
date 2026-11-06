@@ -23,6 +23,12 @@ from pathlib import Path
 from . import __version__
 from .client import ConnectionLost, PacketClient
 from .engine import Engine
+from .mapdata import (
+    MapDataError,
+    find_map_for_positions,
+    load_nstc,
+    terrain_rgb,
+)
 from .protocol import (
     DEFAULT_HOST,
     Kind,
@@ -531,6 +537,107 @@ def cmd_read(args: argparse.Namespace) -> int:
         client.close()
 
 
+# ---------------------------------------------------------------------- map
+
+
+def _write_ppm(grid, output: str, scale: int) -> None:
+    """Fallback renderer with no third-party dependency."""
+    width = grid.width * scale
+    height = grid.height * scale
+    with open(output, "wb") as handle:
+        handle.write(f"P6\n{width} {height}\n255\n".encode())
+        for y in range(grid.height):
+            row = bytearray()
+            for x in range(grid.width):
+                row.extend(bytes(terrain_rgb(grid.at(x, y))) * scale)
+            for _ in range(scale):
+                handle.write(row)
+
+
+def cmd_map(args: argparse.Namespace) -> int:
+    """Inspect or render the client's NStcData map grids."""
+    try:
+        grids = load_nstc(args.file)
+    except MapDataError as exc:
+        print(f"ntpl: {exc}", file=sys.stderr)
+        return 2
+
+    if args.map_command == "info":
+        grid = grids.get(args.map_id)
+        if grid is None:
+            print(f"ntpl: map {args.map_id} not found", file=sys.stderr)
+            return 1
+        total = grid.width * grid.height
+        walkable = grid.walkable_count()
+        print(
+            f"map {grid.map_id}: {grid.width}x{grid.height}, "
+            f"walkable {walkable}/{total} ({100 * walkable / total:.1f}%)"
+        )
+        if args.at:
+            try:
+                x, y = (int(part) for part in args.at.split(",", 1))
+            except ValueError:
+                print("ntpl: --at must be x,y", file=sys.stderr)
+                return 2
+            value = grid.at(x, y)
+            state = "walkable" if grid.is_walkable(x, y) else "blocked"
+            print(f"at ({x},{y}): {value:#04x} {state}" if value is not None else "out of bounds")
+        return 0
+
+    if args.map_command == "render":
+        grid = grids.get(args.map_id)
+        if grid is None:
+            print(f"ntpl: map {args.map_id} not found", file=sys.stderr)
+            return 1
+        if args.scale <= 0 or args.scale > 16:
+            print("ntpl: --scale must be 1..16", file=sys.stderr)
+            return 2
+        try:
+            from PIL import Image
+        except ImportError:
+            _write_ppm(grid, args.output, args.scale)
+            print(f"wrote {args.output} (PPM; install Pillow for PNG)")
+            return 0
+
+        image = Image.new("RGB", (grid.width * args.scale, grid.height * args.scale))
+        pixels = image.load()
+        for y in range(grid.height):
+            for x in range(grid.width):
+                color = terrain_rgb(grid.at(x, y))
+                for dy in range(args.scale):
+                    for dx in range(args.scale):
+                        pixels[x * args.scale + dx, y * args.scale + dy] = color
+        image.save(args.output)
+        print(f"wrote {args.output} ({grid.width}x{grid.height} @ {args.scale}x)")
+        return 0
+
+    if args.map_command == "best":
+        points: list[tuple[int, int]] = []
+        if args.points:
+            for part in args.points.replace(";", " ").split():
+                try:
+                    x, y = (int(v) for v in part.split(",", 1))
+                except ValueError:
+                    print(f"ntpl: bad point {part!r}", file=sys.stderr)
+                    return 2
+                points.append((x, y))
+        if args.log:
+            text = Path(args.log).read_text(encoding="utf-8", errors="replace")
+            points.extend(
+                (int(x), int(y))
+                for x, y in re.findall(r"mv [123] \d+ (\d+) (\d+) ", text)
+            )
+        if not points:
+            print("ntpl: give --points x,y or --log FILE", file=sys.stderr)
+            return 2
+        for fraction, map_id in find_map_for_positions(grids, points):
+            print(f"map {map_id}: {fraction * 100:.1f}% of {len(points)} points walkable")
+        return 0
+
+    print("ntpl: unknown map command", file=sys.stderr)
+    return 2
+
+
 def cmd_gui(args: argparse.Namespace) -> int:
     try:
         from .gui import run_gui
@@ -543,7 +650,7 @@ def cmd_gui(args: argparse.Namespace) -> int:
         )
         return 2
 
-    return run_gui(args.host, args.port)
+    return run_gui(args.host, args.port, args.map_data)
 
 
 # --------------------------------------------------------------------- main
@@ -626,6 +733,28 @@ def build_parser() -> argparse.ArgumentParser:
     read.add_argument("--timeout", type=float, default=5.0)
     read.set_defaults(handler=cmd_read)
 
+    map_parser = sub.add_parser("map", help="inspect or render NStcData maps")
+    map_sub = map_parser.add_subparsers(dest="map_command", required=True)
+
+    map_info = map_sub.add_parser("info", help="map size and walkability")
+    map_info.add_argument("map_id", type=int)
+    map_info.add_argument("--at", default=None, help="x,y to inspect")
+    map_info.add_argument("--file", default=None, help="NStcData.NOS path")
+    map_info.set_defaults(handler=cmd_map)
+
+    map_render = map_sub.add_parser("render", help="render a map to PNG/PPM")
+    map_render.add_argument("map_id", type=int)
+    map_render.add_argument("output")
+    map_render.add_argument("--scale", type=int, default=3)
+    map_render.add_argument("--file", default=None, help="NStcData.NOS path")
+    map_render.set_defaults(handler=cmd_map)
+
+    map_best = map_sub.add_parser("best", help="rank maps for live coordinates")
+    map_best.add_argument("--points", default=None, help="'x,y x,y ...'")
+    map_best.add_argument("--log", default=None, help="packet log to read mv lines")
+    map_best.add_argument("--file", default=None, help="NStcData.NOS path")
+    map_best.set_defaults(handler=cmd_map)
+
     replay = sub.add_parser("replay", help="resend SEND packets from a log")
     _add_connection(replay)
     replay.add_argument("file")
@@ -634,6 +763,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     gui = sub.add_parser("gui", help="open the GTK4 window")
     _add_connection(gui)
+    gui.add_argument(
+        "--map-data",
+        default=None,
+        help="NStcData.NOS path for the Map tab (default: NTPL_NSTC or the local install)",
+    )
     gui.set_defaults(handler=cmd_gui)
 
     return parser

@@ -20,8 +20,9 @@ shared: the transport differs, the game's packets do not.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 37 Python unit tests
-make -C linux gui-test                       # headless GTK4 smoke test (xvfb)
+make -C linux host-test                      # 48 Python unit tests
+make -C linux gui-test                       # headless GTK4 + map smoke (xvfb)
+make -C linux bot-test                       # fake server: path loop + auto-attack
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path
 linux/scripts/dev-test-wine.sh 25
@@ -45,6 +46,12 @@ Run `Injector.exe` as administrator, then open `PacketLoggerGUI`.
 
 Start with [docs/architecture.md](docs/architecture.md), then:
 
+- [docs/engine.md](docs/engine.md) — the Python host API, state model, CLI
+  commands and action confirmations
+- [docs/map.md](docs/map.md) — `NStcData` maps, walkability, A*, the Map/Bot
+  tab, path loop and auto-attack
+- [docs/live-session-2026-11-06.md](docs/live-session-2026-11-06.md) — what was
+  verified on the running client, the bugs fixed and the open items
 - [docs/hooking.md](docs/hooking.md) — how the detours, patterns and assembly
   stubs work, and how to repair them after a client patch
 - [docs/ipc.md](docs/ipc.md) — the TCP message protocol
@@ -56,9 +63,9 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 35 unit tests pass, the GTK4 window passes a
-headless smoke test, and the real injector has been run against the **live
-NosTale client** under Wine 11:
+The Linux port builds, its 48 unit tests pass, the GTK4 window and the map/bot
+loop pass their headless smoke tests, and the real injector has been run
+against the **live NosTale client** under Wine 11:
 
 - both hooks `ACTIVE` (`recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`),
   `drops recv=0`;
@@ -72,6 +79,13 @@ NosTale client** under Wine 11:
 movement and is controlled by the `rest` packet. Some targets are ignored
 (blocked tile, or the client still settling), so confirm each move before
 sending the next one.
+
+The client's own map grids are parsed from `NostaleData/NStcData.NOS`; the live
+map is **20** (230x260) and every observed entity position is on walkable cells.
+The GTK4 **Map / Bot** tab renders the map, takes click waypoints, computes an
+A* path, and can loop it while auto-attacking nearby monsters. `map` commands
+inspect/render the grids; `make bot-test` exercises the loop against a fake
+server. See [docs/map.md](docs/map.md).
 
 Gameforge's terms of service prohibit automation. This is a tool for the
 account owner's own client; using it on a live account is their decision and

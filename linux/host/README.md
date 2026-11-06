@@ -43,16 +43,22 @@ sudo apt install python3-gi gir1.2-gtk-4.0
 | `protocol.py` | `TYPE|PAYLOAD` line protocol, `Message`, `Packet`, port from `NTPL_PORT` |
 | `client.py` | TCP connect with retries, line reassembly, send, reader thread |
 | `engine.py` | `WorldState` (map, position, entities, stats, chat) fed by packets |
-| `cli.py` | `monitor`, `walk`, `cast`, `send`, `status`, `replay`, `gui` |
-| `gui.py` | GTK4 window; optional import |
+| `mapdata.py` | `NStcData.NOS` parser, walkability, A*, map ranking, PNG render |
+| `cli.py` | `monitor`, `walk`, `cast`, `send`, `status`, `map`, `replay`, `gui` |
+| `gui.py` | GTK4 window: packet table + Map/Bot tab; optional import |
 
 ## Tests
 
 From `linux/`:
 
 ```bash
-make host-test      # 37 unittest cases
-make gui-test       # headless GTK4 smoke test (xvfb)
+make host-test      # 48 unittest cases
+make gui-test       # headless GTK4 window + map smoke test (xvfb)
+make bot-test       # path loop + auto-attack against a fake server (xvfb)
 ```
 
-The tests start a fake TCP server, so they need neither the DLL nor Wine.
+The tests start a fake TCP server, so they need neither the DLL nor Wine. The
+map tests build a synthetic NOS archive; the test against the real
+`NStcData.NOS` is skipped when the game is not installed.
+
+See `../../docs/map.md` for the map format and the bot loop.

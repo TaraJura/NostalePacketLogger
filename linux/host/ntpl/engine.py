@@ -47,6 +47,7 @@ class WorldState:
     stats: CharacterStats = field(default_factory=CharacterStats)
     chat: deque[tuple[int, int, str]] = field(default_factory=lambda: deque(maxlen=200))
     resting: bool | None = None
+    self_id: int | None = None
     target_id: int | None = None
     last_skill: int | None = None
     combat: deque[dict] = field(default_factory=lambda: deque(maxlen=100))
@@ -173,9 +174,11 @@ def _on_rest(world: WorldState, packet: Packet) -> None:
     if not values:
         return
     kind, entity_id, state = values
-    entity = world.entities.setdefault(entity_id, Entity(entity_id, kind))
-    entity.kind = kind
+    world.self_id = entity_id
     world.resting = state == 1
+    entity = world.entities.get(entity_id)
+    if entity is not None:
+        entity.kind = kind
 
 
 def _on_condition(world: WorldState, packet: Packet) -> None:
@@ -184,9 +187,10 @@ def _on_condition(world: WorldState, packet: Packet) -> None:
     if not values:
         return
     kind, entity_id, _unknown1, _unknown2, speed = values
-    entity = world.entities.setdefault(entity_id, Entity(entity_id, kind))
-    entity.kind = kind
-    entity.speed = speed
+    entity = world.entities.get(entity_id)
+    if entity is not None:
+        entity.kind = kind
+        entity.speed = speed
 
 
 def _on_select(world: WorldState, packet: Packet) -> None:

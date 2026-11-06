@@ -46,12 +46,31 @@ The handlers are deliberately tolerant. Next:
   future agent can react instead of polling.
 - Persist a session: packets + derived events + timestamps.
 
+## Phase 3.5 — Map, path and auto-attack (implemented, live test pending)
+
+The client's `NStcData.NOS` is parsed into per-map walkability grids (779 maps;
+one byte per cell; `0x00` walkable). The live map is **20** (230x260) and 100 %
+of the observed `mv` positions are on walkable cells.
+
+- `ntpl map info/render/best` inspect the grids from the CLI.
+- The GTK4 **Map / Bot** tab renders the grid, overlays live entities, takes
+  click waypoints, computes an A* path, and can **loop** it.
+- Auto-attack targets the nearest monster in range (`ncif` + a configurable
+  `u_s` template) on a cooldown.
+- The bot stands first (`rest`), walks one cell at a time and waits for the
+  server's `tp`/`mv` before the next.
+
+`make gui-test` and `make bot-test` pass headlessly. The loop has **not** been
+run against the live client yet; the live run and the exact `u_s` field order
+are the next steps. See [map.md](map.md).
+
 ## Phase 4 — Autonomous agent
 
 The first reversible loop is now possible: `ntpl walk X Y` sends a walk and
-waits for the server's `tp`/`mv` confirmation, and `rest` controls sit/stand.
-It is not autonomous yet: a move must be confirmed before the next one, some
-tiles are rejected, and the client's own walk SEND packets are not captured.
+waits for the server's `tp`/`mv` confirmation, `rest` controls sit/stand, and
+the Map/Bot tab runs a confirmed path loop with auto-attack. It is not
+autonomous yet: a move must be confirmed before the next one, some tiles are
+rejected, and the client's own walk SEND packets are not captured.
 
 When it starts:
 
@@ -67,14 +86,18 @@ When it starts:
 1. ~~Install NosTale and run the injector against the real client~~ — done
    2026-11-06.
 2. ~~Verify the signatures~~ — both hooks ACTIVE on the live client.
-3. **Build the closed movement loop**: `walk` → wait for `tp`/`mv` → next
-   target, with a rejected-tile list and a rate limit.
-4. **Capture the client's own `walk` SEND packets** (the current send hook sees
+3. **Closed movement loop** — implemented and smoke-tested: `walk` → wait for
+   `tp`/`mv` → next cell, A* over walkable map cells, path loop, auto-attack.
+   Still to do: a rejected-tile cache from live attempts and a rate limit.
+4. **Run the loop against the live client**: stand the character, load map 20,
+   draw a short path, enable auto-attack, and watch the `SEND`/`tp` stream; lock
+   the `u_s` field order from a real cast.
+5. **Capture the client's own `walk` SEND packets** (the current send hook sees
    `rest`/`sortopen`/`pulse` but not walks) to learn the exact checksum/path
    behaviour.
-5. **Reconcile the protocol wiki** with the live session (`rest`, `tp`, `cond`,
+6. **Reconcile the protocol wiki** with the live session (`rest`, `tp`, `cond`,
    `stat`) and extend the engine handlers.
-6. **Decide the fate of the Windows tree**: keep it as the reference, or port
+7. **Decide the fate of the Windows tree**: keep it as the reference, or port
    the same TCP transport there and retire the named pipes.
 
 ## Known risks

@@ -19,6 +19,25 @@
 | `send failed: hooks are not active` | send hook missing or the DLL was disabled | check `ntpl status`; re-inject |
 | Game crashes on disconnect | unhook race with an in-flight packet | disconnect while idle; report if repeatable |
 
+## Movement and combat
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `walk` sent, but no `tp`/`mv` | character is sitting | `send "rest 1 1 <charId>"` once, then walk |
+| `walk` sent while standing, still no `tp` | target tile blocked/occupied, or the client is settling | try another adjacent tile; confirm one move before the next; `ntpl walk` waits for `tp`/`mv` |
+| `cast` sent, but no `su` | character sitting, target out of range, or the `u_s` field order is wrong | stand, move into range, and use `--packet "u_s …"` with a layout captured from the live client |
+| `rest` toggles twice | two identical packets were sent | send `rest 1 1 <charId>` once per state change |
+| Client looks stuck after many walks | injected walks can desync the client | stop sending; relog/restart the client; the server position is in the `tp` stream |
+| Spell vnum unknown | the client's hotbar mapping is not documented | cast once manually and read `su 1 <charId> ...` from the log |
+
+## UI
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `gui.sh` says GTK4/PyGObject is missing | bindings not installed | `sudo apt install python3-gi gir1.2-gtk-4.0` |
+| Window says "not connected" | DLL not injected, game not running, or wrong port | inject first; check `NTPL_PORT` on both sides |
+| GUI opens but no packets | filter too narrow, or another host is connected | clear the filter; the DLL accepts one host at a time |
+
 ## Injection
 
 | Symptom | Likely cause | Fix |

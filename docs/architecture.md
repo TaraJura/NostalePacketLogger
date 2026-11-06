@@ -105,6 +105,50 @@ Host-to-game packets take the reverse path: `SEND|<packet>` over TCP, the DLL
 builds a Delphi string, and calls the game's own send function through
 `TNTClient`.
 
+The DLL also exposes loopback-only `SCAN`, `FIND` and `READ` debug commands for
+locating and reading structures in the game process. They are reverse
+engineering aids, not part of the play loop; the authoritative player position
+comes from the server's `tp`/`mv`. See [ipc.md](ipc.md) and
+[live-session-2026-11-06.md](live-session-2026-11-06.md).
+
+## Host state model
+
+The host turns the stream into a `WorldState` (`linux/host/ntpl/engine.py`):
+map id, own position, entities keyed by entity id, HP/MP, chat, sit/stand
+state, the selected target, the last skill, and a ring of combat events.
+Parsing is tolerant: an unknown opcode, a short packet or a non-numeric field
+is ignored, never fatal.
+
+| Action | Send | Confirmation |
+|---|---|---|
+| move | `walk <x> <y> <checksum> <speed>` | `tp`/`mv` for a player at the target |
+| sit/stand | `rest 1 1 <charId>` (toggles) | `rest <type> <charId> <state>` (0 stand, 1 sit) |
+| target | `ncif <type> <id>` | no direct reply; used before a skill |
+| skill | `u_s …` | `su <attacker> <target> <skill> …` |
+
+Sitting regenerates HP/MP but **blocks movement**; stand before walking. The
+client does not reliably echo its own actions, so the confirmation packets are
+the only trustworthy signal. See [engine.md](engine.md) for the full API and
+command reference.
+
+## Map, path and auto-attack
+
+The client's `NostaleData/NStcData.NOS` contains one walkability grid per map
+(779 grids; one byte per cell; `0x00` is open ground). `mapdata.py` parses the
+archive, renders the terrain palette, ranks maps against live entity positions
+and runs A* over walkable cells.
+
+The GTK4 **Map / Bot** tab shows the selected grid, the live entities and the
+own character, lets the user click waypoints, and draws the A* path. The bot
+runs on the GLib main loop:
+
+1. stand up if the `rest` state is sitting;
+2. auto-attack the nearest monster in range (`ncif` + configurable `u_s`);
+3. walk the next path cell and wait for the server's `tp`/`mv` before the next.
+
+Everything still goes through the same `PacketClient`; the map is only a view
+and a path source. See [map.md](map.md).
+
 ## Threading model
 
 | Thread | Owns | Rules |
@@ -133,13 +177,21 @@ game threads can push at once; one worker pops. See
    `NOT-FOUND`, and the host shows it.
 6. **The game owns the process.** The DLL does not patch files, does not
    disable checks, and does not try to hide. It restores every byte it changed
-   when it disconnects.
+   when it disconnects. The trampoline and module stay mapped until the process
+   exits, because a game thread may still be inside a stub during unhook.
+7. **Confirm actions from the server.** A walk is done when the server sends
+   `tp`/`mv` at the target; a skill is done when `su` arrives; sit/stand is
+   done when `rest` echoes the new state. Never assume a sent packet worked.
+8. **Debug probes are read-only and loopback-only.** `SCAN`/`FIND`/`READ` read
+   the game's own memory; they are not part of the play loop and must not be
+   exposed beyond `127.0.0.1`.
 
 ## Directory map
 
 ```
 NostalePacketLogger/
-├── docs/                  architecture, hooking, IPC, platform guides, packet wiki
+├── docs/                  architecture, engine, hooking, IPC, map, platform
+│                          guides, live session, packet wiki
 │   └── protocol/          the shared packet documentation
 ├── linux/                 MinGW DLL + injector + Python host + tests
 ├── windows/               original MSVC/C# solution, unchanged

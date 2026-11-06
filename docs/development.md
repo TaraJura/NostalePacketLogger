@@ -3,7 +3,8 @@
 ## Layout
 
 ```
-docs/                 architecture, hooks, IPC, platform guides, packet wiki
+docs/                 architecture, engine, hooks, IPC, live session, platform
+                      guides, packet wiki
 linux/                the Linux port (MinGW DLL, injector, Python host, tests)
 windows/              original MSVC/C# implementation, unchanged
 CLAUDE.md             working context for Claude Code
@@ -27,18 +28,45 @@ The MinGW compiler is `i686-w64-mingw32-g++`. Override with
 ## Tests
 
 ```bash
-make -C linux host-test        # 37 stdlib unittest cases
+make -C linux host-test        # 48 stdlib unittest cases
 make -C linux gui-test         # headless GTK4, needs xvfb
+make -C linux bot-test         # path loop + auto-attack against a fake server
 make -C linux all test-host
 linux/scripts/dev-test-wine.sh 25
 ```
 
 The unit tests cover the wire protocol, the TCP client (including split-line
-reassembly and peer close), and the engine's world-state handlers. The GUI test
-opens the real window under Xvfb against a fake server and checks the rows and
-status bar. The Wine script covers the x86 stubs (`HookStubTest.exe`), the DLL
-lifecycle and the command path with a fake game. Nothing in this repository can
-test the real detours against the real client.
+reassembly and peer close), the engine's world-state handlers, and the map
+parser/A* (a synthetic NOS archive, bad headers, walls, unreachable targets,
+ranking; the local archive test is skipped when the game is absent). The GUI
+test opens the real window under Xvfb against a fake server and checks the rows,
+the status bar and the map surface. The bot test drives the same window with
+auto-attack on and a two-cell path, and asserts the `ncif`/`u_s`/`walk`
+sequence and the `tp` confirmations. The Wine script covers the x86 stubs
+(`HookStubTest.exe`), the DLL lifecycle and the command path with a fake game.
+
+Nothing in this repository can test the real detours against the real client;
+that requires the live game. The procedure is:
+
+```bash
+export WINEPREFIX="$HOME/.wine-nostale"   # or the prefix the game uses
+linux/scripts/inject.sh
+linux/scripts/host.sh status              # both hooks ACTIVE, addresses non-zero
+linux/scripts/host.sh send "rest 1 1 <charId>"   # ensure standing
+linux/scripts/host.sh walk X Y            # waits for tp/mv at the target
+linux/scripts/host.sh cast <skill> --target-id <id>   # waits for su
+linux/scripts/gui.sh                      # packet view + Map/Bot tab
+```
+
+In the Map/Bot tab, load the map (auto-detected/default 20), click waypoints,
+and Start the loop with auto-attack enabled. The bot stands first if needed,
+then walks one cell at a time, waiting for `tp`/`mv`. See [map.md](map.md).
+
+The file log is `<prefix>/drive_c/NosTalePacketLog.txt`. Confirm each action
+from the server (`tp`/`mv`, `su`, `rest`); the client does not reliably echo its
+own actions. A `QUIT` removes the hooks but leaves the module and trampoline
+mapped until the game exits, so re-injection after `QUIT` needs a new DLL
+filename or a client restart. See [live-session-2026-11-06.md](live-session-2026-11-06.md).
 
 When adding a Python feature, add a test in `linux/host/tests/`. Keep the core
 (`protocol`, `client`, `engine`) free of third-party dependencies so the tests
@@ -60,8 +88,9 @@ run on any Python 3.10+.
 
 ### Python
 
-- Standard library for `protocol`, `client`, `engine`, `cli`; PyGObject only in
-  `gui.py`, imported lazily by the CLI.
+- Standard library for `protocol`, `client`, `engine`, `mapdata`, `cli`;
+  PyGObject only in `gui.py`, imported lazily by the CLI. Map rendering in the
+  CLI uses zlib and a hand-written PNG writer; the GUI uses pycairo.
 - Type hints on public functions and dataclasses.
 - No GTK calls outside the main loop; the reader thread only fills a queue.
 - Parse packets tolerantly: a short or non-numeric packet is ignored, not fatal.
@@ -99,7 +128,7 @@ retired.
 ## Release checklist
 
 - [ ] `make -C linux clean all test-host` is warning-free.
-- [ ] `make -C linux host-test` passes.
+- [ ] `make -C linux host-test gui-test bot-test` passes.
 - [ ] `linux/scripts/dev-test-wine.sh` reports the expected `NOT-FOUND` status
       and the `send failed` reply.
 - [ ] `git status` contains only intended files; `build/`, `__pycache__/`, logs

@@ -13,10 +13,12 @@ non-native piece. Everything outside the game is native Linux:
 | Transport | TCP on `127.0.0.1` | a Wine Winsock socket is an ordinary Linux socket; a native Python process can connect to it |
 | Host library / CLI | Python 3.10+, standard library only | no dependencies, easy to extend into the engine |
 | GUI | GTK4 via PyGObject | the native Linux toolkit, already present on Ubuntu |
-| State model | `ntpl.engine.WorldState` | Phase 3 seed: packets become a world, not just a list |
+| State model | `ntpl.engine.WorldState` | packets become a world, not just a list |
+| Map / bot | `ntpl.mapdata` + GTK4 Map/Bot tab | client map grids, A* paths, path loop, auto-attack |
 
-See `../docs/architecture.md`, `../docs/ipc.md`, `../docs/hooking.md` and
-`../docs/linux.md` for the full picture.
+See `../docs/architecture.md`, `../docs/engine.md`, `../docs/map.md`,
+`../docs/ipc.md`, `../docs/hooking.md`, `../docs/linux.md` and
+`../docs/live-session-2026-11-06.md` for the full picture.
 
 ## Layout
 
@@ -33,10 +35,13 @@ linux/
 │   ├── log.*, config.*      file log and environment config
 │   └── dllmain.cpp          worker thread, command loop, shutdown
 ├── src/injector/            32-bit injector (Windows PIDs, works under Wine)
-├── host/ntpl/               Python package (protocol, client, engine, cli, gui)
+├── host/ntpl/               Python package (protocol, client, engine, mapdata,
+│                            cli, gui)
 ├── host/tests/              stdlib unittest suite
-├── scripts/                 inject.sh, host.sh, gui.sh, dev-test-wine.sh
-└── test/fake_game.cpp       LoadLibraryA fixture for the Wine test
+├── scripts/                 inject.sh, host.sh, gui.sh, dev-test-wine.sh,
+│                            dev-test-bot.sh
+├── test/fake_game.cpp       LoadLibraryA fixture for the Wine test
+└── test/gui_*.py            Xvfb smoke tests (packet window, map/bot tab)
 ```
 
 ## Build
@@ -58,8 +63,9 @@ uses lowercase includes for that reason.
 
 ```bash
 make -C linux all test-host
-make -C linux host-test          # protocol, TCP client, engine
-make -C linux gui-test           # headless GTK4 window + fake packet stream
+make -C linux host-test          # protocol, TCP client, engine, mapdata
+make -C linux gui-test           # headless GTK4 window + map surface
+make -C linux bot-test           # path loop + auto-attack, fake server
 ./linux/scripts/dev-test-wine.sh 25
 ```
 
@@ -74,8 +80,10 @@ make -C linux gui-test           # headless GTK4 window + fake packet stream
    signatures (correct: the fake target is not the game) and the test proves the
    injector path, the DLL lifecycle, the TCP server and the command path.
 
-The prefix is deleted afterwards. `gui-test` needs `xvfb` and GTK4, but no
-game and no real display.
+The prefix is deleted afterwards. `gui-test` and `bot-test` need `xvfb` and
+GTK4, but no game and no real display. `bot-test` drives the real window
+against a fake server and checks the injected `ncif`/`u_s`/`walk` sequence and
+the `tp` confirmations.
 
 ## Run with the game
 
@@ -90,9 +98,16 @@ linux/scripts/inject.sh
 linux/scripts/host.sh status
 linux/scripts/host.sh monitor
 linux/scripts/host.sh monitor --engine
+linux/scripts/host.sh walk 25 117        # send a walk, wait for tp/mv
+linux/scripts/host.sh map info 20 --at 25,117
+linux/scripts/host.sh map render 20 /tmp/map.png --scale 3
 linux/scripts/gui.sh                     # GTK4 UI (one-command launcher)
 linux/scripts/host.sh gui                # same, via the host wrapper
 ```
+
+The GUI's **Map / Bot** tab loads the client's own map archive, draws the
+walkable grid and the live entities, and runs a click-drawn A* path in a loop
+with auto-attack. See `../docs/map.md`.
 
 `scripts/inject.sh` uses `NTPL_WINEPREFIX` (default `$WINEPREFIX` or
 `~/.wine-nostale`) and `NTPL_WINE` (default `wine` from `PATH`). The DLL listens
@@ -119,16 +134,16 @@ tail -f "$WINEPREFIX/drive_c/NosTalePacketLog.txt"
 
 ## Honest status
 
-- The three signatures are carried over from the Windows build. They have
-  **not** been re-verified against the live client on this machine, because the
-  game is not installed in a Wine prefix yet. Run `host.sh status` after the
-  first injection: `recv=... send=...` must be non-zero and both hooks must say
-  `ACTIVE`. If they say `NOT-FOUND`, see `../docs/hooking.md`.
-- The real injector has been exercised end-to-end under Wine against a fake
-  target named `NostaleClientX.exe`. It has not been run against the real
-  client.
-- The real detours cannot be exercised without the game. `HookStubTest.exe`
-  covers the stubs' ABI; the Wine test covers the injector, DLL lifecycle, TCP
-  and command path.
+- The three signatures match the **live client** (verified 2026-11-06):
+  `recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`, both hooks `ACTIVE`,
+  drops 0. A `walk` moved the server's authoritative position and `rest`
+  toggled sit/stand. See `../docs/live-session-2026-11-06.md`. If a patch
+  breaks them, `host.sh status` reports `NOT-FOUND`; see
+  `../docs/hooking.md`.
+- The real injector has been exercised end-to-end under Wine against both a
+  fake target and the live client (PID 1216).
+- The map parser identified the live map (20, 230x260) with every observed
+  position on a walkable cell. The map UI and the bot loop pass their headless
+  tests; the loop has not yet been run against the live client.
 - Gameforge's terms of service prohibit automation; using this on a live account
   is the account owner's decision and risk.

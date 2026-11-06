@@ -12,6 +12,10 @@ Linux
 The game is not a Linux binary. This guide assumes it is installed in a Wine
 prefix; the logger does not install or launch it.
 
+See also [engine.md](engine.md) for the Python host API and
+[live-session-2026-11-06.md](live-session-2026-11-06.md) for what was verified
+against the running client.
+
 ## Prerequisites
 
 ```bash
@@ -131,6 +135,9 @@ linux/scripts/host.sh cast 866 --target-id 5180 # use a skill (experimental u_s)
 linux/scripts/host.sh send "rest 1 1 14881134" # sit/stand toggle
 linux/scripts/host.sh status
 linux/scripts/host.sh replay capture.log      # resend the SEND lines
+linux/scripts/host.sh map info 20 --at 25,117 # map size + walkability
+linux/scripts/host.sh map render 20 /tmp/map.png --scale 3
+linux/scripts/host.sh map best                # rank maps by live entity positions
 linux/scripts/gui.sh                          # GTK4 window (one-command launcher)
 linux/scripts/host.sh gui                     # same, through the host wrapper
 
@@ -146,6 +153,13 @@ sitting, the server ignores movement. The sit/stand toggle is
 `send "rest 1 1 <charId>"`; the server's authoritative state comes back as
 `rest <type> <charId> <state>` (0 = standing, 1 = sitting).
 
+The GUI has a second tab, **Map / Bot**. It reads the client's own
+`NostaleData/NStcData.NOS` (path configurable with `--map-data`), draws the
+selected grid with walkable cells, overlays the live entities, accepts
+waypoints by clicking, computes an A* path, and can loop that path while
+auto-attacking nearby monsters. See [map.md](map.md) for the map format and the
+bot loop.
+
 Inside `monitor`, stdin accepts:
 
 | Command | Effect |
@@ -156,8 +170,8 @@ Inside `monitor`, stdin accepts:
 | `/engine` | print the current `WorldState` |
 | `/quit` | disconnect and exit |
 
-The GUI has the same pieces: a filter box, a Follow toggle, a packet table with
-RECV/SEND colours, a send entry and a status bar.
+The GUI's packet tab has the same pieces: a filter box, a Follow toggle, a
+packet table with RECV/SEND colours, a send entry and a status bar.
 
 Without installing anything:
 
@@ -214,15 +228,23 @@ both.
 ## Tests
 
 ```bash
-make host-test          # 37 stdlib unit tests: protocol, engine, TCP client
-make gui-test           # headless GTK4 window against a fake packet stream
+make host-test          # 48 stdlib unit tests: protocol, engine, map, TCP client
+make gui-test           # headless GTK4 window + map surface against a fake stream
+make bot-test           # fake server: path loop, auto-attack, walk confirmations
 make all test-host
 ./scripts/dev-test-wine.sh 25
 ```
 
 `gui-test` uses `xvfb-run` to open the real window with a fake server on
-loopback, then checks that both packets became table rows and that the STATUS
-line reached the status bar. Install `xvfb` if it is missing.
+loopback, then checks that both packets became table rows, that the STATUS line
+reached the status bar and that map 20 loaded with a Cairo surface. Install
+`xvfb` if it is missing.
+
+`bot-test` drives the real GTK window against a fake server that sends an `at`
+and an `mv`; it starts the bot on a two-cell path with auto-attack on and
+asserts that the host sent `ncif`, `u_s` and one confirmed `walk` per cell. It
+needs `xvfb` too, but no game and no map archive (the map grid is optional in
+the smoke test).
 
 `dev-test-wine.sh` is the end-to-end test that does not need NosTale:
 
@@ -259,6 +281,12 @@ The recommended setup is still a dedicated prefix.
   are ignored (blocked tile, or the client/server still settling), so confirm
   each move before sending the next one.
 - The character must be standing; sitting (`rest` state 1) blocks movement.
+- The client's `NStcData.NOS` parsed into 779 grids. Ranking them against the
+  live `mv` samples selected map **20** (230x260): 100 % of 173,503 samples
+  (5,849 unique positions) land on `0x00` walkable cells. The Map/Bot tab
+  renders it; `map render` produced `docs/assets/map20.png`.
+- The GUI map and the bot were verified headlessly (`make gui-test`,
+  `make bot-test`). They have not yet been run against the live client.
 
 ## Honest status
 
@@ -270,8 +298,10 @@ The recommended setup is still a dedicated prefix.
   known EDX and verifies the packet pointer, the original-call replay and the
   send trampoline.
 - GTK4 4.22 and PyGObject 3.56 are installed; the real window passes the
-  headless Xvfb smoke test (`make gui-test`). It has not been opened against the
-  real game.
+  headless Xvfb smoke test (`make gui-test`), and the Map/Bot tab loads map 20
+  with a Cairo surface in it. It has not been opened against the real game.
+- The map parser, A* and the bot loop pass their tests; the loop has only been
+  run against a fake server so far. The live run is the next step.
 - The `SCAN`/`FIND`/`READ` commands are new reverse-engineering aids. `FIND`
   located the charId record, but the live position comes from the server's
   `tp`/`mv`, not from those addresses.

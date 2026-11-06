@@ -3,6 +3,9 @@
 | Document | Read it when |
 |---|---|
 | [architecture.md](architecture.md) | you want the whole picture: components, data flow, why the DLL stays Windows code, Windows vs Linux |
+| [engine.md](engine.md) | you are writing a host, bot or automation: Python API, `WorldState`, handlers, CLI commands, confirmations |
+| [map.md](map.md) | maps, walkability, A*, the Map/Bot tab, path loop and auto-attack |
+| [live-session-2026-11-06.md](live-session-2026-11-06.md) | what was verified on the running client, the bugs fixed, the mechanics learned, open items |
 | [hooking.md](hooking.md) | you need to understand or repair the in-game detours, signatures, assembly stubs, packet injection |
 | [ipc.md](ipc.md) | you are writing a host, a bot, or another front end and need the wire protocol |
 | [linux.md](linux.md) | you are building or running the Linux/Wine side |
@@ -19,9 +22,16 @@ the host differ, the game's packets do not.
 
 - **Windows tree (`windows/`)** — the original working implementation. Injector
   + DLL + WinForms GUI, named pipes.
-- **Linux tree (`linux/`)** — new MinGW DLL + TCP loopback + Python CLI + GTK4
-  GUI + state engine seed. Builds cleanly, host unit tests pass, and the DLL
-  lifecycle/transport is verified under Wine with a fake game. The hooks
-  themselves have **not** been exercised against the real client yet, because
-  NosTale is not installed in a Wine prefix on this machine. See
-  [linux.md](linux.md#honest-status).
+- **Linux tree (`linux/`)** — MinGW DLL + TCP loopback + Python CLI + GTK4 GUI
+  + state engine. Builds cleanly, **48 host tests pass**, the GTK4 window
+  passes a headless smoke test, and the DLL has been verified against the
+  **live NosTale client** under Wine 11: both hooks ACTIVE, drops 0,
+  sit/stand via `rest`, and a `walk` moved the server's authoritative position
+  to the requested tile (`tp 1 14881134 25 117 0`). Spell support
+  (`su` parsing, `ntpl cast`) is in; the exact `u_s` field order still needs
+  one live cast. See [live-session-2026-11-06.md](live-session-2026-11-06.md).
+- **Map / bot** — `NStcData.NOS` parser (779 grids); the live map is **20**
+  (230x260) and 100 % of the observed entity positions are on walkable cells.
+  The GTK4 Map/Bot tab renders the grid, draws A* paths, runs a path loop and
+  can auto-attack nearby monsters. `make gui-test` and `make bot-test` pass.
+  See [map.md](map.md).

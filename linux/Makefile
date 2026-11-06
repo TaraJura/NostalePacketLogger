@@ -30,7 +30,7 @@ INJ_OBJECTS := $(patsubst $(SRC_INJ)/%.cpp,$(BUILD)/injector/%.o,$(INJ_SOURCES))
 # changed PacketQueue capacity links against a stale ABI.
 -include $(DLL_OBJECTS:.o=.d) $(INJ_OBJECTS:.o=.d)
 
-.PHONY: all dll injector test-host host-test gui-test clean check
+.PHONY: all dll injector test-host host-test gui-test bot-test clean check
 
 all: dll injector
 
@@ -73,6 +73,9 @@ host-test:
 
 gui-test:
 	./scripts/dev-test-gui.sh
+
+bot-test:
+	./scripts/dev-test-bot.sh
 
 check: all test-host
 	@file $(BUILD)/PacketLogger.dll $(BUILD)/Injector.exe \

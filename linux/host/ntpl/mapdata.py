@@ -1,0 +1,208 @@
+"""NosTale map grids (NStcData.NOS).
+
+The client's `NostaleData/NStcData.NOS` archive contains one grid per map:
+
+    header     16 bytes ("NT Data 05" + padding)
+    count      uint32
+    separator  1 byte
+    index      count * (map_id:uint32, offset:uint32)
+    blocks     at each offset:
+                 creation_date uint32
+                 data_size     uint32   (uncompressed)
+                 compressed    uint32
+                 is_compressed uint8
+                 payload       zlib stream when is_compressed
+
+The decompressed payload starts with `width:int16`, `height:int16`, followed by
+`width * height` bytes, one per cell. The palette comes from OnexExplorer
+(NosTale Research); 0x00 is the open/walkable terrain. The live 2026-11-06
+session confirmed the format: all 5,849 entity positions in the current map
+landed on 0x00 cells, and the best-scoring grid was map 20 (230x260).
+
+This module is read-only and never touches the game process.
+"""
+
+from __future__ import annotations
+
+import struct
+import zlib
+from collections import deque
+from dataclasses import dataclass
+from pathlib import Path
+
+#: OnexExplorer's NSTC palette (colour per terrain byte).
+TERRAIN_COLORS: dict[int, tuple[int, int, int]] = {
+    0x00: (255, 255, 255),
+    0x01: (100, 100, 100),
+    0x02: (100, 150, 100),
+    0x03: (0, 0, 0),
+    0x09: (100, 100, 150),
+    0x0A: (0, 50, 200),
+    0x0B: (150, 100, 100),
+    0x0D: (150, 150, 100),
+    0x10: (150, 100, 150),
+    0x11: (0, 200, 50),
+    0x12: (200, 50, 0),
+    0x13: (250, 230, 10),
+    0xFF: (150, 0, 255),
+}
+
+#: Terrain byte treated as walkable. 0x00 is the open ground in the live map.
+WALKABLE = 0x00
+
+#: Default install path on this machine; override with NTPL_NSTC or --file.
+DEFAULT_NSTC = (
+    Path.home() / "Desktop/nostake/Nostale/NostaleData/NStcData.NOS"
+)
+
+
+class MapDataError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class MapGrid:
+    map_id: int
+    width: int
+    height: int
+    cells: bytes
+
+    def at(self, x: int, y: int) -> int | None:
+        if 0 <= x < self.width and 0 <= y < self.height:
+            return self.cells[y * self.width + x]
+        return None
+
+    def is_walkable(self, x: int, y: int) -> bool:
+        return self.at(x, y) == WALKABLE
+
+    def neighbours(self, x: int, y: int):
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if self.is_walkable(nx, ny):
+                yield nx, ny
+
+    def walkable_count(self) -> int:
+        return self.cells.count(WALKABLE)
+
+
+def load_nstc(path: str | Path | None = None) -> dict[int, MapGrid]:
+    """Parse the NStcData archive into `{map_id: MapGrid}`."""
+    source = Path(path) if path is not None else DEFAULT_NSTC
+    try:
+        data = source.read_bytes()
+    except OSError as exc:
+        raise MapDataError(f"cannot read {source}: {exc}") from exc
+
+    if not data.startswith(b"NT Data"):
+        raise MapDataError(f"{source} is not a NosTale 'NT Data' archive")
+    if len(data) < 0x15:
+        raise MapDataError(f"{source} is truncated")
+
+    count = struct.unpack_from("<I", data, 0x10)[0]
+    index_start = 0x15
+    index_end = index_start + count * 8
+    if index_end > len(data):
+        raise MapDataError(f"{source}: index ({count} entries) exceeds the file")
+
+    grids: dict[int, MapGrid] = {}
+    for position in range(index_start, index_end, 8):
+        map_id, offset = struct.unpack_from("<II", data, position)
+        if offset + 13 > len(data):
+            continue
+        _creation, _data_size, compressed_size, compressed = struct.unpack_from(
+            "<IIIB", data, offset
+        )
+        payload = data[offset + 13 : offset + 13 + compressed_size]
+        if compressed:
+            try:
+                raw = zlib.decompress(payload)
+            except zlib.error:
+                continue
+        else:
+            raw = payload
+
+        if len(raw) < 4:
+            continue
+        width, height = struct.unpack_from("<hh", raw, 0)
+        if width <= 0 or height <= 0:
+            continue
+        cells = raw[4 : 4 + width * height]
+        if len(cells) != width * height:
+            continue
+        grids[map_id] = MapGrid(map_id, width, height, cells)
+
+    if not grids:
+        raise MapDataError(f"{source}: no map grids found")
+    return grids
+
+
+def find_map_for_positions(
+    grids: dict[int, MapGrid],
+    points: list[tuple[int, int]],
+    limit: int = 8,
+) -> list[tuple[float, int]]:
+    """Rank maps by how many entity positions land on walkable cells.
+
+    The live map's moving entities are all on 0x00; other maps at the same
+    coordinates score much lower. Returns `(fraction, map_id)` sorted best
+    first. Maps that do not cover every point are skipped.
+    """
+    if not points:
+        return []
+
+    ranked: list[tuple[float, int]] = []
+    for grid in grids.values():
+        if not all(
+            0 <= x < grid.width and 0 <= y < grid.height for x, y in points
+        ):
+            continue
+        walkable = sum(1 for x, y in points if grid.is_walkable(x, y))
+        ranked.append((walkable / len(points), grid.map_id))
+    ranked.sort(reverse=True)
+    return ranked[:limit]
+
+
+def astar(
+    grid: MapGrid,
+    start: tuple[int, int],
+    goal: tuple[int, int],
+) -> list[tuple[int, int]] | None:
+    """Shortest 4-direction path over walkable cells, excluding `start`.
+
+    Returns the cells to walk through (goal included), or None when no path
+    exists or either endpoint is not walkable.
+    """
+    if not grid.is_walkable(*start) or not grid.is_walkable(*goal):
+        return None
+    if start == goal:
+        return []
+
+    frontier = deque([start])
+    came_from: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
+
+    while frontier:
+        current = frontier.popleft()
+        if current == goal:
+            break
+        for neighbour in grid.neighbours(*current):
+            if neighbour in came_from:
+                continue
+            came_from[neighbour] = current
+            frontier.append(neighbour)
+
+    if goal not in came_from:
+        return None
+
+    path: list[tuple[int, int]] = []
+    node = goal
+    while node is not None and node != start:
+        path.append(node)
+        node = came_from[node]
+    path.reverse()
+    return path
+
+
+def terrain_rgb(value: int | None) -> tuple[int, int, int]:
+    if value is None:
+        return (0, 0, 0)
+    return TERRAIN_COLORS.get(value, TERRAIN_COLORS[0xFF])
