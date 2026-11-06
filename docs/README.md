@@ -24,7 +24,7 @@ the host differ, the game's packets do not.
 - **Windows tree (`windows/`)** — the original working implementation. Injector
   + DLL + WinForms GUI, named pipes.
 - **Linux tree (`linux/`)** — MinGW DLL + TCP loopback + Python CLI + GTK4 GUI
-  + state engine. Builds cleanly, **58 host tests pass**, the GTK4 window
+  + state engine. Builds cleanly, **59 host tests pass**, the GTK4 window
   passes a headless smoke test, and the DLL has been verified against the
   **live NosTale client** under Wine 11: both hooks ACTIVE, drops 0,
   sit/stand via `rest`, and natural movement through the client's own MoveTo
@@ -35,7 +35,9 @@ the host differ, the game's packets do not.
 - **Map / bot** — `NStcData.NOS` parser (779 grids); the live map is **20**
   (230x260) and 100 % of the observed entity positions are on walkable cells.
   The GTK4 Map/Bot tab renders the grid, draws A* paths, runs a path loop and
-  can auto-attack nearby monsters and pick up your drops. `make gui-test`
-  and `make bot-test` pass; live auto-attack (`u_s 0 3 <id>` → `su ... 866 ...`)
-  and pickup (`get 1 <charId> <dropId>` → server `get`) were verified.
+  can auto-attack nearby monsters (Retaliate prioritises the one hitting you),
+  pick up your drops, and sit to recover below a configurable HP %. The UI has
+  live HP/MP bars and a structured sidebar. `make gui-test` and `make bot-test`
+  pass; live auto-attack (`u_s 0 3 <id>` → `su ... 866 ...`) and pickup
+  (`get 1 <charId> <dropId>` → server `get`) were verified.
   See [map.md](map.md).

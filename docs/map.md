@@ -80,34 +80,45 @@ linux/scripts/host.sh map best --log "$WINEPREFIX/drive_c/NosTalePacketLog.txt"
 
 ## UI map tab
 
-`linux/scripts/gui.sh` opens the window. The **Map / Bot** tab contains:
+`linux/scripts/gui.sh` opens the window. The **Map / Bot** tab is split into a
+map on the left and a scrollable control sidebar on the right. The layout is
+grouped by function:
+
+- **Map bar** — Map ID, Load, Auto-detect, Scale, Center, map info. The mouse
+  wheel zooms the map.
+- **Character** — live HP and MP bars with current/max/missing values, plus
+  map/position/char id. HP and MP are fed by the server's `stat` packets.
+- **Path** — path summary, Start, Stop, Clear path, Loop.
+- **Combat** — Auto-attack, Retaliate, Skill, Range, Cooldown and the skill
+  template.
+- **Loot** — Pickup and loot radius.
+- **Recovery** — Auto-recover and the low-HP threshold.
+- **Identity** — Char ID (auto-filled from `at`/`rest`/`cond`/`tp`).
+
+The map redraws are coalesced at ~80 ms instead of one redraw per packet, and
+the map/`POS` view can auto-centre on the character. Right-click removes the
+last waypoint; left-click adds one.
 
 | Control | Effect |
 |---|---|
-| Map ID + Load | load a specific grid from `NStcData.NOS` |
-| Auto-detect | rank maps by the live entity positions and select the best |
-| Scale | pixels per cell (1-10) |
-| left-click | add a walkable waypoint |
-| right-click | remove the last waypoint |
-| Clear path | drop all waypoints |
-| Loop | repeat the path when it finishes |
-| Start / Stop | run/stop the bot |
-| Auto-attack | attack monsters in range before the next path step |
-| Pickup | pick up your own/unowned drops within the loot radius |
-| Loot | pickup radius in cells (default 3) |
+| Center | keep the map scrolled to the own character |
+| Retaliate | attack the monster that most recently hit you first, if in range |
+| Auto-recover | below the HP threshold, sit and wait for full HP, then stand |
+| Below HP % | recovery threshold (default 30) |
+| Pickup / Loot | pick up your own/unowned drops within the radius |
 | Skill | skill vnum (default **0** = normal/basic attack; the client sends `u_s 0 3 <monster>` and the server reports the basic skill, e.g. 866, in `su`) |
-| Range | attack radius in cells |
-| Cooldown | seconds between attacks |
-| Char ID | own char id; auto-filled from a `rest` packet, or enter it manually |
-| skill template | default `u_s {skill} {type} {target}`; use `{skill}`, `{type}`, `{target}` |
+| Range / Cooldown | attack radius and seconds between attacks |
+| Loop | repeat the path when it finishes |
+| Char ID | own char id; auto-filled |
 
-Overlays: cyan path, yellow waypoints, green players, blue NPCs/pets, orange
-monsters. The own character is a **bigger red dot with a white ring and a red
-facing arrow**. The arrow follows the last `walk` delta (map coordinates:
-`+x` right, `+y` down), so it has eight directions. The protocol has no
-own-facing packet: `in` carries a direction only at spawn, and every observed
-character kept one constant spawn direction regardless of movement. Deriving
-the arrow from movement is therefore the honest source.
+Overlays: cyan path, yellow waypoints, **gold diamonds for drops**, green
+players, blue NPCs/pets, orange monsters. The own character is a **bigger red
+dot with a white ring and a red facing arrow**. The arrow follows the last
+`walk` delta (map coordinates: `+x` right, `+y` down), so it has eight
+directions. The protocol has no own-facing packet: `in` carries a direction
+only at spawn, and every observed character kept one constant spawn direction
+regardless of movement. Deriving the arrow from movement is therefore the
+honest source.
 
 ![GUI map tab](assets/gui-map.png)
 
@@ -115,16 +126,21 @@ the arrow from movement is therefore the honest source.
 
 `_bot_tick` runs on the GTK main loop every 200 ms:
 
-1. **Stand up** if `WorldState.resting` is true and the char id is known:
+1. **Recovery** — if Auto-recover is on and HP is below the threshold, stop
+   the current walk, sit (`rest 1 1 <charId>` unless already sitting) and wait.
+   No attack, pickup or movement happens until HP is full; then the bot stands
+   (`rest`) and resumes the path. `stat` is the source of HP/MP.
+2. **Stand up** if `WorldState.resting` is true and the char id is known:
    `rest 1 1 <charId>` (the server toggles sit/stand; sitting blocks movement).
-2. **Pick up** if enabled and a drop owned by you (or unowned) is within the
+3. **Pick up** if enabled and a drop owned by you (or unowned) is within the
    loot radius: send `get 1 <charId> <dropId>`. Each drop is tried at most
    three times; the server's `get` confirmation removes it from
    `WorldState.drops`.
-3. **Auto-attack**, if enabled and the cooldown is over: pick the nearest
-   `kind == 3` entity within the range from the own position, send
-   `ncif 3 <id>` and the skill template, and set the cooldown.
-4. **Walk** a multi-cell leg (three cells from the A* path, plus the final
+4. **Auto-attack**, if enabled and the cooldown is over: with **Retaliate** on,
+   first try the most recent `su` attacker that hit you (within 5 s); otherwise
+   pick the nearest `kind == 3` entity within range. Send `ncif 3 <id>` and the
+   skill template, and set the cooldown.
+5. **Walk** a multi-cell leg (three cells from the A* path, plus the final
    cell) by calling the client's own MoveTo: the GUI sends `MOVE|x y` to the
    DLL. The client pathfinds, animates and sends its own `walk` packet with
    the leg destination; the server accepts it as a normal player move. Because
@@ -133,7 +149,7 @@ the arrow from movement is therefore the honest source.
    character walks continuously instead of stopping after every single cell.
    On a timeout it skips the leg (blocked path) and stops after three
    consecutive rejections.
-5. Repeat/loop; Stop ends the timer.
+6. Repeat/loop; Stop ends the timer.
 
 The bot sends ordinary packets (`ncif`, `u_s`, `rest`) through the existing
 `PacketClient` and uses the DLL's `MOVE`/`POS` commands for movement. It never
@@ -179,7 +195,7 @@ never sees the `at` packet.
 ## Tests
 
 ```bash
-make -C linux host-test   # 58 cases incl. synthetic NOS, A*, checksum
+make -C linux host-test   # 59 cases incl. synthetic NOS, A*, checksum
 make -C linux gui-test    # GUI + map surface + unknown-position guard
 make -C linux bot-test    # fake server: auto-attack, pickup, MOVE, rejection
 ```

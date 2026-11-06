@@ -56,6 +56,9 @@ class FakeServer:
             b"STATUS|ready\n"
             b"RECV|at 14881134 20 25 117 0 0 0 0 0 0 0\n"
             b"RECV|mv 3 500 25 118 10\n"
+            b"RECV|mv 3 501 25 119 10\n"
+            b"RECV|rest 1 14881134 0\n"
+            b"RECV|su 3 501 1 14881134 10 9 11 4401\n"
             b"RECV|drop 1046 999 25 117 1 0 14881134\n"
         )
 
@@ -144,9 +147,10 @@ def main() -> int:
     def check() -> bool:
         try:
             lines = list(server.received)
-            has_ncif = any("SEND|ncif 3 500" in line for line in lines)
+            # 501 is hitting us; Retaliate must prefer it over the closer 500.
+            has_ncif = any("SEND|ncif 3 501" in line for line in lines)
             has_skill = any(
-                line.startswith("SEND|u_s") and "0 3 500" in line
+                line.startswith("SEND|u_s") and "0 3 501" in line
                 for line in lines
             )
             has_move = any(line == "MOVE|26 119" for line in lines)

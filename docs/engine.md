@@ -65,7 +65,8 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `facing` | last movement direction `(dx, dy)`, each -1/0/1; drives the GUI arrow; `None` until the first walk |
 | `entities` | `dict[int, Entity]` keyed by **entityId** (never vnum) |
 | `drops` | `dict[int, GroundItem]` keyed by drop id: item vnum, x, y, amount, owner char id |
-| `stats` | `CharacterStats(hp, hp_max, mp, mp_max)` from `stat` |
+| `stats` | `CharacterStats(hp, hp_max, mp, mp_max)` from `stat`; drives the bars and recovery |
+| `last_attacker_id` / `last_attacker_at` | last entity that hit the local player and the packet timestamp; Retaliate uses it (5 s window) |
 | `chat` | last 200 `(type, id, message)` tuples from `say` |
 | `resting` | `True` sitting, `False` standing, `None` unknown; from `rest` |
 | `self_id` | own char id from `at`, `cond` (the live client sends it only for the local player), `rest`, or a matched `tp` |
@@ -93,7 +94,7 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `rest` | RECV | `resting` |
 | `cond` | RECV | entity `speed` |
 | `ncif` | SEND | `target_id` |
-| `su` | RECV | `combat`, `last_skill` (first five ints) |
+| `su` | RECV | `combat`, `last_skill` (first five ints); if the target is self, `last_attacker_id`/`last_attacker_at` |
 | `stat` | RECV | own HP/MP |
 | `say` | RECV/SEND | `chat` |
 
@@ -202,10 +203,12 @@ The GUI's **Map / Bot** tab renders the grid, overlays entities and the own
 character, accepts waypoints by click, draws the A* path, and runs the bot:
 
 - stand up with `rest` when sitting;
+- recover below the configured HP % (sit, wait for full, stand);
 - pick up your own/unowned drops in the loot radius (`get 1 <charId>
   <dropId>`);
-- auto-attack the nearest monster in range (`ncif` + a configurable `u_s`
-  template; skill 0 is the normal attack);
+- auto-attack, preferring the monster that most recently hit you (Retaliate),
+  otherwise the nearest one in range (`ncif` + a configurable `u_s` template;
+  skill 0 is the normal attack);
 - walk one path cell at a time via the DLL's `MOVE|x y`, which runs the
   client's own pathfinding and animation; confirmation is the client's own
   `walk` packet / `world.position`.

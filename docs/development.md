@@ -28,7 +28,7 @@ The MinGW compiler is `i686-w64-mingw32-g++`. Override with
 ## Tests
 
 ```bash
-make -C linux host-test        # 58 stdlib unittest cases
+make -C linux host-test        # 59 stdlib unittest cases
 make -C linux gui-test         # headless GTK4, needs xvfb
 make -C linux bot-test         # path loop + auto-attack against a fake server
 make -C linux all test-host
@@ -41,9 +41,11 @@ parser/A* (a synthetic NOS archive, bad headers, walls, unreachable targets,
 ranking; the local archive test is skipped when the game is absent). The GUI
 test opens the real window under Xvfb against a fake server and checks the rows,
 the status bar and the map surface. The bot test drives the same window with
-auto-attack on and a one-cell path, and asserts the `ncif`/`u_s`/`MOVE`
-sequence and that the fake client's own `walk` confirms the move. A second test
-makes the server silent and asserts the bot stops after three rejected moves.
+auto-attack on and a one-cell path, and asserts the `get`/`ncif`/`u_s`/`MOVE`
+sequence (Retaliate picks the monster that hit us) and that the fake client's
+own `walk` confirms the move. A second test makes the server silent and asserts
+the bot stops after three rejected moves. A third starts the character at
+20/100 HP and asserts it sits, waits for full HP and then stands.
 The Wine script covers the x86 stubs
 (`HookStubTest.exe`), the DLL lifecycle and the command path with a fake game.
 

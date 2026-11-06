@@ -305,7 +305,7 @@ skill packet.
   as well as other cast skills.
 - The file log is `~/games/gameforge/prefix/drive_c/NosTalePacketLog.txt`.
 - The TCP server is `127.0.0.1:47821`.
-- The host test count is now 58; `make bot-test` also runs the
+- The host test count is now 59; `make bot-test` also runs the
   rejected-move regression test. The DLL in the client is `PacketLogger8.dll`
   (hooks ACTIVE, `MOVE`/`POS` available).
 

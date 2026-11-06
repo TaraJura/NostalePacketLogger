@@ -30,9 +30,9 @@ build); the fixed build is in the repo, and the client must be restarted.
 |---|---|
 | `windows/` | Original MSVC/C# implementation, moved unchanged. Builds with Visual Studio; not exercised on this machine. |
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
-| Linux host tests | 58/58 pass (`make -C linux host-test`). |
+| Linux host tests | 59/59 pass (`make -C linux host-test`). |
 | Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live map is **20** (230x260); 100 % of 173,503 `mv` samples land on walkable `0x00` cells. |
-| Map UI / bot | GTK4 Map/Bot tab: grid + entities + drops + A* path + loop + auto-attack + pickup; own character is a bigger dot with a facing arrow from the last walk delta. `make gui-test` and `make bot-test` pass. |
+| Map UI / bot | GTK4 Map/Bot tab: structured sidebar (Character HP/MP bars, Path, Combat, Loot, Recovery, Identity), map + drops + A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover; bigger own dot + facing arrow. `make gui-test` and `make bot-test` (3 smokes) pass. |
 | x86 hook stubs | `HookStubTest.exe` (Wine) calls the real `hooks.S` detours and verifies the EDX packet pointer at `20(%ebp)`, the original-call replay and the send trampoline. Passes. |
 | GUI | Headless GTK4 smoke test passes (`make -C linux gui-test`, Xvfb): fake stream → 2 rows + STATUS in the status bar. |
 | Injector | Verified under Wine end-to-end against both the fake target and the live client (PID 1216): remote `LoadLibraryA` succeeds and the DLL starts. |
@@ -52,7 +52,7 @@ cd ~/games/gameforge/NostalePacketLogger
 # Linux build (MinGW-w64 i686; installed via apt)
 make -C linux all test-host
 make -C linux check                 # file(1) on the three PE32 outputs
-make -C linux host-test             # 58 stdlib unittest cases
+make -C linux host-test             # 59 stdlib unittest cases
 make -C linux gui-test              # headless GTK4 + map surface smoke
 make -C linux bot-test              # fake server: path loop + auto-attack
 make -C linux clean
@@ -122,11 +122,11 @@ PYTHONPATH=linux/host python3 -m ntpl status
   count, id/offset index, zlib blocks; `width:int16`, `height:int16`,
   `width*height` terrain bytes; `0x00` walkable). The live map id is **20**,
   230x260. The Map/Bot tab draws the grid, takes click waypoints, computes an
-  A* path, and the bot stands (`rest`), picks up own/unowned drops
-  (`get 1 <charId> <dropId>`), auto-attacks (`ncif` + `u_s` template; skill 0
-  = normal attack) and walks in three-cell legs through the client's own MoveTo
-  (`MOVE|x y`), pacing each leg by distance so the animation stays continuous
-  instead of stopping after every cell. The own
+  A* path, and the bot recovers below the HP threshold (sit, wait for full,
+  stand), stands (`rest`), picks up own/unowned drops (`get 1 <charId>
+  <dropId>`), auto-attacks with Retaliate priority (`ncif` + `u_s`; skill 0 =
+  normal attack) and walks in three-cell legs through the client's own MoveTo
+  (`MOVE|x y`), pacing each leg by distance so the animation stays continuous. The own
   marker is a bigger dot + a facing arrow from the last `walk` delta (the
   protocol has no own-facing packet).
 - **Docs**: `docs/architecture.md`, `docs/engine.md`, `docs/map.md`,

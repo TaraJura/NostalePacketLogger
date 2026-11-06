@@ -186,6 +186,11 @@ class Application(Gtk.Application):
         self.pickup_cooldown_until = 0.0
         self.pickup_attempts: dict[int, int] = {}
         self.pickup_ignored: dict[int, float] = {}
+        self.recovering = False
+        self.recover_rest_at = 0.0
+        self.map_redraw_scheduled = False
+        self.stats_redraw_scheduled = False
+        self.last_center: tuple[int, int] | None = None
         self.bot_running = False
         self.bot_timer = None
         self._closing = False
@@ -286,13 +291,31 @@ class Application(Gtk.Application):
         page.append(self.scrolled)
         return page
 
+    @staticmethod
+    def _frame(title: str, child: Gtk.Widget) -> Gtk.Frame:
+        frame = Gtk.Frame(label=title)
+        frame.set_child(child)
+        return frame
+
+    @staticmethod
+    def _field_row(*widgets: Gtk.Widget) -> Gtk.Box:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        for widget in widgets:
+            row.append(widget)
+        return row
+
     def _build_map_page(self):
-        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        page = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        page.set_margin_top(6)
+        page.set_margin_start(8)
+        page.set_margin_end(8)
+        page.set_margin_bottom(6)
+
+        # -- left: map ----------------------------------------------------
+        map_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        map_box.set_hexpand(True)
 
         top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        top.set_margin_top(6)
-        top.set_margin_start(8)
-        top.set_margin_end(8)
         top.append(Gtk.Label(label="Map ID"))
         self.map_id_spin = Gtk.SpinButton.new_with_range(0, 100000, 1)
         self.map_id_spin.set_value(DEFAULT_MAP_ID)
@@ -301,7 +324,9 @@ class Application(Gtk.Application):
         load.connect("clicked", self._on_load_map)
         top.append(load)
         auto = Gtk.Button(label="Auto-detect")
-        auto.set_tooltip_text("Pick the map whose walkable cells contain the live entities")
+        auto.set_tooltip_text(
+            "Pick the map whose walkable cells contain the live entities"
+        )
         auto.connect("clicked", self._on_auto_map)
         top.append(auto)
         top.append(Gtk.Label(label="Scale"))
@@ -309,100 +334,202 @@ class Application(Gtk.Application):
         self.map_scale_spin.set_value(DEFAULT_SCALE)
         self.map_scale_spin.connect("value-changed", self._on_map_scale)
         top.append(self.map_scale_spin)
+        self.center_toggle = Gtk.ToggleButton(label="Center")
+        self.center_toggle.set_active(True)
+        self.center_toggle.set_tooltip_text(
+            "Keep the view centred on your character"
+        )
+        top.append(self.center_toggle)
         self.map_info = Gtk.Label(label="map data not loaded")
         self.map_info.set_xalign(0)
         self.map_info.set_hexpand(True)
         top.append(self.map_info)
-        page.append(top)
+        map_box.append(top)
 
         self.map_area = Gtk.DrawingArea()
         self.map_area.set_draw_func(self._draw_map)
         click = Gtk.GestureClick()
         click.connect("pressed", self._on_map_click)
         self.map_area.add_controller(click)
+        scroll = Gtk.EventControllerScroll.new(
+            Gtk.EventControllerScrollFlags.VERTICAL
+        )
+        scroll.connect("scroll", self._on_map_scroll)
+        self.map_area.add_controller(scroll)
         self.map_scrolled = Gtk.ScrolledWindow()
         self.map_scrolled.set_child(self.map_area)
         self.map_scrolled.set_vexpand(True)
-        page.append(self.map_scrolled)
+        self.map_scrolled.set_hexpand(True)
+        map_box.append(self.map_scrolled)
 
-        bottom = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        bottom.set_margin_start(8)
-        bottom.set_margin_end(8)
-        bottom.set_margin_bottom(4)
-        clear = Gtk.Button(label="Clear path")
-        clear.connect("clicked", lambda *_: self._clear_path())
-        bottom.append(clear)
-        self.loop_toggle = Gtk.ToggleButton(label="Loop")
-        self.loop_toggle.set_active(True)
-        bottom.append(self.loop_toggle)
+        legend = Gtk.Label()
+        legend.set_markup(
+            '<span foreground="#ff3333">●</span> you   '
+            '<span foreground="#ff7322">●</span> monster   '
+            '<span foreground="#33e633">●</span> player   '
+            '<span foreground="#4d80ff">●</span> NPC/pet   '
+            '<span foreground="#ffd91a">●</span> drop   '
+            '<span foreground="#00e5e5">·</span> path'
+        )
+        legend.set_xalign(0)
+        legend.add_css_class("dim-label")
+        map_box.append(legend)
+
+        # -- right: structured control sidebar ----------------------------
+        sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        sidebar.set_margin_top(2)
+        sidebar.set_margin_bottom(2)
+        sidebar.set_margin_start(2)
+        sidebar.set_margin_end(2)
+
+        # Character: live HP/MP bars and position.
+        char_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.stats_area = Gtk.DrawingArea()
+        self.stats_area.set_content_height(92)
+        self.stats_area.set_draw_func(self._draw_stats)
+        char_box.append(self.stats_area)
+        self.char_info = Gtk.Label(label="position unknown")
+        self.char_info.set_xalign(0)
+        self.char_info.set_wrap(True)
+        self.char_info.add_css_class("dim-label")
+        char_box.append(self.char_info)
+        sidebar.append(self._frame("Character", char_box))
+
+        # Path.
+        path_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.path_info = Gtk.Label(label="no path")
+        self.path_info.set_xalign(0)
+        self.path_info.set_wrap(True)
+        path_box.append(self.path_info)
+        path_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         start = Gtk.Button(label="Start")
+        start.add_css_class("suggested-action")
         start.connect("clicked", lambda *_: self._start_bot())
-        bottom.append(start)
+        path_row.append(start)
         stop = Gtk.Button(label="Stop")
         stop.connect("clicked", lambda *_: self._stop_bot())
-        bottom.append(stop)
+        path_row.append(stop)
+        clear = Gtk.Button(label="Clear path")
+        clear.connect("clicked", lambda *_: self._clear_path())
+        path_row.append(clear)
+        path_box.append(path_row)
+        self.loop_toggle = Gtk.ToggleButton(label="Loop")
+        self.loop_toggle.set_active(True)
+        path_box.append(self.loop_toggle)
+        sidebar.append(self._frame("Path", path_box))
 
+        # Combat.
+        combat_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.auto_attack_toggle = Gtk.ToggleButton(label="Auto-attack")
-        bottom.append(self.auto_attack_toggle)
-        self.pickup_toggle = Gtk.ToggleButton(label="Pickup")
-        self.pickup_toggle.set_active(True)
-        self.pickup_toggle.set_tooltip_text(
-            "Pick up your own drops within the loot range"
+        self.retaliate_toggle = Gtk.ToggleButton(label="Retaliate")
+        self.retaliate_toggle.set_active(True)
+        self.retaliate_toggle.set_tooltip_text(
+            "Prioritise the monster that is currently hitting you"
         )
-        bottom.append(self.pickup_toggle)
-        bottom.append(Gtk.Label(label="Loot"))
-        self.loot_range = Gtk.SpinButton.new_with_range(1, 10, 1)
-        self.loot_range.set_value(3)
-        self.loot_range.set_tooltip_text("pickup radius in cells")
-        bottom.append(self.loot_range)
-        bottom.append(Gtk.Label(label="Skill"))
+        combat_box.append(
+            self._field_row(self.auto_attack_toggle, self.retaliate_toggle)
+        )
         self.skill_entry = Gtk.Entry()
         self.skill_entry.set_width_chars(6)
-        # The basic/normal attack is `u_s 0 3 <monster>`; the server reports
-        # the character's basic skill as 866 (or 868 for a different attack)
-        # in the `su` response. 866 is not a castable `u_s` skill.
+        # Skill 0 is the normal/basic attack (`u_s 0 3 <monster>`); the server
+        # reports 866/868 in `su`. 866 is not a castable `u_s` skill.
         self.skill_entry.set_text("0")
         self.skill_entry.set_tooltip_text("skill vnum sent to the server")
-        bottom.append(self.skill_entry)
-        bottom.append(Gtk.Label(label="Range"))
         self.attack_range = Gtk.SpinButton.new_with_range(1, 40, 1)
         self.attack_range.set_value(10)
-        bottom.append(self.attack_range)
-        bottom.append(Gtk.Label(label="Cooldown"))
         self.attack_cooldown = Gtk.SpinButton.new_with_range(1, 30, 1)
         self.attack_cooldown.set_value(3)
-        bottom.append(self.attack_cooldown)
-        bottom.append(Gtk.Label(label="Char ID"))
-        self.char_entry = Gtk.Entry()
-        self.char_entry.set_width_chars(10)
-        self.char_entry.set_placeholder_text("auto from rest")
-        bottom.append(self.char_entry)
-        page.append(bottom)
-
+        combat_box.append(
+            self._field_row(
+                Gtk.Label(label="Skill"),
+                self.skill_entry,
+                Gtk.Label(label="Range"),
+                self.attack_range,
+                Gtk.Label(label="Cooldown"),
+                self.attack_cooldown,
+            )
+        )
         self.skill_packet_entry = Gtk.Entry()
         self.skill_packet_entry.set_text("u_s {skill} {type} {target}")
         self.skill_packet_entry.set_tooltip_text(
             "template for auto-attack: {skill}, {type}, {target}"
         )
-        self.skill_packet_entry.set_margin_start(8)
-        self.skill_packet_entry.set_margin_end(8)
-        page.append(self.skill_packet_entry)
+        combat_box.append(self.skill_packet_entry)
+        sidebar.append(self._frame("Combat", combat_box))
+
+        # Loot.
+        loot_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.pickup_toggle = Gtk.ToggleButton(label="Pickup")
+        self.pickup_toggle.set_active(True)
+        self.pickup_toggle.set_tooltip_text(
+            "Pick up your own drops within the loot range"
+        )
+        self.loot_range = Gtk.SpinButton.new_with_range(1, 10, 1)
+        self.loot_range.set_value(3)
+        self.loot_range.set_tooltip_text("pickup radius in cells")
+        loot_box.append(
+            self._field_row(
+                self.pickup_toggle,
+                Gtk.Label(label="Radius"),
+                self.loot_range,
+            )
+        )
+        sidebar.append(self._frame("Loot", loot_box))
+
+        # Recovery.
+        recover_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.recover_toggle = Gtk.ToggleButton(label="Auto-recover")
+        self.recover_toggle.set_active(True)
+        self.recover_toggle.set_tooltip_text(
+            "Below the threshold, sit and wait for full HP"
+        )
+        self.low_hp_pct = Gtk.SpinButton.new_with_range(5, 90, 5)
+        self.low_hp_pct.set_value(30)
+        recover_box.append(
+            self._field_row(
+                self.recover_toggle,
+                Gtk.Label(label="Below HP %"),
+                self.low_hp_pct,
+            )
+        )
+        sidebar.append(self._frame("Recovery", recover_box))
+
+        # Identity.
+        id_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.char_entry = Gtk.Entry()
+        self.char_entry.set_placeholder_text("auto from rest/at/tp")
+        id_box.append(
+            self._field_row(Gtk.Label(label="Char ID"), self.char_entry)
+        )
+        sidebar.append(self._frame("Identity", id_box))
 
         hint = Gtk.Label(
             label=(
                 "Click the map to add waypoints; Start walks the A* path. "
-                "Auto-attack sends ncif + the skill template when a monster is in range. "
-                "The character must be standing; the rest packet toggles sit/stand."
+                "Combat picks the monster hitting you first (Retaliate), then "
+                "the nearest one. Low HP sits until full."
             )
         )
         hint.set_xalign(0)
         hint.set_wrap(True)
-        hint.set_margin_start(8)
-        hint.set_margin_end(8)
-        hint.set_margin_bottom(6)
         hint.add_css_class("dim-label")
-        page.append(hint)
-        return page
+        sidebar.append(hint)
+
+        sidebar_scroll = Gtk.ScrolledWindow()
+        sidebar_scroll.set_child(sidebar)
+        sidebar_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        sidebar_scroll.set_size_request(360, -1)
+        sidebar_scroll.set_vexpand(True)
+
+        paned = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
+        paned.set_start_child(map_box)
+        paned.set_end_child(sidebar_scroll)
+        paned.set_resize_start_child(True)
+        paned.set_resize_end_child(False)
+        paned.set_shrink_start_child(False)
+        paned.set_position(880)
+        paned.set_wide_handle(True)
+        return paned
 
     def _install_css(self) -> None:
         provider = Gtk.CssProvider()
@@ -459,6 +586,9 @@ class Application(Gtk.Application):
             f"walkable {100 * walkable / total:.1f}%"
         )
         self._set_status(f"loaded map {grid.map_id} ({grid.width}x{grid.height})")
+        self.last_center = None
+        self._schedule_map_redraw()
+        self._schedule_stats_redraw()
 
     def _build_map_surface(self) -> None:
         grid = self.map_grid
@@ -485,6 +615,150 @@ class Application(Gtk.Application):
 
     def _on_map_scale(self, _spin) -> None:
         self._update_map_size()
+
+    def _on_map_scroll(self, _controller, _dx: float, dy: float) -> bool:
+        step = -1 if dy > 0 else 1
+        value = int(self.map_scale_spin.get_value()) + step
+        self.map_scale_spin.set_value(max(1, min(10, value)))
+        return True
+
+    # -- redraw scheduling ---------------------------------------------
+
+    def _schedule_map_redraw(self) -> None:
+        if self.map_area is None or self.map_redraw_scheduled:
+            return
+        self.map_redraw_scheduled = True
+        GLib.timeout_add(80, self._redraw_map_once)
+
+    def _redraw_map_once(self) -> bool:
+        self.map_redraw_scheduled = False
+        if self.map_area is not None:
+            self.map_area.queue_draw()
+        self._update_char_info()
+        if self.center_toggle is not None and self.center_toggle.get_active():
+            self._center_on_player()
+        return False
+
+    def _schedule_stats_redraw(self) -> None:
+        if self.stats_area is None or self.stats_redraw_scheduled:
+            return
+        self.stats_redraw_scheduled = True
+        GLib.timeout_add(100, self._redraw_stats_once)
+
+    def _redraw_stats_once(self) -> bool:
+        self.stats_redraw_scheduled = False
+        if self.stats_area is not None:
+            self.stats_area.queue_draw()
+        self._update_char_info()
+        return False
+
+    def _update_char_info(self) -> None:
+        if self.char_info is None:
+            return
+        world = self.engine.world
+        parts = []
+        if world.map_id is not None:
+            parts.append(f"map {world.map_id}")
+        elif self.map_grid is not None:
+            parts.append(f"map {self.map_grid.map_id}")
+        if world.position is not None:
+            parts.append(f"pos {world.position[0]},{world.position[1]}")
+        else:
+            parts.append("position unknown")
+        char_id = self._char_id()
+        if char_id is not None:
+            parts.append(f"char {char_id}")
+        if self.recovering:
+            parts.append("RECOVERING")
+        self.char_info.set_text(" · ".join(parts))
+
+    def _center_on_player(self) -> None:
+        position = self._player_cell()
+        if position is None or self.map_scrolled is None:
+            return
+        if position == self.last_center:
+            return
+        scale = max(1, int(self.map_scale))
+        x = position[0] * scale + scale / 2
+        y = position[1] * scale + scale / 2
+        for adjustment, center in (
+            (self.map_scrolled.get_hadjustment(), x),
+            (self.map_scrolled.get_vadjustment(), y),
+        ):
+            page = adjustment.get_page_size()
+            if page <= 0:
+                return
+            adjustment.set_value(max(0.0, center - page / 2))
+        self.last_center = position
+
+    def _draw_stats(self, _area, context, width: int, height: int) -> None:
+        context.set_source_rgb(0.08, 0.08, 0.08)
+        context.paint()
+        stats = self.engine.world.stats
+        rows = (
+            (
+                "HP",
+                stats.hp,
+                stats.hp_max,
+                (0.18, 0.72, 0.26),
+                (0.42, 0.08, 0.08),
+            ),
+            (
+                "MP",
+                stats.mp,
+                stats.mp_max,
+                (0.22, 0.52, 0.95),
+                (0.08, 0.16, 0.40),
+            ),
+        )
+        context.select_font_face(
+            "Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD
+        )
+        context.set_font_size(11)
+        y = 6.0
+        for label, value, maximum, fill, missing in rows:
+            percent = (100.0 * value / maximum) if maximum > 0 else 0.0
+            if maximum > 0:
+                text = (
+                    f"{label}  {value} / {maximum}  ({percent:.0f}%)"
+                    f"   missing {max(0, maximum - value)}"
+                )
+            else:
+                text = f"{label}  —"
+            context.set_source_rgb(0.85, 0.85, 0.85)
+            context.move_to(8, y + 12)
+            context.show_text(text)
+            bar_y = y + 18
+            bar_w = max(10.0, width - 16)
+            bar_h = 16.0
+            context.set_source_rgb(*missing)
+            context.rectangle(8, bar_y, bar_w, bar_h)
+            context.fill()
+            if maximum > 0:
+                context.set_source_rgb(*fill)
+                context.rectangle(8, bar_y, bar_w * min(1.0, value / maximum), bar_h)
+                context.fill()
+            context.set_source_rgb(0.0, 0.0, 0.0)
+            context.rectangle(8, bar_y, bar_w, bar_h)
+            context.set_line_width(1.0)
+            context.stroke()
+            y += 44.0
+
+    def _retaliation_target(self, radius: int) -> Entity | None:
+        world = self.engine.world
+        if world.last_attacker_id is None:
+            return None
+        # Only recent hits count; a stale attacker should not lock targeting.
+        if time.time() - world.last_attacker_at > 5.0:
+            return None
+        entity = world.entities.get(world.last_attacker_id)
+        if entity is None or entity.kind != 3:
+            return None
+        position = self._player_cell()
+        if position is None:
+            return None
+        distance = max(abs(entity.x - position[0]), abs(entity.y - position[1]))
+        return entity if distance <= radius else None
 
     def _on_load_map(self, _button) -> None:
         self._ensure_map_loaded()
@@ -566,6 +840,24 @@ class Application(Gtk.Application):
             )
             context.fill()
 
+        # ground items (drops) as small gold diamonds
+        for drop in self.engine.world.drops.values():
+            if not (0 <= drop.x < grid.width and 0 <= drop.y < grid.height):
+                continue
+            cx = drop.x * scale + scale / 2
+            cy = drop.y * scale + scale / 2
+            size = max(2.5, scale * 0.55)
+            context.move_to(cx, cy - size)
+            context.line_to(cx + size, cy)
+            context.line_to(cx, cy + size)
+            context.line_to(cx - size, cy)
+            context.close_path()
+            context.set_source_rgba(1.0, 0.83, 0.1, 1.0)
+            context.fill_preserve()
+            context.set_source_rgba(0.15, 0.1, 0.0, 1.0)
+            context.set_line_width(1.0)
+            context.stroke()
+
         # own character: a bigger dot plus a facing arrow. The arrow is drawn
         # first so the dot covers its base.
         own = self._player_cell()
@@ -636,6 +928,7 @@ class Application(Gtk.Application):
         if self.map_area is not None:
             self.map_area.queue_draw()
         self._set_status("path cleared")
+        self._set_path_info("no path")
 
     def _player_cell(self) -> tuple[int, int] | None:
         # Prefer the protocol position (`at`/`walk`); the char entity from
@@ -664,6 +957,7 @@ class Application(Gtk.Application):
             if self.map_area is not None:
                 self.map_area.queue_draw()
             self._set_status("own position unknown; wait for at/tp or move once")
+            self._set_path_info("position unknown")
             return
         if not self.map_grid.is_walkable(*current):
             self.path_cells = []
@@ -677,6 +971,7 @@ class Application(Gtk.Application):
             leg = astar(self.map_grid, current, waypoint)
             if leg is None:
                 self._set_status(f"no path to {waypoint}")
+                self._set_path_info(f"no path to {waypoint}")
                 continue
             path.extend(leg)
             current = waypoint
@@ -684,6 +979,9 @@ class Application(Gtk.Application):
         if self.map_area is not None:
             self.map_area.queue_draw()
         self._set_status(f"path: {len(path)} cells, {len(self.waypoints)} waypoint(s)")
+        self._set_path_info(
+            f"path: {len(path)} cells · {len(self.waypoints)} waypoint(s)"
+        )
 
     def _on_page_switch(self, _notebook, _page, _page_num) -> None:
         self._ensure_map_loaded()
@@ -724,6 +1022,7 @@ class Application(Gtk.Application):
         GLib.timeout_add(DRAIN_INTERVAL_MS, self._drain)
 
     def _drain(self) -> bool:
+        dirty = False
         for _ in range(1000):
             try:
                 message = self.inbox.get_nowait()
@@ -749,8 +1048,7 @@ class Application(Gtk.Application):
                             self.engine.world.self_id = char_id
                             self._learn_char_id(char_id)
                             self._set_status(f"position {x},{y} (char {char_id})")
-                            if self.map_area is not None:
-                                self.map_area.queue_draw()
+                            dirty = True
                 else:
                     self._set_status(message.payload)
             elif message.kind is Kind.QUIT:
@@ -761,9 +1059,13 @@ class Application(Gtk.Application):
                 self._track_packet(packet)
                 self._learn_char_id(self.engine.world.self_id)
                 self._append(packet)
-                if self.map_area is not None:
-                    self.map_area.queue_draw()
+                dirty = True
 
+        if dirty:
+            # The game can send hundreds of packets per tick. Coalesce the
+            # drawing instead of queueing a redraw for every packet.
+            self._schedule_map_redraw()
+            self._schedule_stats_redraw()
         return True
 
     def _track_packet(self, packet: Packet) -> None:
@@ -853,6 +1155,10 @@ class Application(Gtk.Application):
         if self.status is not None:
             self.status.set_text(text)
 
+    def _set_path_info(self, text: str) -> None:
+        if getattr(self, "path_info", None) is not None:
+            self.path_info.set_text(text)
+
     # -- bot ------------------------------------------------------------
 
     def _char_id(self) -> int | None:
@@ -868,6 +1174,7 @@ class Application(Gtk.Application):
         self.char_id = char_id
         if self.char_entry is not None and not self.char_entry.get_text().strip():
             self.char_entry.set_text(str(char_id))
+        self._update_char_info()
 
     def _send(self, text: str) -> bool:
         if self.client is None or not self.client.connected:
@@ -932,9 +1239,16 @@ class Application(Gtk.Application):
         self.pickup_cooldown_until = 0.0
         self.pickup_attempts.clear()
         self.pickup_ignored.clear()
+        self.recovering = False
+        self.recover_rest_at = 0.0
+        self.last_center = None
         if self.bot_timer is None:
             self.bot_timer = GLib.timeout_add(BOT_INTERVAL_MS, self._bot_tick)
         self._set_status("bot started")
+        self._set_path_info(
+            f"running · {len(self.bot_goals)} leg(s) · loop "
+            f"{'on' if self.loop_toggle.get_active() else 'off'}"
+        )
 
     def _stop_bot(self) -> None:
         self.bot_running = False
@@ -942,7 +1256,9 @@ class Application(Gtk.Application):
         if self.bot_timer is not None:
             GLib.source_remove(self.bot_timer)
             self.bot_timer = None
+        self.recovering = False
         self._set_status("bot stopped")
+        self._set_path_info("stopped")
 
     def _advance_path(self) -> None:
         self.path_index += 1
@@ -1013,6 +1329,43 @@ class Application(Gtk.Application):
 
         now = time.monotonic()
         world = self.engine.world
+        char_id = self._char_id()
+
+        # -- recovery: sit below the configured HP %, wait for full HP -----
+        recover_enabled = (
+            self.recover_toggle is not None
+            and self.recover_toggle.get_active()
+        )
+        if (
+            recover_enabled
+            and char_id is not None
+            and world.stats.hp_max > 0
+        ):
+            percent = 100.0 * world.stats.hp / world.stats.hp_max
+            threshold = float(self.low_hp_pct.get_value())
+            if not self.recovering and percent < threshold:
+                self.recovering = True
+                self.pending_target = None
+                self.attack_cooldown_until = 0.0
+                self._set_status(
+                    f"HP {percent:.0f}% below {threshold:.0f}%; recovering"
+                )
+            if self.recovering:
+                if world.stats.hp >= world.stats.hp_max:
+                    self.recovering = False
+                    if world.resting is True:
+                        self._send(f"rest 1 1 {char_id}")
+                    self._set_status("HP full; resuming")
+                    self._schedule_stats_redraw()
+                    return True
+                if world.resting is not True and now >= self.recover_rest_at:
+                    self._send(f"rest 1 1 {char_id}")
+                    self.recover_rest_at = now + 2.5
+                    self._set_status("sitting to recover HP")
+                self._schedule_stats_redraw()
+                return True
+        elif self.recovering:
+            self.recovering = False
 
         if self.pending_target is not None:
             # The client's own MoveTo sends a `walk` SEND packet; the engine
@@ -1080,7 +1433,15 @@ class Application(Gtk.Application):
             and self.auto_attack_toggle.get_active()
             and now >= self.attack_cooldown_until
         ):
-            monster = self._nearest_monster(int(self.attack_range.get_value()))
+            radius = int(self.attack_range.get_value())
+            monster = None
+            if (
+                self.retaliate_toggle is not None
+                and self.retaliate_toggle.get_active()
+            ):
+                monster = self._retaliation_target(radius)
+            if monster is None:
+                monster = self._nearest_monster(radius)
             if monster is not None:
                 self._send(f"ncif 3 {monster.entity_id}")
                 packet = self._skill_packet(monster.entity_id)

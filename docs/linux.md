@@ -229,10 +229,10 @@ both.
 ## Tests
 
 ```bash
-make host-test          # 58 stdlib unit tests: protocol, engine, map, checksum
+make host-test          # 59 stdlib unit tests: protocol, engine, map, checksum
 
 make gui-test           # headless GTK4 window + map surface against a fake stream
-make bot-test           # fake server: auto-attack, MOVE, rejection
+make bot-test           # fake server: combat, pickup, MOVE, recovery, rejection
 make all test-host
 ./scripts/dev-test-wine.sh 25
 ```

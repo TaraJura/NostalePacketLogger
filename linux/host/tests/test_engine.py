@@ -185,6 +185,18 @@ class EngineTests(unittest.TestCase):
         world = self.engine.feed(packet(Kind.RECV, "mv 1 14881134 26 118 10"))
         self.assertEqual(world.position, (26, 118))
 
+    def test_skill_used_marks_the_attacker(self):
+        self.engine.feed(packet(Kind.RECV, "rest 1 14881134 0"))
+        world = self.engine.feed(
+            packet(Kind.RECV, "su 3 500 1 14881134 10 9 11 4401")
+        )
+        self.assertEqual(world.last_attacker_id, 500)
+        # Our own attack on a monster must not be treated as retaliation.
+        world = self.engine.feed(
+            packet(Kind.RECV, "su 1 14881134 3 501 0 9 11 4401")
+        )
+        self.assertEqual(world.last_attacker_id, 500)
+
     def test_skill_used_event(self):
         # Real packet observed in the live log.
         world = self.engine.feed(

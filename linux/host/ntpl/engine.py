@@ -66,6 +66,9 @@ class WorldState:
     self_id: int | None = None
     target_id: int | None = None
     last_skill: int | None = None
+    # Last entity that hit the local player, with the packet timestamp.
+    last_attacker_id: int | None = None
+    last_attacker_at: float = 0.0
     combat: deque[dict] = field(default_factory=lambda: deque(maxlen=100))
     last_packet: Packet | None = None
 
@@ -283,6 +286,10 @@ def _on_skill_used(world: WorldState, packet: Packet) -> None:
         return
     attacker_type, attacker_id, target_type, target_id, skill = values
     world.last_skill = skill
+    if target_type == 1 and target_id == world.self_id:
+        # Something is hitting us; remember it so the bot can retaliate.
+        world.last_attacker_id = attacker_id
+        world.last_attacker_at = packet.timestamp
     world.combat.append(
         {
             "attacker_type": attacker_type,

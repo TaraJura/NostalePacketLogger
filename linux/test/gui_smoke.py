@@ -36,6 +36,7 @@ def start_fake_server() -> int:
             b"RECV|walk 1 2 3 4\n"
             b"SEND|walk 2 2 0 10\n"
             b"SEND|u_s 1 2\n"
+            b"RECV|stat 100 200 50 120 0 0\n"
         )
         time.sleep(15)
         connection.close()
@@ -69,10 +70,19 @@ def main() -> int:
                 and "position unknown" in app.status.get_text()
             )
             facing = app.engine.world.facing
+            stats = app.engine.world.stats
+            stats_ok = (
+                stats.hp == 100
+                and stats.hp_max == 200
+                and stats.mp == 50
+                and stats.mp_max == 120
+                and app.stats_area is not None
+            )
 
             result["detail"] = (
                 f"rows={rows} status={status!r} map={app.map_grid.map_id if app.map_grid else None} "
-                f"surface={app.map_surface is not None} guard={guard} facing={facing}"
+                f"surface={app.map_surface is not None} guard={guard} facing={facing} "
+                f"hp={stats.hp}/{stats.hp_max} stats_area={app.stats_area is not None}"
             )
             result["ok"] = (
                 rows >= 2
@@ -80,6 +90,7 @@ def main() -> int:
                 and map_ok
                 and guard
                 and facing == (1, 0)
+                and stats_ok
             )
         except Exception as exc:  # noqa: BLE001 - report, do not crash GTK
             result["detail"] = f"exception: {exc!r}"
