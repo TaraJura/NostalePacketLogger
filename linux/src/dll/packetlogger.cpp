@@ -25,6 +25,13 @@ constexpr char kRecvMask[] = "x????xxxx????xx?xx?xx?xx";
 constexpr char kSendPattern[] = "\xeb\x00\xeb\x00\x39\x19\x8b\xd6";
 constexpr char kSendMask[] = "x?x?xxxx";
 
+// The `u_s` builder calls the lower-level send function here, with the
+// finished packet in ECX. The normal send hook is a different wrapper and
+// does not see client skill packets.
+constexpr char kSkillPattern[] =
+    "\xBA\x40\xD6\x72\x00\xE8\x00\x00\x00\x00\x8B\xD8\x84\xDB\x74";
+constexpr char kSkillMask[] = "xxxxxx????xxxxx?";
+
 constexpr char kTntPattern[] =
     "\xA1\x00\x00\x00\x00\x8B\x00\xE8\x00\x00\x00\x00\xA1\x00\x00\x00"
     "\x00\x8B\x00\x33\xD2\x89\x10";
@@ -38,6 +45,7 @@ std::atomic<bool>    g_enabled{false};
 
 std::uint8_t g_recv_original[5] = {0};
 std::uint8_t g_send_original[6] = {0};
+std::uint8_t g_skill_original[5] = {0};
 void*        g_trampoline_mem = nullptr;
 
 }  // namespace
@@ -46,6 +54,7 @@ extern "C" {
 std::uintptr_t ntpl_recv_original_call = 0;
 std::uintptr_t ntpl_recv_jmp_back = 0;
 std::uintptr_t ntpl_send_trampoline = 0;
+std::uintptr_t ntpl_skill_original_call = 0;
 std::uintptr_t ntpl_tnt_client = 0;
 std::uintptr_t ntpl_send_addr = 0;
 
@@ -139,6 +148,27 @@ bool initialize(Queue* recv, Queue* send, Status& status) {
         }
     }
 
+    // ---- skill packet: capture the client's own `u_s` builder call site ----
+    const std::uintptr_t skill_hint =
+        Memory::FindPattern(kSkillPattern, kSkillMask);
+    if (skill_hint != 0) {
+        const std::uintptr_t call_addr = skill_hint + 5;
+        const std::int32_t relative =
+            *reinterpret_cast<const std::int32_t*>(call_addr + 1);
+        const std::uintptr_t target =
+            call_addr + 5 + static_cast<std::uintptr_t>(
+                               static_cast<std::intptr_t>(relative));
+        // Stay inside the game image; the send wrapper is around 0x4EB610.
+        if (target >= 0x00400000 && target < 0x01400000) {
+            g_status.skill_found = true;
+            g_status.skill_addr = call_addr;
+            ntpl_skill_original_call = target;
+            std::memcpy(g_skill_original,
+                        reinterpret_cast<const void*>(call_addr),
+                        sizeof(g_skill_original));
+        }
+    }
+
     // ---- the TNTClient global used by the send path ------------------------
     const std::uintptr_t tnt = Memory::FindPattern(kTntPattern, kTntMask);
     if (tnt != 0) {
@@ -171,7 +201,15 @@ bool install_hooks(Status& status) {
         ok = ok && g_status.send_hooked;
     }
 
-    g_enabled.store(g_status.recv_hooked || g_status.send_hooked,
+    if (g_status.skill_found && ntpl_skill_original_call != 0) {
+        g_status.skill_hooked = Memory::Hook(
+            reinterpret_cast<void*>(g_status.skill_addr),
+            reinterpret_cast<void*>(&ntpl_hook_skill), 5);
+        ok = ok && g_status.skill_hooked;
+    }
+
+    g_enabled.store(g_status.recv_hooked || g_status.send_hooked ||
+                        g_status.skill_hooked,
                     std::memory_order_release);
     status = g_status;
     return ok;
@@ -190,6 +228,12 @@ void remove_hooks() {
         Memory::Patch(reinterpret_cast<void*>(g_status.send_addr),
                       g_send_original, sizeof(g_send_original));
         g_status.send_hooked = false;
+    }
+
+    if (g_status.skill_hooked) {
+        Memory::Patch(reinterpret_cast<void*>(g_status.skill_addr),
+                      g_skill_original, sizeof(g_skill_original));
+        g_status.skill_hooked = false;
     }
 
     // Deliberately keep the trampoline allocated until the process exits.

@@ -14,10 +14,13 @@ using Queue = ntpl::PacketQueue<4096, 2048>;
 struct Status {
     bool           recv_found = false;
     bool           send_found = false;
+    bool           skill_found = false;
     bool           recv_hooked = false;
     bool           send_hooked = false;
+    bool           skill_hooked = false;
     std::uintptr_t recv_addr = 0;
     std::uintptr_t send_addr = 0;
+    std::uintptr_t skill_addr = 0;
     std::uintptr_t tnt_client = 0;
 };
 
@@ -51,11 +54,13 @@ std::uint32_t send_dropped();
 extern "C" {
 void ntpl_hook_recv();
 void ntpl_hook_send();
+void ntpl_hook_skill();
 void ntpl_game_send(char* packet);
 
 extern std::uintptr_t ntpl_recv_original_call;
 extern std::uintptr_t ntpl_recv_jmp_back;
 extern std::uintptr_t ntpl_send_trampoline;
+extern std::uintptr_t ntpl_skill_original_call;
 extern std::uintptr_t ntpl_tnt_client;
 extern std::uintptr_t ntpl_send_addr;
 }

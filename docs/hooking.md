@@ -115,6 +115,47 @@ deliberate: it is the smallest overwrite that lands on an instruction boundary
 and is at least 5 bytes (the size of `E9 rel32`). `Memory::Hook` fills the
 remaining byte with `0x90` before writing the jump.
 
+## The skill packet hook
+
+The client's `u_s` skill builder calls a lower-level send function at
+`0x4EB610`; the normal send hook is a different wrapper and does not see those
+packets. To capture the client's own skill packets, the DLL hooks the 5-byte
+call site inside the builder:
+
+```
+72D5A3  mov ecx, [ebp-0x14]      ; finished `u_s ...` string
+72D5A7  mov eax, [0x7946A0]
+72D5AD  mov edx, 0x72D640        ; "u_s"
+72D5B2  call 0x4EB610            ; <-- hooked call
+```
+
+The pattern is `BA 40 D6 72 00 E8 ?? ?? ?? ?? 8B D8 84 DB 74 ?`; the call
+target is decoded from the rel32 and must point inside the game image. The stub
+reads the packet pointer from the saved **ECX** (`pushal` layout offset +24),
+queues it through `ntpl_on_packet_send`, replays the original call and returns
+to the instruction after the call site:
+
+```asm
+_ntpl_hook_skill:
+    pushfl
+    pushal
+    movl    %esp, %ebp
+    andl    $-16, %esp
+    subl    $12, %esp
+    pushl   24(%ebp)            # saved ECX = packet pointer
+    call    _ntpl_on_packet_send
+    movl    %ebp, %esp
+    popal
+    popfl
+    call    *_ntpl_skill_original_call
+    ret
+```
+
+The status line reports it as `skill=ACTIVE` (or `NOT-FOUND` after a patch).
+Use this hook to learn the client's exact `u_s` field order and skill vnums
+from a real manual cast; injected `u_s` packets are still logged as
+`MANUAL_SEND`.
+
 ## Sending a packet into the game
 
 `send_packet` builds a Delphi-style string (see below) and calls the game's own

@@ -33,13 +33,14 @@ std::string status_line() {
     std::snprintf(
         buffer, sizeof(buffer),
         "STATUS|ntpl %s | recv=0x%08lX send=0x%08lX tnt=0x%08lX | "
-        "hooks recv=%s send=%s | drops recv=%lu send=%lu",
+        "hooks recv=%s send=%s skill=%s | drops recv=%lu send=%lu",
         ntpl::kVersion,
         static_cast<unsigned long>(st.recv_addr),
         static_cast<unsigned long>(st.send_addr),
         static_cast<unsigned long>(st.tnt_client),
         hook_state(st.recv_found, st.recv_hooked),
         hook_state(st.send_found, st.send_hooked),
+        hook_state(st.skill_found, st.skill_hooked),
         static_cast<unsigned long>(packetlogger::recv_dropped()),
         static_cast<unsigned long>(packetlogger::send_dropped()));
 

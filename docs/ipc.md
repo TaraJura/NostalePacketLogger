@@ -65,7 +65,8 @@ build reported, so a host can parse it or just display it:
 - `ntpl <version>`
 - `recv=0x... send=0x... tnt=0x...` — resolved addresses; `0x00000000` means
   the signature was not found
-- `hooks recv=ACTIVE|FAILED|NOT-FOUND send=...`
+- `hooks recv=ACTIVE|FAILED|NOT-FOUND send=... skill=...` — the skill hook
+  captures the client's own `u_s` builder output
 - `drops recv=<n> send=<n>`
 
 ### Movement commands

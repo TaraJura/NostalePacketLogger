@@ -69,6 +69,29 @@ _ntpl_hook_send:
     popfl
     jmp     *_ntpl_send_trampoline
 
+/* --------------------------------------------------------------- skill ---
+ * The client's skill packet builder calls its lower-level send function at
+ * 0x72D5B2 with the finished `u_s ...` string in ECX. Hooking that call site
+ * captures the client's own skill packet (the normal send hook is a different
+ * wrapper and does not see it). Replay the original call, then return to the
+ * instruction after the call site.
+ */
+    .globl _ntpl_hook_skill
+    .def   _ntpl_hook_skill; .scl 2; .type 32; .endef
+_ntpl_hook_skill:
+    pushfl
+    pushal
+    movl    %esp, %ebp
+    andl    $-16, %esp
+    subl    $12, %esp
+    pushl   24(%ebp)                /* saved ECX = packet pointer */
+    call    _ntpl_on_packet_send
+    movl    %ebp, %esp
+    popal
+    popfl
+    call    *_ntpl_skill_original_call
+    ret
+
 /* ------------------------------------------------------------ game send --
  * void ntpl_game_send(char* packet)
  *
