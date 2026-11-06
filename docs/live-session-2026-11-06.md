@@ -492,7 +492,7 @@ shortcut and the no-corner-cutting rule.
   watched on the first live run.
 
 
-### Live feature pass (late, ~22:47–22:56)
+### Live feature pass (late, ~22:47–23:36)
 
 A full live pass was run against character 14881134 on map 20, with the GUI
 stopped so the test harness could own the DLL host. The character started at
@@ -509,15 +509,22 @@ restarted or killed.
 | Spell slot 9 | `u_s 9 1 14881134` → `su 1 14881134 1 14881134 875 …` (Blessing); MP 4401 → 4251 (150 cost). |
 | Spell slot 7 | `u_s 7 1 14881134` → `su … 873` (Group Healing); HP 2761 → 3209 (full). |
 | Spell slot 1 | `u_s 1 1 14881134` (Healing 867) → `cancel 0 1 -1`; 867 is not self-castable. The picker heuristic was fixed to default only Skill.dat target type 1 to Self. |
-| Bot combo | Path (49,187)→(52,187), Auto-attack + Move first + Pickup on, Auto-recover off, rule Mana Shield 869 Always/Self. The bot cast `u_s 3 1 14881134` → `su … 869` (MP -300), then `MOVE 52 187` → client `walk 52 187`. |
+| Bot combo (path + spell) | Path (49,187)→(52,187), Auto-attack + Move first + Pickup on, Auto-recover off, rule Mana Shield 869 Always/Self. The bot cast `u_s 3 1 14881134` → `su … 869` (MP -300), then `MOVE 52 187` → client `walk 52 187`. |
+| Bot combo (filter + attack) | No path, target mode Only selected vnum 200, Auto-attack/Retaliate/Move first/Pickup on, Auto-recover 75 %, rule Mana Shield 869. It cast 869, then attacked only entity 5030 (`su … 3 5030 866 …` three times); other monsters were ignored. |
+| Pickup | The turtle dropped item 5965 (drop 16830502, owner 14881134) at (46,187): `get 1 14881134 16830502` → `get … 0`, `ivn`/`sayi` confirmation. |
 | Out-of-range guard | Earlier live packet: bot targeted 5087 at 35+ cells and the server answered self-target; fixed to cap basic attacks at the scanned skill range and covered by a smoke. |
 
-The character was healed back to full HP with **Group Healing 873** after the
-combination test (the user’s “don’t die” instruction); no combat was left running.
+**Safety incident:** the filter/attack combo ran for 9 s and was stopped while
+the turtle was still hitting. Stopping the bot does not disengage, and HP fell
+from 3209 to 1177 before a delayed Group Healing 873 cast landed and restored
+3209/3209. The character never died; the lesson is recorded in
+[feature-review-2026-11-06.md](feature-review-2026-11-06.md): finish the target
+or move away before stopping a live bot, and keep a high recovery threshold.
 
-Not exercised live in this pass: a ground-drop pickup (no drop appeared),
-forced low-HP recovery, and a portal crossing (map switching was verified live
-earlier in the day). Their headless smokes pass.
+Not exercised live in this pass: forced low-HP recovery (no safe way without
+risking the character) and a portal crossing (map switching was verified live
+earlier in the day). Their headless smokes pass. The live pickup is now
+verified.
 
 ## Safety
 

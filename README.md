@@ -56,6 +56,8 @@ Start with [docs/architecture.md](docs/architecture.md), then:
   the exact post-reboot reinjection + auto-attack test procedure
 - [docs/live-session-2026-11-06.md](docs/live-session-2026-11-06.md) — what was
   verified on the running client, the bugs fixed and the open items
+- [docs/feature-review-2026-11-06.md](docs/feature-review-2026-11-06.md) —
+  feature inventory, test coverage and live combination results
 - [docs/hooking.md](docs/hooking.md) — how the detours, patterns and assembly
   stubs work, and how to repair them after a client patch
 - [docs/ipc.md](docs/ipc.md) — the TCP message protocol

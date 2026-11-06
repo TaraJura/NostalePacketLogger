@@ -8,6 +8,7 @@
 | [bot-config.md](bot-config.md) | monster target filters, conditional spell rules, JSON export/import |
 | [handoff-2026-11-06.md](handoff-2026-11-06.md) | **read after a reboot**: current state, why Gameforge shows "Ve hře", exact reinjection + auto-attack test procedure |
 | [live-session-2026-11-06.md](live-session-2026-11-06.md) | what was verified on the running client, the bugs fixed, the mechanics learned, open items |
+| [feature-review-2026-11-06.md](feature-review-2026-11-06.md) | feature inventory, automated coverage and the live combination-test matrix |
 | [hooking.md](hooking.md) | you need to understand or repair the in-game detours, signatures, assembly stubs, packet injection |
 | [ipc.md](ipc.md) | you are writing a host, a bot, or another front end and need the wire protocol |
 | [linux.md](linux.md) | you are building or running the Linux/Wine side |

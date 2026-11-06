@@ -151,8 +151,8 @@ PYTHONPATH=linux/host python3 -m ntpl status
   is a bigger dot + a facing arrow from the last `walk` delta (the protocol has
   no own-facing packet).
 - **Docs**: `docs/architecture.md`, `docs/engine.md`, `docs/map.md`,
-  `docs/bot-config.md`, `docs/live-session-2026-11-06.md`, `docs/hooking.md`,
-  `docs/ipc.md`,
+  `docs/bot-config.md`, `docs/live-session-2026-11-06.md`,
+  `docs/feature-review-2026-11-06.md`, `docs/hooking.md`, `docs/ipc.md`,
   `docs/linux.md`, `docs/windows.md`, `docs/development.md`,
   `docs/roadmap.md`, `docs/troubleshooting.md`; packet wiki in
   `docs/protocol/`.
