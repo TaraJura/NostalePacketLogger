@@ -220,6 +220,12 @@ follows the equipped SP card, whose vnum is learned from `u_s 0` + `su`.
 the skill's own range. The **Targets** list shows the monster vnums currently
 spawned on the loaded map (plus selected entries marked "not on this map"),
 not the 2,795-entry catalog, so the list matches what is around the character.
+The map header has a **Map id** box + **Set** (also `gui --map-id ID`): when
+no `c_map`/`at` has been seen, position-only detection is a guess (monsters
+may stand on blocked cells and several maps can fit the same local cloud), so
+a typed id is honoured until the server sends one; the label shows `· auto`
+for a guess and `· manual` for a typed id. With no id the canvas stays blank
+and the info says "waiting for the game…" rather than showing a default map.
 The sidebar also owns the bot configuration:
 
 - `monsternames.py` — `vnum → monster name` and skill descriptions from
