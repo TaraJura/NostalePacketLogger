@@ -166,7 +166,8 @@ grouped by function:
   "Portal → map N" tooltip and persisted in `~/.config/ntpl/portals.json`.
   Right after `gp` the server sends the map's **Time-Space entrances** as
   `wp <x> <y> <tsId> <flag> <minLv> <maxLv>`; each is drawn as the nosapki
-  Time-Space stone in a gold frame, tooltip "Time-Space 16 · Lv 26-99".
+  Time-Space stone in a gold frame, with the client's own tooltip wording:
+  "Time-Space Stone / Required Level 26".
   Live map 4 has all eight: TS 16, 17, 18, 19, 20, 21, 22 and 704; map 3 has
   TS 5, 6, 10, 11, 12, 13. A `gp` destination in the 2xxx range is a
   Time-Space **instance map** gate (e.g. map 4's `(224,103)→2110`,
@@ -399,8 +400,9 @@ is sent and the status says “not attacking”. See
   <maxLv>` follows the `gp` list. Map 4 has the complete set (TS 16, 17, 18,
   19, 20, 21, 22, 704) at the golden-circle positions, matching nosapki's
   list and level ranges; map 3 has TS 5, 6, 10, 11, 12, 13. They are drawn
-  with the nosapki stone icon and a tooltip with the TS id and level range,
-  so no guessing or manual entry is involved.
+  with the nosapki stone icon; the tooltip uses the client's own wording,
+  "Time-Space Stone / Required Level N", with no position or id. No guessing
+  or manual entry is involved.
 - The basic skill follows the equipped SP card: `u_s 0` was answered with
   `su ... 260 ...` (Energy Bolt, range 6/cast 0.8 s/CD 0.5 s/0 MP) and later
   with `su ... 855 ...` (Fire Bolt, 40 MP) after a card change; the Combat box

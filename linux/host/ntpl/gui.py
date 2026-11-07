@@ -2726,15 +2726,14 @@ class Application(Gtk.Application):
         for (map_id, tx, ty), entry in self.timespaces.items():
             if map_id != self.map_grid.map_id:
                 continue
-            ts_id, min_level, max_level = entry
+            _ts_id, min_level, _max_level = entry
             cx, cy = self._map_cell_screen(tx, ty)
             distance = math.hypot(x - cx, y - cy)
             if distance <= radius and (best is None or distance < best[0]):
+                # Same wording as the client's own tooltip on the stone.
                 best = (
                     distance,
-                    f"Time-Space {ts_id}\n"
-                    f"Level {min_level}-{max_level}\n"
-                    f"position {tx}, {ty}",
+                    f"Time-Space Stone\nRequired Level {min_level}",
                 )
 
         for (portal_map, px, py), destination in self.portals.items():
