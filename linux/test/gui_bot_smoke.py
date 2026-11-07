@@ -161,8 +161,6 @@ def main() -> int:
             app.loop_toggle.set_active(False)
             app.auto_attack_toggle.set_active(True)
             # Clear in-range monsters first, then continue the path.
-            app.skill_entry.set_text("0")
-            app.attack_cooldown.set_value(1)
             app.attack_walk_delay = 0.1
             app.walk_timeout = 0.5
             app._start_bot()

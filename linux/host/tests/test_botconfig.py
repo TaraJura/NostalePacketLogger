@@ -46,6 +46,7 @@ class BotConfigTests(unittest.TestCase):
                 "attack_range": 999,
                 "attack_cooldown": -5,
                 "low_hp_pct": 500,
+                "low_mp_pct": 500,
                 "monster_mode": "weird",
                 "monster_vnums": ["206", "x", -1, 0],
                 "spell_rules": [
@@ -63,6 +64,7 @@ class BotConfigTests(unittest.TestCase):
         self.assertEqual(config.attack_range, 40)
         self.assertEqual(config.attack_cooldown, 0.0)
         self.assertEqual(config.low_hp_pct, 90.0)
+        self.assertEqual(config.low_mp_pct, 90.0)
         self.assertEqual(config.monster_mode, "all")
         self.assertEqual(config.monster_vnums, [206])
         rule = config.spell_rules[0]

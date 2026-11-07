@@ -40,3 +40,5 @@ run gui_spell_order_smoke.py
 run gui_out_of_range_smoke.py
 run gui_bot_reject_smoke.py
 run gui_recover_smoke.py
+run gui_recover_mp_smoke.py
+run gui_recover_fight_smoke.py

@@ -3,9 +3,10 @@
 The live 2026-11-06 late session showed the bot sending `u_s 0 3 5087` at a
 bee 38 cells away while the UI Range was large enough to select it; the client
 played the attack animation at empty space and the server reported a
-self-target. The scanned basic skill (866) has range 11, so this smoke sets
-UI Range 40 and places the monster 35 cells away. The bot must select it,
-send a MOVE toward it and send no ncif/u_s from where it stands.
+self-target. The scanned basic skill (866) has range 11; targets are
+acquired up to 15 cells, so this smoke places the monster 12 cells away,
+just outside the skill's range. The bot must select it, send a MOVE toward
+it and send no ncif/u_s from where it stands.
 
 Run through scripts/dev-test-bot.sh (Xvfb).
 """
@@ -48,7 +49,7 @@ class FakeServer:
             b"RECV|rest 1 14881134 0\n"
             b"RECV|ski 0 866 866 866 867 868 869 870 871 872 873 "
             b"874 875 876\n"
-            b"RECV|in 3 204 5087 60 147 2 100 100 0\n"
+            b"RECV|in 3 204 5087 13 105 2 100 100 0\n"
         )
         buffer = b""
         while not self.stop.is_set():
@@ -95,9 +96,6 @@ def main() -> int:
             app.path_cells = []
             app.auto_attack_toggle.set_active(True)
             app.retaliate_toggle.set_active(False)
-            app.skill_entry.set_text("0")
-            app.attack_range.set_value(40)  # UI range is larger than 866
-            app.attack_cooldown.set_value(1)
             app._start_bot()
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"start exception: {exc!r}"

@@ -22,7 +22,7 @@ shared: the transport differs, the game's packets do not.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 119 Python unit tests
+make -C linux host-test                      # 123 Python unit tests
 make -C linux gui-test                       # headless GTK4 + map smoke (xvfb)
 make -C linux bot-test                       # 6 fake-server bot smokes
 
@@ -80,7 +80,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 119 unit tests pass, the GTK4 window and six bot
+The Linux port builds, its 123 unit tests pass, the GTK4 window and eight bot
 smoke tests pass, and the real injector has been run against the **live
 NosTale client** under Wine 11:
 
@@ -114,7 +114,7 @@ The GTK4 **Map / Bot** tab renders the map (automatic map switch on `c_map`),
 takes click waypoints, computes an **8-direction A\*** path (diagonals, no
 corner cutting, continuous polyline), and can loop it while auto-attacking
 monsters (Retaliate picks the one hitting you), picking up drops, and sitting
-to recover below a configurable HP %. It shows live HP/MP bars plus a red
+to recover below configurable HP/MP % thresholds (after finishing the current kill). It shows live HP/MP bars plus a red
 recovery banner, green/red active toggles, hover tooltips with monster names
 from the client's language archive, server-sent portals (`gp`) and Time-Space
 entrances (`wp`, with the nosapki stone icon and the client's own "Required

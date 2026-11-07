@@ -192,11 +192,11 @@ grouped by function:
   The own marker follows the DLL's real player position (`POS`, polled twice
   a second), not the walk packet's destination, so the dot tracks the
   actual movement instead of jumping ahead.
-- **Combat** — Auto-attack, Retaliate, Skill, Search (target
-  radius), Min delay (0 = use the skill's own cooldown) and the skill
-  template. The line under Skill shows the
-  selected skill's Skill.dat range/cast/cooldown/MP; Skill `0` follows the
-  equipped SP card (the server reports its vnum for `u_s 0`).
+- **Combat** — Auto-attack and Retaliate, plus one info line with the
+  detected basic skill's Skill.dat range/cast/cooldown/MP (slot 0 follows the
+  equipped SP card; the server reports its vnum for `u_s 0`). There are no
+  Skill / Search / Min delay / template controls: the bot always uses slot 0,
+  the skill's own range and cooldown, and acquires targets within 15 cells.
 - **Targets** — monster filter: all monsters, only the selected templates, or
   all except the selected ones. Search the client's monster table by name or
   vnum, or add a vnum manually. **Also attack monsters with unknown vnum**
@@ -206,9 +206,10 @@ grouped by function:
   `NSgtdData.NOS` → `Skill.dat` (name, vnum, MP, target, cooldown). Rules are
   ordered 1., 2., … and can use **Always**, My HP % or My MP %; the first rule
   that is off cooldown, in range and affordable wins. Always + cooldowns forms
-  a rotation. Otherwise the **Skill** in Combat is the fallback.
+  a rotation. Otherwise the equipped SP card's basic attack (slot 0) is the
+  fallback.
 - **Loot** — Pickup and loot radius.
-- **Recovery** — Auto-recover and the low-HP threshold.
+- **Recovery** — Auto-recover HP/MP and the low-HP/MP thresholds.
 - **Configuration** — Save/Load the whole bot configuration as JSON.
 
 See [bot-config.md](bot-config.md) for the target filter, spell-rule semantics
@@ -223,12 +224,13 @@ The packet **Follow** toggle lives in the Packets tab, not in the window header.
 
 | Control | Effect |
 |---|---|
+| Auto-attack | attack the nearest allowed monster (Retaliate priority) with the equipped SP card's basic skill (slot 0); no skill/range/delay knobs — Skill.dat drives the pace |
 | Retaliate | attack the monster that most recently hit you first, if in range |
-| Auto-recover | below the HP threshold, sit and wait for full HP, then stand |
-| Below HP % | recovery threshold (default 30) |
+| Auto-recover HP | below the HP threshold, sit and wait for full HP, then stand (after finishing the current kill) |
+| Below HP % | HP recovery threshold (default 30) |
+| Auto-recover MP | below the MP threshold, sit and wait for full MP, then stand (after finishing the current kill) |
+| Below MP % | MP recovery threshold (default 30) |
 | Pickup / Loot | pick up your own/unowned drops within the radius |
-| Skill | skill vnum (default **0** = the equipped SP card's basic attack; the client sends `u_s 0 3 <monster>` and the server reports the card's skill in `su`, e.g. 260 Energy Bolt or 855 Fire Bolt) |
-| Range / Cooldown | attack radius and seconds between attacks |
 | Loop | repeat the path when it finishes |
 | Targets | all / only selected / all except selected monster templates (`vnum`); Retaliate respects the same filter |
 | Spell rule | scanned spell + Always/My HP/My MP + below/above + cooldown + Monster/Self target; ordered top to bottom; static MP/range/cooldown checks from Skill.dat |
@@ -258,12 +260,15 @@ honest source.
 
 ## Bot loop
 
-`_bot_tick` runs on the GTK main loop every 200 ms:
+`_bot_tick` runs on the GTK main loop every 50 ms:
 
-1. **Recovery** — if Auto-recover is on and HP is below the threshold, stop
-   the current walk, sit (`rest 1 1 <charId>` unless already sitting) and wait.
-   No attack, pickup or movement happens until HP is full; then the bot stands
-   (`rest`) and resumes the path. `stat` is the source of HP/MP.
+1. **Recovery** — if Auto-recover HP/MP is on and HP or MP is below its
+   threshold, the bot first finishes the monster it is currently hitting (if
+   the target is alive and still in range); only then does it stop the walk,
+   sit (`rest 1 1 <charId>` unless already sitting) and wait. No attack,
+   pickup or movement happens until every resource that triggered recovery is
+   full; then the bot stands (`rest`) and resumes. `stat` is the source of
+   HP/MP.
 2. **Stand up** if `WorldState.resting` is true and the char id is known:
    `rest 1 1 <charId>` (the server toggles sit/stand; sitting blocks movement).
 3. **Pick up** if enabled and a drop owned by you (or unowned) is within the
@@ -274,9 +279,9 @@ honest source.
    path: while any allowed monster is within attack range the bot stays and
    keeps attacking (the skill's cast time and cooldown pace it); when none is
    left it takes the next path leg. With no path, Start runs stationary
-   combat, pickup and recovery, and an out-of-range target is chased on foot
-   (one A* leg at a time) until it is in range — the game's
-   click-a-monster behaviour.
+   combat, pickup and recovery. Targets are acquired within 15 cells; a
+   monster outside the skill's own range is chased on foot (one A* leg at a
+   time) until it is in range — the game's click-a-monster behaviour.
    Target choice: with **Retaliate** on, first try the most recent `su`
    attacker that hit you (within 5 s); otherwise pick the nearest `kind == 3`
    entity within range. Both paths apply the **Targets** filter.
@@ -288,8 +293,8 @@ honest source.
    enabled rule that is off its per-rule cooldown, has enough MP, has the
    target in spell range and whose condition (Always or HP/MP threshold) is
    true is cast on the monster or on yourself. **Always** plus cooldowns is a
-   rotation. If none matches, the **Skill** from Combat is used (`0` = basic
-   attack). Monster casts first select the monster in the client
+   rotation. If none matches, the equipped SP card's basic attack (slot 0) is
+   used. Monster casts first select the monster in the client
    (`TARGET|id`, which makes the client send its own `ncif 3 <id>`), then send
    `u_s` in the same tick: the DLL handles both commands in order, so the
    selection is applied first. A refusal arrives asynchronously and the
@@ -363,8 +368,8 @@ never sees the `at` packet.
   be resolved is skipped; in "all except selected" it is allowed because it
   cannot be on the exclusion list.
 - Spell rules require **Auto-attack** to be on. The recovery check runs first:
-  below the Auto-recover threshold the bot sits, so a heal rule with a lower
-  threshold never fires while recovery is active. Self-target rules use the
+  below an Auto-recover HP/MP threshold the bot sits, so a heal rule with a
+  lower threshold never fires while recovery is active. Self-target rules use the
   current char id and send `u_s <spell> 1 <charId>`.
 - The spell catalog comes from `NSgtdData.NOS` → `Skill.dat`; names/descriptions
   come from `_code_<lang>_Skill.txt` through the record's `NAME` key. The
@@ -389,9 +394,9 @@ never sees the `at` packet.
 ## Tests
 
 ```bash
-make -C linux host-test   # 119 cases incl. synthetic NOS, 8-way A*, checksum, config
+make -C linux host-test   # 123 cases incl. synthetic NOS, 8-way A*, checksum, config
 make -C linux gui-test    # GUI + map surface + tooltips + unknown-position guard
-make -C linux bot-test    # 6 fake-server smokes: combat, rules, spell order, out-of-range, rejection, recovery
+make -C linux bot-test    # 8 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP recovery, finish-kill recovery
 ```
 
 The bot test sends a fake player at (25,117) on map 20, a monster at

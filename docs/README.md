@@ -28,7 +28,7 @@ the host differ, the game's packets do not.
 - **Windows tree (`windows/`)** — the original working implementation. Injector
   + DLL + WinForms GUI, named pipes.
 - **Linux tree (`linux/`)** — MinGW DLL + TCP loopback + Python CLI + GTK4 GUI
-  + state engine. Builds cleanly, **119 host tests pass**, the GTK4 window
+  + state engine. Builds cleanly, **123 host tests pass**, the GTK4 window
   passes a headless smoke test, and the DLL has been verified against the
   **live NosTale client** under Wine 11: both hooks ACTIVE, drops 0,
   sit/stand via `rest`, and natural movement through the client's own MoveTo
@@ -43,8 +43,8 @@ the host differ, the game's packets do not.
   walkable cells. The GTK4 Map/Bot tab renders the whole map (auto-switches
   from `c_map`), draws **8-direction A\*** paths as a continuous polyline,
   runs a path loop and can auto-attack monsters (Retaliate prioritises the
-  one hitting you), pick up drops, and sit to recover below a configurable
-  HP %. Attacks first select the monster **in the client** (`TARGET|id`, which
+  one hitting you), pick up drops, and sit to recover below configurable
+  HP/MP % thresholds. Attacks first select the monster **in the client** (`TARGET|id`, which
   sends the client's own `ncif`), because the server validates `u_s` against
   that selection. Server-sent `gp` portals and `wp` Time-Space entrances are
   drawn on the map. A third **Bot log** tab records every action with a
@@ -54,6 +54,7 @@ the host differ, the game's packets do not.
   scanned from `NSgtdData.NOS` → `Skill.dat` (Always/HP/MP conditions, MP,
   range, cast time, cooldown); the whole configuration can be saved/loaded as
   JSON. `make gui-test` and `make
-  bot-test` pass (6 bot smokes, including the spell rotation). See
+  bot-test` pass (8 bot smokes, including the spell rotation, HP/MP recovery
+  and finish-kill-before-recovery). See
   [map.md](map.md) and
   [bot-config.md](bot-config.md).

@@ -75,7 +75,7 @@ one byte per cell; `0x00` walkable). Live maps so far include **2, 3, 4, 20,
 - Monster names come from the client's `NSlangData_UK.NOS`; the spawn log
   backfills vnums for entities that predate the host connection.
 
-`make gui-test` and the six `make bot-test` smokes pass. The live run verified
+`make gui-test` and the eight `make bot-test` smokes pass. The live run verified
 `MOVE`, client-side selection (`TARGET|id` → client `ncif` → `su` for the
 selected id), pickup and map switching. Server-sent `gp` portals and `wp`
 Time-Space entrances are drawn on the map, and a **Bot log** tab keeps a

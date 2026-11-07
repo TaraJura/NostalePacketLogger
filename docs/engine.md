@@ -259,7 +259,7 @@ The sidebar also owns the bot configuration:
 The bot loop:
 
 - stand up with `rest` when sitting;
-- recover below the configured HP % (sit, wait for full, stand);
+- recover below the configured HP % or MP % (finish the current kill, sit, wait until full, stand);
 - pick up your own/unowned drops in the loot radius (`get 1 <charId>
   <dropId>`);
 - evaluate ordered spell rules from the scanned Skill.dat catalog (Always or

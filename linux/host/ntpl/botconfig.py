@@ -18,6 +18,8 @@ Schema (version 1)::
       "loot_range": 3,
       "recover": true,
       "low_hp_pct": 30,
+      "recover_mp": true,
+      "low_mp_pct": 30,
       "loop": true,
       "monster_mode": "only",       # all | only | except
       "monster_vnums": [200, 206],
@@ -112,6 +114,8 @@ class BotConfig:
     loot_range: int = 3
     recover: bool = True
     low_hp_pct: float = 30.0
+    recover_mp: bool = True
+    low_mp_pct: float = 30.0
     loop: bool = True
     monster_mode: str = "all"
     monster_vnums: list[int] = field(default_factory=list)
@@ -131,6 +135,8 @@ class BotConfig:
             "loot_range": self.loot_range,
             "recover": self.recover,
             "low_hp_pct": self.low_hp_pct,
+            "recover_mp": self.recover_mp,
+            "low_mp_pct": self.low_mp_pct,
             "loop": self.loop,
             "monster_mode": self.monster_mode,
             "monster_vnums": sorted(set(self.monster_vnums)),
@@ -177,6 +183,8 @@ class BotConfig:
             loot_range=_as_int(data.get("loot_range"), 3, 1, 10),
             recover=_as_bool(data.get("recover"), True),
             low_hp_pct=_as_float(data.get("low_hp_pct"), 30.0, 5.0, 90.0),
+            recover_mp=_as_bool(data.get("recover_mp"), True),
+            low_mp_pct=_as_float(data.get("low_mp_pct"), 30.0, 5.0, 90.0),
             loop=_as_bool(data.get("loop"), True),
             monster_mode=mode if mode in MONSTER_MODES else "all",
             monster_vnums=sorted(set(vnums)),

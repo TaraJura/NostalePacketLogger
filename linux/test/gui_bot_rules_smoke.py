@@ -126,8 +126,6 @@ def main() -> int:
             app.path_cells = []
             app.auto_attack_toggle.set_active(True)
             app.retaliate_toggle.set_active(False)
-            app.skill_entry.set_text("0")
-            app.attack_cooldown.set_value(10)
             app.target_mode.set_selected(1)  # only selected
             app.target_vnums = {200}
             app._update_target_info()
@@ -158,7 +156,22 @@ def main() -> int:
             )
             has_spell = any(line == "SEND|u_s 1 3 500" for line in lines)
             ignored_other = not any("501" in line for line in lines)
-            no_basic = not any(line.startswith("SEND|u_s 0 ") for line in lines)
+            spell_index = next(
+                (i for i, line in enumerate(lines)
+                 if line == "SEND|u_s 1 3 500"),
+                None,
+            )
+            basic_index = next(
+                (i for i, line in enumerate(lines)
+                 if line.startswith("SEND|u_s 0 ")),
+                None,
+            )
+            # The rule must win first; a basic follow-up after its cooldown is
+            # fine (and desirable for DPS).
+            spell_first = (
+                spell_index is not None
+                and (basic_index is None or spell_index < basic_index)
+            )
 
             condition_ok = (
                 app._spell_condition_met(
@@ -227,14 +240,14 @@ def main() -> int:
             unknown_ok = unknown_off and unknown_on
 
             saved = app._save_config_to(temp_path)
-            app.attack_range.set_value(5)
+            app.low_hp_pct.set_value(55)
             app.target_vnums = set()
             app._clear_spell_rules()
             loaded = app._load_config_from(temp_path)
             config_ok = (
                 saved
                 and loaded
-                and app.attack_range.get_value() == 10
+                and app.low_hp_pct.get_value() == 30
                 and app.target_mode.get_selected() == 1
                 and app.target_vnums == {200}
                 and len(app.spell_rows) == 1
@@ -295,7 +308,7 @@ def main() -> int:
                 has_target
                 and has_spell
                 and ignored_other
-                and no_basic
+                and spell_first
                 and condition_ok
                 and self_target_ok
                 and always_ok
@@ -311,7 +324,7 @@ def main() -> int:
             )
             result["detail"] = (
                 f"target={has_target} spell={has_spell} "
-                f"ignored_other={ignored_other} no_basic={no_basic} "
+                f"ignored_other={ignored_other} spell_first={spell_first} "
                 f"conditions={condition_ok} self={self_target_ok} "
                 f"always={always_ok} slots={slot_ok} "
                 f"catalog={catalog_ok} "

@@ -99,6 +99,11 @@ AUTO_MAP_POINTS = 512
 # The server ignores a walk sent during the skill animation. The bot attacks,
 # then waits this long before it sends the next path step.
 ATTACK_WALK_DELAY = 0.4
+#: Target acquisition radius when the Combat search field is gone; the
+#: equipped skill's own range is used when it is larger.
+ATTACK_SEARCH_CELLS = 15
+DEFAULT_SKILL_TEMPLATE = "u_s {skill} {type} {target}"
+
 # A walk timed out this many times in a row: the server is rejecting the
 # position (wrong self position, sitting, or an unsettled client). Stop instead
 # of walking further away from the real character.
@@ -247,12 +252,8 @@ class Application(Gtk.Application):
         self.sidebar_scroll = None
         self.narrow_layout = False
         self.map_info = None
-        self.skill_entry = None
-        self.skill_packet_entry = None
         self.combat_info = None
         self._combat_info_text = ""
-        self.attack_range = None
-        self.attack_cooldown = None
         self.mp_warn_at = 0.0
         self.slot_warn_at = 0.0
         self._target_map_vnums: frozenset[int] | None = None
@@ -269,6 +270,7 @@ class Application(Gtk.Application):
         self.draw_path_toggle = None
         self.pickup_toggle = None
         self.recover_toggle = None
+        self.recover_mp_toggle = None
         self.attack_unknown_toggle = None
         self.recover_banner = None
         self.unknown_warn_at = 0.0
@@ -313,7 +315,12 @@ class Application(Gtk.Application):
         self.pickup_attempts: dict[int, int] = {}
         self.pickup_ignored: dict[int, float] = {}
         self.recovering = False
+        self.recover_need_hp = False
+        self.recover_need_mp = False
         self.recover_rest_at = 0.0
+        # The monster the bot is currently hitting; recovery waits until it
+        # dies so a low bar never abandons a half-killed target.
+        self.fight_target_id = None
         # Attack pacing / cancel retry.
         self.last_attack_sent_at = 0.0
         self.last_cancel_count = 0
@@ -732,45 +739,6 @@ class Application(Gtk.Application):
                 self.retaliate_toggle,
             )
         )
-        self.skill_entry = Gtk.Entry()
-        self.skill_entry.set_width_chars(6)
-        # Skill 0 is the equipped SP card's basic attack (`u_s 0 3 <monster>`);
-        # the server reports its vnum in `su` (260 Energy Bolt on the mage).
-        self.skill_entry.set_text("0")
-        self.skill_entry.set_tooltip_text(
-            "skill vnum; mapped to the u_s skill slot when known "
-            "(0 = the SP card's basic attack)"
-        )
-        self.skill_entry.connect(
-            "changed", lambda *_: self._update_combat_info()
-        )
-        self.attack_range = Gtk.SpinButton.new_with_range(1, 40, 1)
-        self.attack_range.set_value(10)
-        self.attack_range.set_tooltip_text(
-            "target search radius in cells; the attack itself is limited by "
-            "the skill's own range (shown below)"
-        )
-        self.attack_cooldown = Gtk.SpinButton.new_with_range(0, 10, 0.1)
-        self.attack_cooldown.set_digits(1)
-        self.attack_cooldown.set_value(0.0)
-        self.attack_cooldown.set_tooltip_text(
-            "extra delay between attacks; 0 = attack as soon as the skill's "
-            "own cooldown and cast time (shown below) allow it"
-        )
-        combat_box.append(
-            self._field_row(
-                Gtk.Label(label="Skill"),
-                self.skill_entry,
-                Gtk.Label(label="Search"),
-                self.attack_range,
-            )
-        )
-        combat_box.append(
-            self._field_row(
-                Gtk.Label(label="Min delay"),
-                self.attack_cooldown,
-            )
-        )
         self.combat_info = Gtk.Label(label="reading Skill.dat…")
         self.combat_info.set_xalign(0)
         self.combat_info.set_wrap(True)
@@ -780,12 +748,6 @@ class Application(Gtk.Application):
             "the bot is using; skill 0 follows the equipped SP card"
         )
         combat_box.append(self.combat_info)
-        self.skill_packet_entry = Gtk.Entry()
-        self.skill_packet_entry.set_text("u_s {skill} {type} {target}")
-        self.skill_packet_entry.set_tooltip_text(
-            "template for auto-attack: {skill}, {type}, {target}"
-        )
-        combat_box.append(self.skill_packet_entry)
         sidebar.append(self._frame("Combat", combat_box))
 
         # Targets: restrict auto-attack to selected monster templates.
@@ -907,10 +869,10 @@ class Application(Gtk.Application):
 
         # Recovery.
         recover_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.recover_toggle = Gtk.ToggleButton(label="Auto-recover")
+        self.recover_toggle = Gtk.ToggleButton(label="Auto-recover HP")
         self.recover_toggle.set_active(True)
         self.recover_toggle.set_tooltip_text(
-            "Below the threshold, sit and wait for full HP"
+            "Below the HP threshold, sit and wait for full HP"
         )
         self._bind_toggle_color(self.recover_toggle)
         self.low_hp_pct = Gtk.SpinButton.new_with_range(5, 90, 5)
@@ -920,6 +882,21 @@ class Application(Gtk.Application):
                 self.recover_toggle,
                 Gtk.Label(label="Below HP %"),
                 self.low_hp_pct,
+            )
+        )
+        self.recover_mp_toggle = Gtk.ToggleButton(label="Auto-recover MP")
+        self.recover_mp_toggle.set_active(True)
+        self.recover_mp_toggle.set_tooltip_text(
+            "Below the MP threshold, sit and wait for full MP"
+        )
+        self._bind_toggle_color(self.recover_mp_toggle)
+        self.low_mp_pct = Gtk.SpinButton.new_with_range(5, 90, 5)
+        self.low_mp_pct.set_value(30)
+        recover_box.append(
+            self._field_row(
+                self.recover_mp_toggle,
+                Gtk.Label(label="Below MP %"),
+                self.low_mp_pct,
             )
         )
         sidebar.append(self._frame("Recovery", recover_box))
@@ -952,7 +929,7 @@ class Application(Gtk.Application):
                 "start point before following the route. Combat selects the "
                 "monster in the client first (target ring), then attacks; it "
                 "picks the one hitting you first (Retaliate), then the "
-                "nearest. Low HP sits until full."
+                "nearest. Low HP/MP sits until full."
             )
         )
         hint.set_xalign(0)
@@ -1284,16 +1261,8 @@ class Application(Gtk.Application):
         """
         if self.combat_info is None:
             return
-        skill = self._entry_int(self.skill_entry, 0)
         if not self.spells_loaded:
             text = "reading Skill.dat…"
-        elif skill > 0:
-            info = self.spells.get(skill)
-            text = (
-                self._combat_stats_text(info)
-                if info is not None
-                else f"skill {skill}: not in Skill.dat"
-            )
         else:
             vnum = self._basic_skill_vnum()
             info = self.spells.get(vnum) if vnum else None
@@ -1972,12 +1941,12 @@ class Application(Gtk.Application):
         )
         self._send(packet)
         self.last_attack_sent_at = now
+        if target_type == 3:
+            self.fight_target_id = target_id
         # The per-rule cooldown (max of the rule and Skill.dat) is enforced in
         # _select_spell_rule; here only the cast animation plus the Min delay
         # floor pace the next action.
-        cooldown = float(self.attack_cooldown.get_value())
-        if info is not None:
-            cooldown = max(cooldown, info.cast_time)
+        cooldown = info.cast_time if info is not None else 0.0
         self.attack_cooldown_until = now + cooldown
         cast_pause = info.cast_time if info is not None else 0.0
         self.walk_not_before = now + max(
@@ -2003,13 +1972,10 @@ class Application(Gtk.Application):
                 self.retaliate_toggle is not None
                 and self.retaliate_toggle.get_active()
             ),
-            skill=self._entry_int(self.skill_entry, 0),
-            skill_template=(
-                self.skill_packet_entry.get_text().strip()
-                or "u_s {skill} {type} {target}"
-            ),
-            attack_range=int(self.attack_range.get_value()),
-            attack_cooldown=float(self.attack_cooldown.get_value()),
+            skill=0,
+            skill_template=DEFAULT_SKILL_TEMPLATE,
+            attack_range=ATTACK_SEARCH_CELLS,
+            attack_cooldown=0.0,
             pickup=bool(
                 self.pickup_toggle is not None
                 and self.pickup_toggle.get_active()
@@ -2020,6 +1986,11 @@ class Application(Gtk.Application):
                 and self.recover_toggle.get_active()
             ),
             low_hp_pct=float(self.low_hp_pct.get_value()),
+            recover_mp=bool(
+                self.recover_mp_toggle is not None
+                and self.recover_mp_toggle.get_active()
+            ),
+            low_mp_pct=float(self.low_mp_pct.get_value()),
             loop=bool(
                 self.loop_toggle is not None
                 and self.loop_toggle.get_active()
@@ -2033,29 +2004,18 @@ class Application(Gtk.Application):
             spell_rules=self._collect_spell_rules(),
         )
 
-    @staticmethod
-    def _entry_int(entry, default: int) -> int:
-        if entry is None:
-            return default
-        try:
-            return int(entry.get_text().strip() or default)
-        except ValueError:
-            return default
-
     def _apply_config(self, config: BotConfig) -> None:
         if self.bot_running:
             self._stop_bot()
         self.auto_attack_toggle.set_active(config.auto_attack)
         self.retaliate_toggle.set_active(config.retaliate)
-        self.skill_entry.set_text(str(config.skill))
-        self.skill_packet_entry.set_text(config.skill_template)
-        self.attack_range.set_value(config.attack_range)
-        self.attack_cooldown.set_value(config.attack_cooldown)
         self._update_combat_info()
         self.pickup_toggle.set_active(config.pickup)
         self.loot_range.set_value(config.loot_range)
         self.recover_toggle.set_active(config.recover)
         self.low_hp_pct.set_value(config.low_hp_pct)
+        self.recover_mp_toggle.set_active(config.recover_mp)
+        self.low_mp_pct.set_value(config.low_mp_pct)
         self.loop_toggle.set_active(config.loop)
 
         mode_index = (
@@ -2278,23 +2238,32 @@ class Application(Gtk.Application):
         if self.recover_banner is not None:
             if self.recovering:
                 stats = world.stats
-                threshold = (
-                    self.low_hp_pct.get_value()
-                    if self.low_hp_pct is not None
-                    else 0
-                )
-                if stats.hp_max > 0:
+                bits = []
+                if self.recover_need_hp and stats.hp_max > 0:
                     percent = 100.0 * stats.hp / stats.hp_max
-                    text = (
-                        f"RECOVERING — HP {percent:.0f}% is below "
-                        f"{threshold:.0f}%. Sitting until full; "
-                        "attacks and movement are paused."
+                    threshold = (
+                        self.low_hp_pct.get_value()
+                        if self.low_hp_pct is not None
+                        else 0
                     )
-                else:
-                    text = (
-                        "RECOVERING — sitting until HP is full; "
-                        "attacks and movement are paused."
+                    bits.append(
+                        f"HP {percent:.0f}% (below {threshold:.0f}%)"
                     )
+                if self.recover_need_mp and stats.mp_max > 0:
+                    percent = 100.0 * stats.mp / stats.mp_max
+                    threshold = (
+                        self.low_mp_pct.get_value()
+                        if self.low_mp_pct is not None
+                        else 0
+                    )
+                    bits.append(
+                        f"MP {percent:.0f}% (below {threshold:.0f}%)"
+                    )
+                detail = " · ".join(bits) if bits else "HP/MP"
+                text = (
+                    f"RECOVERING — {detail}. Sitting until full; "
+                    "attacks and movement are paused."
+                )
                 self.recover_banner.set_text(text)
                 self.recover_banner.set_visible(True)
             else:
@@ -3539,6 +3508,42 @@ class Application(Gtk.Application):
             return False
         return True
 
+    def _finish_kill_first(self) -> bool:
+        """True while a half-killed target is still in attack range.
+
+        Recovery waits for it: a low HP/MP bar must not abandon a fight the
+        bot already started. When the monster dies it leaves the entity list
+        (the `st` death handler) and recovery starts on the next tick.
+        """
+        entity_id = self.fight_target_id
+        if entity_id is None:
+            return False
+        monster = self.engine.world.entities.get(entity_id)
+        if monster is None or monster.kind != 3:
+            return False
+        position = self._player_cell()
+        if position is None:
+            return False
+        distance = max(
+            abs(monster.x - position[0]), abs(monster.y - position[1])
+        )
+        info = self.spells.get(self._basic_skill_vnum() or 0)
+        reach = (
+            float(info.range)
+            if info is not None and info.range > 0
+            else float(ATTACK_SEARCH_CELLS)
+        )
+        if distance > reach:
+            return False
+        if (
+            info is not None
+            and info.mp_cost > 0
+            and self.engine.world.stats.mp < info.mp_cost
+        ):
+            # Cannot cast the next hit anyway: heal now.
+            return False
+        return True
+
     def _target_blocked(self, entity_id: int) -> bool:
         until = self.target_blocked.get(entity_id)
         if until is None:
@@ -3585,6 +3590,8 @@ class Application(Gtk.Application):
                     and self.pickup_toggle.get_active())
                 or (self.recover_toggle is not None
                     and self.recover_toggle.get_active())
+                or (self.recover_mp_toggle is not None
+                    and self.recover_mp_toggle.get_active())
             ):
                 self._set_status("add waypoints or enable combat/pickup")
                 return
@@ -3634,7 +3641,12 @@ class Application(Gtk.Application):
         self.pickup_attempts.clear()
         self.pickup_ignored.clear()
         self.recovering = False
+        self.recover_need_hp = False
+        self.recover_need_mp = False
         self.recover_rest_at = 0.0
+        # The monster the bot is currently hitting; recovery waits until it
+        # dies so a low bar never abandons a half-killed target.
+        self.fight_target_id = None
         # Attack pacing / cancel retry.
         self.last_attack_sent_at = 0.0
         self.last_cancel_count = 0
@@ -3659,6 +3671,9 @@ class Application(Gtk.Application):
             GLib.source_remove(self.bot_timer)
             self.bot_timer = None
         self.recovering = False
+        self.recover_need_hp = False
+        self.recover_need_mp = False
+        self.fight_target_id = None
         self._set_status("bot stopped")
         self._set_path_info("stopped")
 
@@ -3790,14 +3805,8 @@ class Application(Gtk.Application):
         skill: int | str | None = None,
         target_type: int = 3,
     ) -> str:
-        if skill is None:
-            skill = self.skill_entry.get_text().strip() or "0"
-        else:
-            skill = str(skill)
-        template = (
-            self.skill_packet_entry.get_text().strip()
-            or "u_s {skill} {type} {target}"
-        )
+        skill = "0" if skill is None else str(skill)
+        template = DEFAULT_SKILL_TEMPLATE
         try:
             return template.format(
                 skill=skill, type=target_type, target=target_id
@@ -3826,37 +3835,77 @@ class Application(Gtk.Application):
                 self.attack_cooldown_until = now + 0.1
                 self._set_status("attack cancelled; retrying")
 
-        # -- recovery: sit below the configured HP %, wait for full HP -----
-        recover_enabled = (
+        # -- recovery: sit below the configured HP/MP %, wait until full --
+        recover_hp = (
             self.recover_toggle is not None
             and self.recover_toggle.get_active()
         )
-        if (
-            recover_enabled
-            and char_id is not None
-            and world.stats.hp_max > 0
-        ):
-            percent = 100.0 * world.stats.hp / world.stats.hp_max
-            threshold = float(self.low_hp_pct.get_value())
-            if not self.recovering and percent < threshold:
+        recover_mp = (
+            self.recover_mp_toggle is not None
+            and self.recover_mp_toggle.get_active()
+        )
+        hp_max = world.stats.hp_max
+        mp_max = world.stats.mp_max
+        hp_pct = 100.0 * world.stats.hp / hp_max if hp_max > 0 else None
+        mp_pct = 100.0 * world.stats.mp / mp_max if mp_max > 0 else None
+        hp_threshold = float(self.low_hp_pct.get_value())
+        mp_threshold = float(self.low_mp_pct.get_value())
+        hp_low = (
+            recover_hp and hp_pct is not None and hp_pct < hp_threshold
+        )
+        mp_low = (
+            recover_mp and mp_pct is not None and mp_pct < mp_threshold
+        )
+        if (recover_hp or recover_mp) and char_id is not None:
+            if not self.recovering and self.fight_target_id is not None:
+                if self.fight_target_id not in world.entities:
+                    self.fight_target_id = None
+            if not self.recovering and (hp_low or mp_low):
+                if self._finish_kill_first():
+                    # Keep fighting; the next tick after the kill starts
+                    # recovery. Fall through to combat.
+                    hp_low = mp_low = False
+            if not self.recovering and (hp_low or mp_low):
                 self.recovering = True
+                self.recover_need_hp = hp_low
+                self.recover_need_mp = mp_low
                 self.pending_target = None
                 self.attack_cooldown_until = 0.0
-                self._set_status(
-                    f"HP {percent:.0f}% below {threshold:.0f}%; recovering"
-                )
+                reasons = []
+                if hp_low:
+                    reasons.append(
+                        f"HP {hp_pct:.0f}% below {hp_threshold:.0f}%"
+                    )
+                if mp_low:
+                    reasons.append(
+                        f"MP {mp_pct:.0f}% below {mp_threshold:.0f}%"
+                    )
+                self._set_status("; ".join(reasons) + "; recovering")
             if self.recovering:
-                if world.stats.hp >= world.stats.hp_max:
+                was_hp = self.recover_need_hp
+                was_mp = self.recover_need_mp
+                if self.recover_need_hp and (
+                    hp_max <= 0 or world.stats.hp >= hp_max
+                ):
+                    self.recover_need_hp = False
+                if self.recover_need_mp and (
+                    mp_max <= 0 or world.stats.mp >= mp_max
+                ):
+                    self.recover_need_mp = False
+                if not self.recover_need_hp and not self.recover_need_mp:
                     self.recovering = False
                     if world.resting is True:
                         self._send(f"rest 1 1 {char_id}")
-                    self._set_status("HP full; resuming")
+                    names = "HP and MP" if was_hp and was_mp else (
+                        "HP" if was_hp else "MP"
+                    )
+                    self._set_status(f"{names} full; resuming")
                     self._schedule_stats_redraw()
                     return True
                 if world.resting is not True and now >= self.recover_rest_at:
                     self._send(f"rest 1 1 {char_id}")
                     self.recover_rest_at = now + 2.5
-                    self._set_status("sitting to recover HP")
+                    self._set_status("sitting to recover")
                 self._schedule_stats_redraw()
                 return True
         elif self.recovering:
@@ -3956,7 +4005,10 @@ class Application(Gtk.Application):
             and self.auto_attack_toggle.get_active()
         )
         if auto_attack:
-            radius = int(self.attack_range.get_value())
+            radius = ATTACK_SEARCH_CELLS
+            base_info = self.spells.get(self._basic_skill_vnum() or 0)
+            if base_info is not None and base_info.range > 0:
+                radius = max(radius, int(base_info.range))
             monster = None
             if (
                 self.retaliate_toggle is not None
@@ -3992,8 +4044,8 @@ class Application(Gtk.Application):
                 ):
                     return True
 
-            basic = self._entry_int(self.skill_entry, 0)
-            basic_vnum = basic if basic > 0 else self._basic_skill_vnum()
+            basic = 0
+            basic_vnum = self._basic_skill_vnum()
             basic_info = (
                 self.spells.get(basic_vnum) if basic_vnum else None
             )
@@ -4051,17 +4103,17 @@ class Application(Gtk.Application):
                         )
                         self._send(packet)
                         self.last_attack_sent_at = now
+                        self.fight_target_id = monster.entity_id
                         # The skill's own cast time and cooldown pace the next
                         # action; the Min delay spin is only a floor on top.
-                        cooldown = float(self.attack_cooldown.get_value())
                         if basic_info is not None:
                             cooldown = max(
-                                cooldown,
                                 basic_info.cooldown,
                                 basic_info.cast_time,
                             )
                         else:
-                            cooldown = max(cooldown, 1.0)
+                            # Unknown skill data: keep a safe 1 s floor.
+                            cooldown = 1.0
                         self.attack_cooldown_until = now + cooldown
                         # Do not walk inside the skill animation: the server
                         # drops the walk and the bot would skip the path.
@@ -4118,6 +4170,8 @@ class Application(Gtk.Application):
                     and self.pickup_toggle.get_active())
                 or (self.recover_toggle is not None
                     and self.recover_toggle.get_active())
+                or (self.recover_mp_toggle is not None
+                    and self.recover_mp_toggle.get_active())
             ):
                 return True
             self._set_status("path finished")

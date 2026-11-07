@@ -108,8 +108,6 @@ def main() -> int:
             app.path_cells = []
             app.auto_attack_toggle.set_active(True)
             app.retaliate_toggle.set_active(False)
-            app.skill_entry.set_text("0")
-            app.attack_cooldown.set_value(1)
             if app.spells.get(876) is None or app.spells.get(866) is None:
                 result["detail"] = "spell catalog missing 876/866"
                 app.quit()

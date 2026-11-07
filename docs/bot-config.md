@@ -39,10 +39,13 @@ target was found; enable the checkbox to attack them anyway. This is also
 saved as `attack_unknown` in the JSON configuration.
 
 The UI makes toggle state explicit: active toggles (Loop, Auto-attack,
-Retaliate, Pickup, Auto-recover) are **green**, inactive ones are
-**red**. While Auto-recover is active and HP is below the threshold, a red
+Retaliate, Pickup, Auto-recover HP/MP) are **green**, inactive ones are
+**red**. While recovery is active and HP or MP is below its threshold, a red
 **RECOVERING** banner explains that attacks and movement are paused; the
-recovery check runs before targeting and spell rules.
+recovery check runs before targeting and spell rules. Recovery never abandons
+a fight: if the bot is already hitting a live target in range, it finishes
+that kill first, then sits until the resource that triggered recovery is
+full.
 
 ## Spells — scanned catalog, rules and execution order
 
@@ -149,10 +152,13 @@ range 10): a self cast is answered with `cancel 0 1 -1`. Use **Group Healing
 873** (type 1) for a live-verified self heal; Healing 867 is for another
 entity/party target and is not auto-selected as self.
 
-If no rule matches, the bot uses the **Skill** field from Combat (0 = normal
-attack). Recovery runs before spell rules: below **Auto-recover → Below HP %**
-the bot sits and waits for full HP, so a heal rule with a lower threshold does
-not fire while recovery is active. Spell rules require **Auto-attack** to be
+If no rule matches, the bot uses the equipped SP card's basic attack (slot
+0). The Combat UI has no Skill/Search/Min delay/template fields; the bot
+always uses slot 0, the skill's own range and cooldown, and a 15-cell target
+acquisition radius. Recovery runs before spell rules: below **Auto-recover
+HP/MP → Below HP/MP %** the bot finishes the current kill, then sits and
+waits until the resource that triggered recovery is full, so a heal rule with
+a lower threshold does not fire while recovery is active. Spell rules require **Auto-attack** to be
 on.
 
 The catalog is loaded in a background thread at startup (Skill.dat decodes
@@ -181,6 +187,8 @@ Example:
   "loot_range": 3,
   "recover": true,
   "low_hp_pct": 30.0,
+  "recover_mp": true,
+  "low_mp_pct": 30.0,
   "loop": true,
   "monster_mode": "only",
   "monster_vnums": [200, 206],
