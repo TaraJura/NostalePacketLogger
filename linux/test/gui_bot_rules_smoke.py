@@ -84,7 +84,7 @@ class FakeServer:
                         self.connection.sendall(
                             (
                                 f"STATUS|TARGET {entity_id} "
-                                "0x08A00000 0x087B4DD8\n"
+                                "OK 0x08A00000 0x087B4DD8\n"
                             ).encode()
                         )
                     except OSError:

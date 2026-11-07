@@ -132,13 +132,16 @@ void handle_command(const std::string& command) {
         unsigned long controller = 0;
         std::string error;
         if (!client_target(id, entity, controller, error)) {
-            tcpserver::send_line("STATUS|" + error);
+            char reply[256] = {0};
+            std::snprintf(reply, sizeof(reply), "STATUS|TARGET %lu ERR %s",
+                          id, error.c_str());
+            tcpserver::send_line(reply);
             return;
         }
 
         char reply[128] = {0};
         std::snprintf(reply, sizeof(reply),
-                      "STATUS|TARGET %lu 0x%08lX 0x%08lX", id, entity,
+                      "STATUS|TARGET %lu OK 0x%08lX 0x%08lX", id, entity,
                       controller);
         tcpserver::send_line(reply);
         return;

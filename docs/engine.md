@@ -278,9 +278,12 @@ The Targets filter applies to both Retaliate and nearest-target selection. See
 
 ## GUI
 
-`python3 -m ntpl gui` (or `linux/scripts/gui.sh`) opens the GTK4 window:
-a packet table with RECV/SEND colours, a filter, a Follow toggle, a raw send
-entry, and the Map/Bot tab. Options:
+`python3 -m ntpl gui` (or `linux/scripts/gui.sh`) opens the GTK4 window with
+three tabs: **Packets** (packet table with RECV/SEND colours, a filter, a
+Follow toggle and a raw send entry), **Map / Bot** and **Bot log** (a
+timestamped, selectable text view of every action the status bar reports --
+attacks, selections, walks, pickups, recovery, DLL errors -- capped at 4,000
+lines with a Clear log button). Options:
 
 - `--map-data PATH` — `NStcData.NOS` archive (or `NTPL_NSTC`);
 - `--log PATH` — DLL packet log used to backfill entity vnums/player names

@@ -213,14 +213,14 @@ class TargetSelectionTests(unittest.TestCase):
         threading.Thread(target=feed, daemon=True).start()
 
     def test_select_target_uses_the_dll(self):
-        self.feed_after("TARGET 5160 0x08A00000 0x087B4DD8")
+        self.feed_after("TARGET 5160 OK 0x08A00000 0x087B4DD8")
         result = self.service._select_target(5160)
         self.assertTrue(result["ok"])
         self.assertEqual(result["target_id"], 5160)
         self.assertIn("TARGET|5160", self.broker.sent)
 
     def test_select_target_reports_a_refusal(self):
-        self.feed_after("TARGET: entity not found in client memory")
+        self.feed_after("TARGET 5160 ERR entity not found in client memory")
         with self.assertRaises(ToolError):
             self.service._select_target(5160)
 

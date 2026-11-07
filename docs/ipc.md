@@ -96,18 +96,29 @@ injecting `ncif` alone tells the server about a target the client never
 selected, and the next `u_s` is redirected to (or cancelled because of) the
 client's real selection.
 
-The entity object is found by scanning for the id, then validating the object
-layout: in-module vtable at +0, kind 1-2 at +4, the id at +8, a live flag at
-+0x33, and the targetable type byte at +0xA9. A small cache keeps the last
-eight ids, so only the first selection of each monster pays for the scan
-(~0.5 s). The reply is:
+The entity object is found by scanning for the id and validating every
+occurrence *during* the scan (not just the first N hits): in-module vtable at
++0, kind 1-2 at +4, the id at +8, a live flag at +0x33, and the targetable
+type byte at +0xA9. This matters because a small id such as 3546 occurs in
+thousands of table entries before the object's heap address; a hit limit
+would report "entity not found" for a monster standing right next to the
+player. A small cache keeps the last eight ids, so only the first selection
+of each monster pays for the scan (~0.5 s). The reply is:
 
 ```
-STATUS|TARGET 8684 0x089305D0 0x087B4DD8     # id, entity object, controller
-STATUS|TARGET: entity not found in client memory
-STATUS|TARGET: client refused the selection   # dead, off-map, not targetable
-STATUS|TARGET: client build mismatch
+STATUS|TARGET 8684 OK 0x089305D0 0x087B4DD8  # id, entity object, controller
+STATUS|TARGET 8684 ERR entity not found in client memory
+STATUS|TARGET 8684 ERR client refused the selection  # dead/off-map
+STATUS|TARGET 8684 ERR client build mismatch
 ```
+
+The command is synchronous: when the reply arrives, the client has already
+selected the entity (or refused it). A host does not have to wait for the
+reply before sending `u_s` -- the DLL processes commands in order on the same
+connection, so `TARGET|id` followed by `SEND|u_s ...` selects first and then
+attacks. Waiting for the reply only adds latency when the packet stream is
+busy; the Python host uses the reply just to block an entity the client
+refused.
 
 The client's own `ncif` appears in the normal `SEND|ncif ...` stream, so a host
 can confirm the selection from packets alone.

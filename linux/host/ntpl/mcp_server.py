@@ -801,8 +801,6 @@ class GameService:
                         break
                     if text.startswith("TARGET "):
                         return text
-                    if text.startswith("TARGET:"):
-                        return text
             return None
 
         text = self._wait(answered, timeout)
@@ -810,7 +808,8 @@ class GameService:
             raise ToolError(
                 f"no TARGET answer from the DLL for entity {target_id}"
             )
-        if text.startswith("TARGET:"):
+        parts = text.split()
+        if len(parts) < 3 or parts[2] != "OK":
             raise ToolError(text)
         return {"ok": True, "target_id": target_id, "status": text}
 

@@ -170,8 +170,23 @@ def main() -> int:
             stats.hp, stats.hp_max = saved_hp, saved_hp_max
             app._update_char_info()
 
+            log_buffer = app.bot_log_buffer
+            log_text = ""
+            if log_buffer is not None:
+                log_text = log_buffer.get_text(
+                    log_buffer.get_start_iter(),
+                    log_buffer.get_end_iter(),
+                    False,
+                )
+            log_ok = bool(
+                log_buffer is not None
+                and log_text
+                and "auto-selected map 85" in log_text
+            )
+
             result["detail"] = (
-                f"rows={rows} status={status!r} map={app.map_grid.map_id if app.map_grid else None} "
+                f"rows={rows} status={status!r} log={log_ok} "
+                f"map={app.map_grid.map_id if app.map_grid else None} "
                 f"surface={app.map_surface is not None} guard={guard} facing={facing} "
                 f"hp={stats.hp}/{stats.hp_max} stats_area={app.stats_area is not None} "
                 f"switched={switched} tooltips={tooltips_ok} "
@@ -191,6 +206,7 @@ def main() -> int:
                 and tooltips_ok
                 and toggle_ok
                 and banner_ok
+                and log_ok
             )
         except Exception as exc:  # noqa: BLE001 - report, do not crash GTK
             result["detail"] = f"exception: {exc!r}"

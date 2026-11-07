@@ -30,4 +30,12 @@ std::vector<std::uintptr_t> ScanPair(std::int32_t x, std::int32_t y, int width,
 // structure by its charId.
 std::vector<std::uintptr_t> ScanValue(std::uint32_t value, std::size_t limit);
 
+// Scans for a single 4-byte value and returns the first hit accepted by
+// `accept(hit, context)` (0 when none). The predicate runs for every
+// occurrence, so a common value cannot exhaust a hit limit before the wanted
+// structure is reached. Used by TARGET to find an entity object by id.
+std::uintptr_t ScanFirstValue(std::uint32_t value,
+                              bool (*accept)(std::uintptr_t, void*),
+                              void* context);
+
 }  // namespace Memory

@@ -61,13 +61,13 @@ void self_module_range(std::uintptr_t& begin, std::uintptr_t& end) {
 }
 
 // Shared scan loop. `values_per_match` is 1 for a single value and 2 for a
-// pair; the matcher receives a pointer into the chunk.
-template <typename Match>
-std::vector<std::uintptr_t> scan_memory(int width, int values_per_match,
-                                        std::size_t limit, Match match) {
-    std::vector<std::uintptr_t> results;
+// pair; the matcher receives a pointer into the chunk. `on_hit` runs for every
+// match and may stop the scan early by returning false.
+template <typename Match, typename OnHit>
+void scan_memory(int width, int values_per_match, std::size_t limit,
+                 Match match, OnHit on_hit) {
     if ((width != 1 && width != 2 && width != 4) || limit == 0) {
-        return results;
+        return;
     }
 
     std::uintptr_t self_begin = 0;
@@ -103,8 +103,9 @@ std::vector<std::uintptr_t> scan_memory(int width, int values_per_match,
     const std::size_t match_bytes =
         static_cast<std::size_t>(width * values_per_match);
 
-    while (address < maximum && results.size() < limit &&
-           scanned < kMaxScanBytes) {
+    std::size_t hits = 0;
+
+    while (address < maximum && hits < limit && scanned < kMaxScanBytes) {
         MEMORY_BASIC_INFORMATION info = {};
         if (VirtualQuery(reinterpret_cast<LPCVOID>(address), &info,
                          sizeof(info)) == 0) {
@@ -125,8 +126,7 @@ std::vector<std::uintptr_t> scan_memory(int width, int values_per_match,
 
         if (usable) {
             for (std::uintptr_t offset = 0;
-                 offset < size && results.size() < limit &&
-                 scanned < kMaxScanBytes;
+                 offset < size && hits < limit && scanned < kMaxScanBytes;
                  offset += sizeof(buffer)) {
                 const std::size_t chunk = static_cast<std::size_t>(
                     (size - offset) < sizeof(buffer) ? (size - offset)
@@ -147,11 +147,12 @@ std::vector<std::uintptr_t> scan_memory(int width, int values_per_match,
                         continue;
                     }
 
-                    if (match(buffer + i)) {
-                        results.push_back(absolute);
-                        if (results.size() >= limit) {
-                            break;
-                        }
+                    if (!match(buffer + i)) {
+                        continue;
+                    }
+                    ++hits;
+                    if (!on_hit(absolute) || hits >= limit) {
+                        return;
                     }
                 }
             }
@@ -162,8 +163,6 @@ std::vector<std::uintptr_t> scan_memory(int width, int values_per_match,
         }
         address = next;
     }
-
-    return results;
 }
 
 }  // namespace
@@ -270,8 +269,10 @@ void Patch(void* dst, const void* src, unsigned int size) {
 
 std::vector<std::uintptr_t> ScanPair(std::int32_t x, std::int32_t y, int width,
                                      std::size_t limit) {
-    return scan_memory(
-        width, 2, limit, [x, y, width](const unsigned char* p) -> bool {
+    std::vector<std::uintptr_t> results;
+    scan_memory(
+        width, 2, limit,
+        [x, y, width](const unsigned char* p) -> bool {
             if (width == 1) {
                 const auto* pair =
                     reinterpret_cast<const std::uint8_t*>(p);
@@ -286,16 +287,49 @@ std::vector<std::uintptr_t> ScanPair(std::int32_t x, std::int32_t y, int width,
             }
             const auto* pair = reinterpret_cast<const std::int32_t*>(p);
             return pair[0] == x && pair[1] == y;
+        },
+        [&results](std::uintptr_t absolute) {
+            results.push_back(absolute);
+            return true;
         });
+    return results;
 }
 
 std::vector<std::uintptr_t> ScanValue(std::uint32_t value, std::size_t limit) {
-    return scan_memory(4, 1, limit,
-                       [value](const unsigned char* p) -> bool {
-                           std::uint32_t found = 0;
-                           std::memcpy(&found, p, sizeof(found));
-                           return found == value;
-                       });
+    std::vector<std::uintptr_t> results;
+    scan_memory(
+        4, 1, limit,
+        [value](const unsigned char* p) -> bool {
+            std::uint32_t found = 0;
+            std::memcpy(&found, p, sizeof(found));
+            return found == value;
+        },
+        [&results](std::uintptr_t absolute) {
+            results.push_back(absolute);
+            return true;
+        });
+    return results;
+}
+
+std::uintptr_t ScanFirstValue(std::uint32_t value,
+                              bool (*accept)(std::uintptr_t, void*),
+                              void* context) {
+    std::uintptr_t result = 0;
+    scan_memory(
+        4, 1, std::numeric_limits<std::size_t>::max(),
+        [value](const unsigned char* p) -> bool {
+            std::uint32_t found = 0;
+            std::memcpy(&found, p, sizeof(found));
+            return found == value;
+        },
+        [accept, context, &result](std::uintptr_t absolute) {
+            if (accept(absolute, context)) {
+                result = absolute;
+                return false;
+            }
+            return true;
+        });
+    return result;
 }
 
 }  // namespace Memory

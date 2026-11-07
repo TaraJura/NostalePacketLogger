@@ -71,6 +71,10 @@ TIMESPACE_ICON = ASSET_DIR / "ts-1.png"
 
 MAX_ROWS = 20000
 TRIM_ROWS = 2000
+#: Bot action log: enough history to debug a fight or a walk, trimmed in
+#: chunks so a long session does not grow the text buffer forever.
+LOG_MAX_LINES = 4000
+LOG_TRIM_LINES = 500
 DRAIN_INTERVAL_MS = 50
 BOT_INTERVAL_MS = 200
 #: Click-to-walk tick; the next leg is handed to the client before the
@@ -105,6 +109,8 @@ POS_COMMAND = "POS"
 # The server validates u_s against the client's local selection, so an
 # injected ncif alone is not enough.
 TARGET_PREFIX = "TARGET|"
+# A monster the client refuses to select is skipped this long.
+TARGET_BLOCK_S = 5.0
 
 
 class PacketRow(GObject.Object):
@@ -247,13 +253,10 @@ class Application(Gtk.Application):
         # "unknown command" and the bot falls back to an injected ncif.
         self.dll_target_supported = True
         self.last_target_reply = ""
-        # Two-step attack: TARGET first, then u_s on a later tick once the
-        # client has confirmed the selection.
-        self.target_request_id: int | None = None
-        self.target_request_at = 0.0
-        self.target_confirmed_id: int | None = None
-        self.target_confirmed_at = 0.0
-        self.target_waiting: int | None = None
+        # A TARGET the client refused (dead, off-map, ...) blocks that entity
+        # for a few seconds so the bot picks another monster instead of
+        # attacking with a stale selection.
+        self.target_blocked: dict[int, float] = {}
         self.auto_attack_toggle = None
         self.loop_toggle = None
         self.draw_path_toggle = None
@@ -310,6 +313,12 @@ class Application(Gtk.Application):
         self.start_when_located = False
         self.bot_timer = None
         self._closing = False
+        # Top-level "Bot log" tab: every action the status bar shows, with
+        # timestamps, so a fight can be debugged after the fact.
+        self.bot_log_view = None
+        self.bot_log_buffer = None
+        self._bot_log_lines = 0
+        self._bot_log_scroll_scheduled = False
 
     # -- UI -------------------------------------------------------------
 
@@ -341,10 +350,12 @@ class Application(Gtk.Application):
 
         packet_page = self._build_packet_page()
         map_page = self._build_map_page()
+        log_page = self._build_log_page()
 
         self.notebook = Gtk.Notebook()
         self.notebook.append_page(packet_page, Gtk.Label(label="Packets"))
         self.notebook.append_page(map_page, Gtk.Label(label="Map / Bot"))
+        self.notebook.append_page(log_page, Gtk.Label(label="Bot log"))
         self.notebook.set_vexpand(True)
         self.notebook.connect("switch-page", self._on_page_switch)
 
@@ -484,6 +495,79 @@ class Application(Gtk.Application):
         button.add_css_class(
             "ntpl-on" if button.get_active() else "ntpl-off"
         )
+
+    def _build_log_page(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        toolbar.set_margin_top(6)
+        toolbar.set_margin_start(6)
+        toolbar.set_margin_end(6)
+        clear = Gtk.Button(label="Clear log")
+        clear.connect("clicked", lambda *_: self._clear_bot_log())
+        toolbar.append(clear)
+        hint = Gtk.Label(
+            label="Bot actions, target selections and DLL errors, newest "
+            "at the bottom."
+        )
+        hint.add_css_class("dim-label")
+        hint.set_xalign(0)
+        toolbar.append(hint)
+        box.append(toolbar)
+
+        self.bot_log_buffer = Gtk.TextBuffer()
+        view = Gtk.TextView(buffer=self.bot_log_buffer)
+        view.set_editable(False)
+        view.set_cursor_visible(False)
+        view.set_monospace(True)
+        view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        view.set_left_margin(8)
+        view.set_right_margin(8)
+        view.set_top_margin(4)
+        view.set_bottom_margin(4)
+        self.bot_log_view = view
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_vexpand(True)
+        scrolled.set_child(view)
+        box.append(scrolled)
+        return box
+
+    def _log_line(self, text: str) -> None:
+        """Append one timestamped action line to the Bot log tab."""
+        buffer = self.bot_log_buffer
+        text = text.strip()
+        if buffer is None or not text:
+            return
+        if self._bot_log_lines:
+            buffer.insert(buffer.get_end_iter(), "\n")
+        buffer.insert(
+            buffer.get_end_iter(), f"{time.strftime('%H:%M:%S')}  {text}"
+        )
+        self._bot_log_lines += 1
+        if self._bot_log_lines > LOG_MAX_LINES:
+            buffer.delete(
+                buffer.get_start_iter(),
+                buffer.get_iter_at_line(LOG_TRIM_LINES),
+            )
+            self._bot_log_lines -= LOG_TRIM_LINES
+        if not self._bot_log_scroll_scheduled:
+            self._bot_log_scroll_scheduled = True
+            GLib.idle_add(self._scroll_bot_log)
+
+    def _scroll_bot_log(self) -> bool:
+        self._bot_log_scroll_scheduled = False
+        if self.bot_log_view is not None:
+            buffer = self.bot_log_view.get_buffer()
+            mark = buffer.create_mark(None, buffer.get_end_iter(), False)
+            self.bot_log_view.scroll_mark_onscreen(mark)
+            buffer.delete_mark(mark)
+        return False
+
+    def _clear_bot_log(self) -> None:
+        if self.bot_log_buffer is not None:
+            self.bot_log_buffer.set_text("")
+            self._bot_log_lines = 0
 
     def _build_map_page(self):
         page = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -1858,7 +1942,6 @@ class Application(Gtk.Application):
             target_id, skill=send_skill, target_type=target_type
         )
         self._send(packet)
-        self._target_used()
         # The per-rule cooldown (max of the rule and Skill.dat) is enforced in
         # _select_spell_rule; here only the cast animation plus the Min delay
         # floor pace the next action.
@@ -2256,6 +2339,8 @@ class Application(Gtk.Application):
         if entity is None or entity.kind != 3:
             return None
         if not self._monster_allowed(entity):
+            return None
+        if self._target_blocked(entity.entity_id):
             return None
         position = self._player_cell()
         if position is None:
@@ -3173,21 +3258,27 @@ class Application(Gtk.Application):
                             self._update_char_info()
                             dirty = True
                 elif message.payload.startswith("TARGET "):
-                    # DLL confirmation for a bot selection; keep the status
-                    # bar for the attack action itself.
+                    # DLL answer to a bot TARGET. The attack has already gone
+                    # out in the same tick (the DLL handles commands in
+                    # order); a refusal only blocks the entity for a while.
                     self.last_target_reply = message.payload
                     parts = message.payload.split()
-                    try:
-                        self.target_confirmed_id = int(parts[1])
-                        self.target_confirmed_at = time.monotonic()
-                    except (IndexError, ValueError):
-                        pass
+                    if len(parts) >= 3 and parts[2] == "ERR":
+                        try:
+                            blocked = int(parts[1])
+                        except ValueError:
+                            blocked = None
+                        if blocked is not None:
+                            self.target_blocked[blocked] = (
+                                time.monotonic() + TARGET_BLOCK_S
+                            )
+                        self._set_status(message.payload)
+                    elif len(parts) >= 5 and parts[2] == "OK":
+                        self._log_line(
+                            f"monster {parts[1]} selected "
+                            f"(entity {parts[3]}, controller {parts[4]})"
+                        )
                     dirty = True
-                elif message.payload.startswith("TARGET:"):
-                    # The client refused the selection (dead, off-map, ...):
-                    # do not attack with a stale target.
-                    self.target_confirmed_id = None
-                    self._set_status(message.payload)
                 elif message.payload.startswith(
                     "unknown command: TARGET"
                 ):
@@ -3334,6 +3425,7 @@ class Application(Gtk.Application):
     def _set_status(self, text: str) -> None:
         if self.status is not None:
             self.status.set_text(text)
+        self._log_line(text)
 
     def _set_path_info(self, text: str) -> None:
         if getattr(self, "path_info", None) is not None:
@@ -3391,48 +3483,38 @@ class Application(Gtk.Application):
             return False
         return True
 
-    def _ensure_target(self, entity_id: int, now: float) -> bool:
-        """True once the DLL confirmed the client has the entity selected.
+    def _target_blocked(self, entity_id: int) -> bool:
+        until = self.target_blocked.get(entity_id)
+        if until is None:
+            return False
+        if time.monotonic() >= until:
+            self.target_blocked.pop(entity_id, None)
+            return False
+        return True
 
-        The server validates `u_s` against the client's own selection, so the
-        bot never attacks in the same tick it asks for a TARGET: it waits for
-        the DLL's ``STATUS|TARGET`` confirmation, which is sent only after the
-        client's selector has stored the entity as the current target. A
-        confirmation is used once (the caller clears it after sending the
-        skill), so every attack re-verifies the selection instead of trusting
-        an old target id. The request is retried once a second.
+    def _ensure_target(self, entity_id: int, now: float) -> bool:
+        """Select the monster in the client and attack in the same tick.
+
+        The DLL handles TARGET synchronously and processes the following
+        SEND|u_s only after it returns, so the client's selection is applied
+        before the skill goes out even though the host does not wait for the
+        status reply. Waiting for that reply (or for a later tick) added
+        seconds of latency during packet bursts, because STATUS lines queue
+        behind the live packet stream.
+
+        A refusal is reported asynchronously (``TARGET <id> ERR ...``) and
+        blocks the entity for a few seconds, so the bot moves on to another
+        monster instead of attacking with a stale selection.
         """
-        if (
-            self.target_confirmed_id == entity_id
-            and self.target_confirmed_at >= self.target_request_at
-        ):
-            self.target_waiting = None
-            return True
+        if self._target_blocked(entity_id):
+            return False
         if not self.dll_target_supported:
             # Old DLL: keep the previous behaviour, an injected ncif.
-            self.target_waiting = None
             self._send(f"ncif 3 {entity_id}")
             return True
-        if (
-            self.target_request_id != entity_id
-            or now - self.target_request_at >= 1.0
-        ):
-            self.target_request_id = entity_id
-            self.target_request_at = now
-            self.target_confirmed_id = None
-            self.target_waiting = entity_id
-            if not self._client_target(entity_id):
-                self.target_waiting = None
-                self._send(f"ncif 3 {entity_id}")
-                return True
-            self._set_status(f"selecting monster {entity_id}…")
-        else:
-            self.target_waiting = entity_id
-        return False
-
-    def _target_used(self) -> None:
-        """Drop the selection confirmation after a skill went out."""
-        self.target_confirmed_id = None
+        if not self._client_target(entity_id):
+            self._send(f"ncif 3 {entity_id}")
+        return True
 
     def _start_bot(self) -> None:
         if self.bot_running:
@@ -3517,9 +3599,7 @@ class Application(Gtk.Application):
         self.bot_running = False
         self.start_when_located = False
         self.pending_target = None
-        self.target_waiting = None
-        self.target_confirmed_id = None
-        self.target_request_id = None
+        self.target_blocked.clear()
         # Stop a click-to-walk too; Stop is the one "stop moving" button.
         self._stop_travel(quiet=True)
         if self.bot_timer is not None:
@@ -3549,6 +3629,8 @@ class Application(Gtk.Application):
             if entity.kind != 3:
                 continue
             if not self._monster_allowed(entity):
+                continue
+            if self._target_blocked(entity.entity_id):
                 continue
             distance = max(abs(entity.x - px), abs(entity.y - py))
             if distance <= radius and distance < best_distance:
@@ -3652,6 +3734,34 @@ class Application(Gtk.Application):
             # The client's own MoveTo sends a `walk` SEND packet; the engine
             # updates world.position from it. A server `tp`/`mv` is accepted
             # too, in case the server corrects the client.
+            self._travel_request_position(now)
+            actual = self._player_cell()
+            loop_on = bool(
+                self.loop_toggle is not None
+                and self.loop_toggle.get_active()
+            )
+            has_next = (
+                self.path_index + 1 < len(self.bot_goals) or loop_on
+            )
+            remaining = None
+            if actual is not None:
+                remaining = max(
+                    abs(actual[0] - self.pending_target[0]),
+                    abs(actual[1] - self.pending_target[1]),
+                )
+            if (
+                has_next
+                and remaining is not None
+                and remaining <= TRAVEL_HANDOFF_CELLS
+                and now - self.pending_since >= TRAVEL_MIN_LEG_S
+            ):
+                # Hand the next leg to the client while the character is
+                # still moving, so the drawn-path walk never stops at a leg
+                # boundary (the same rule as click-to-walk).
+                self.pending_target = None
+                self.rejected_walks = 0
+                self._advance_path()
+                return True
             confirmed = world.position == self.pending_target or (
                 self.last_move_time >= self.pending_since
                 and self.last_move is not None
@@ -3754,9 +3864,6 @@ class Application(Gtk.Application):
                     rule_index, rule, monster, char_id, now
                 ):
                     return True
-                if self.target_waiting is not None:
-                    # Waiting for the client's selection; do not walk away.
-                    return True
 
             basic = self._entry_int(self.skill_entry, 0)
             basic_vnum = basic if basic > 0 else self._basic_skill_vnum()
@@ -3816,7 +3923,6 @@ class Application(Gtk.Application):
                             monster.entity_id, skill=send_skill
                         )
                         self._send(packet)
-                        self._target_used()
                         # The skill's own cast time and cooldown pace the next
                         # action; the Min delay spin is only a floor on top.
                         cooldown = float(self.attack_cooldown.get_value())

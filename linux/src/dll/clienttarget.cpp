@@ -110,20 +110,36 @@ bool looks_like_entity(std::uintptr_t entity, std::uint32_t id,
     return true;
 }
 
+struct EntityScan {
+    std::uint32_t id;
+    std::uintptr_t module_begin;
+    std::uintptr_t module_end;
+};
+
+bool accept_entity_hit(std::uintptr_t hit, void* context)
+{
+    const auto* scan = static_cast<const EntityScan*>(context);
+    if (hit < 8) {
+        return false;
+    }
+    return looks_like_entity(hit - 8, scan->id, scan->module_begin,
+                             scan->module_end);
+}
+
 bool resolve_controller(std::uintptr_t& controller, std::string& error)
 {
     if (!readable(kSelectionGlobal, sizeof(std::uint32_t))) {
-        error = "TARGET: selection global not readable";
+        error = "selection global not readable";
         return false;
     }
     const std::uintptr_t holder = load_u32(kSelectionGlobal);
     if (!readable(holder, sizeof(std::uint32_t))) {
-        error = "TARGET: selection holder not readable";
+        error = "selection holder not readable";
         return false;
     }
     controller = load_u32(holder);
     if (!readable(controller, 0x60)) {
-        error = "TARGET: selection controller not readable";
+        error = "selection controller not readable";
         return false;
     }
     return true;
@@ -143,18 +159,18 @@ bool client_target(unsigned long entity_id, unsigned long& entity_out,
                    unsigned long& controller_out, std::string& error)
 {
     if (entity_id == 0) {
-        error = "TARGET: invalid entity id";
+        error = "invalid entity id";
         return false;
     }
     if (!selector_ok()) {
-        error = "TARGET: client build mismatch";
+        error = "client build mismatch";
         return false;
     }
 
     std::uintptr_t module_begin = 0;
     std::uintptr_t module_end = 0;
     if (!module_range(module_begin, module_end)) {
-        error = "TARGET: main module not readable";
+        error = "main module not readable";
         return false;
     }
 
@@ -171,23 +187,20 @@ bool client_target(unsigned long entity_id, unsigned long& entity_out,
 
     if (entity == 0) {
         // The id is stored at entity+8, so the scan hit is entity+8. Monster
-        // ids also appear in maps and tables; only a live object with an
-        // in-module vtable and the expected layout is accepted.
-        const std::vector<std::uintptr_t> hits = Memory::ScanValue(id, 64);
-        for (std::uintptr_t hit : hits) {
-            if (hit < 8) {
-                continue;
-            }
-            const std::uintptr_t candidate = hit - 8;
-            if (looks_like_entity(candidate, id, module_begin, module_end)) {
-                entity = candidate;
-                break;
-            }
+        // ids also appear in maps and tables -- a small id like 3546 can show
+        // up thousands of times before the heap address of its object. The
+        // validator therefore runs inside the scan for every occurrence
+        // instead of collecting a limited number of hits first.
+        EntityScan scan = {id, module_begin, module_end};
+        const std::uintptr_t hit =
+            Memory::ScanFirstValue(id, accept_entity_hit, &scan);
+        if (hit >= 8) {
+            entity = hit - 8;
         }
     }
 
     if (entity == 0) {
-        error = "TARGET: entity not found in client memory";
+        error = "entity not found in client memory";
         return false;
     }
 
@@ -206,7 +219,7 @@ bool client_target(unsigned long entity_id, unsigned long& entity_out,
     // different value here means the client refused it (dead, off-map, ...).
     if (load_u32(controller + kControllerTarget) !=
         static_cast<std::uint32_t>(entity)) {
-        error = "TARGET: client refused the selection";
+        error = "client refused the selection";
         return false;
     }
 
