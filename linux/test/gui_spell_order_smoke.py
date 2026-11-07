@@ -111,7 +111,7 @@ def main() -> int:
             result["detail"] = f"start exception: {exc!r}"
             app.quit()
             return False
-        GLib.timeout_add(2500, check)
+        GLib.timeout_add(4000, check)
         return False
 
     def start_when_spells_loaded() -> bool:

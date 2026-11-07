@@ -53,7 +53,6 @@ MAX_ROWS = 20000
 TRIM_ROWS = 2000
 DRAIN_INTERVAL_MS = 50
 BOT_INTERVAL_MS = 200
-DEFAULT_MAP_ID = 20
 DEFAULT_SCALE = 3
 # Live positions fed to the attach-time map ranking. More points separate
 # same-layout maps; ranking 779 grids costs ~16 ms at this cap.
@@ -126,6 +125,7 @@ class Application(Gtk.Application):
         map_data: str | None = None,
         unique: bool = True,
         log_file: str | None = None,
+        initial_map_id: int | None = None,
     ) -> None:
         super().__init__(
             application_id="cz.tarajura.ntpl",
@@ -165,6 +165,9 @@ class Application(Gtk.Application):
         )
         self.map_grids: dict[int, MapGrid] = {}
         self.map_grid: MapGrid | None = None
+        self.map_source: str | None = None
+        self.map_override: int | None = None
+        self.initial_map_id = initial_map_id
         self.monster_names: dict[int, str] = {}
         self.spell_descriptions: dict[int, str] = {}
         self.spells: dict[int, SpellInfo] = {}
@@ -432,6 +435,25 @@ class Application(Gtk.Application):
         self.map_info.set_xalign(0)
         self.map_info.set_hexpand(True)
         top.append(self.map_info)
+        # Position-only auto-detection is ambiguous while the server has not
+        # sent `c_map`/`at` (a late attach sees only monsters, some of them on
+        # blocked cells). A manual id is the escape hatch; a server id always
+        # wins once it arrives.
+        self.map_id_entry = Gtk.Entry()
+        self.map_id_entry.set_width_chars(6)
+        self.map_id_entry.set_placeholder_text("map id")
+        self.map_id_entry.set_tooltip_text(
+            "force the map id until the server sends c_map/at"
+        )
+        self.map_id_entry.connect(
+            "activate", lambda *_: self._apply_map_override()
+        )
+        map_set = Gtk.Button(label="Set")
+        map_set.set_tooltip_text("show this map id")
+        map_set.connect("clicked", lambda *_: self._apply_map_override())
+        top.append(Gtk.Label(label="Map"))
+        top.append(self.map_id_entry)
+        top.append(map_set)
         map_box.append(top)
 
         self.map_area = Gtk.DrawingArea()
@@ -1897,22 +1919,42 @@ class Application(Gtk.Application):
                 self.map_info.set_text(str(exc))
             return
 
-        map_id = None
-        if self.engine.world.map_id in self.map_grids:
-            map_id = self.engine.world.map_id
-        elif DEFAULT_MAP_ID in self.map_grids:
-            map_id = DEFAULT_MAP_ID
-        else:
-            map_id = next(iter(self.map_grids))
-        self._select_map(map_id)
+        if self.initial_map_id in self.map_grids:
+            self.map_override = self.initial_map_id
+            self._select_map(self.initial_map_id, source="manual")
+        elif self.engine.world.map_id in self.map_grids:
+            self._select_map(self.engine.world.map_id)
+        elif self.map_info is not None:
+            # No server map id yet (the window opened before the DLL/injection
+            # or before login). Do not invent map 20: the auto-map tick picks
+            # a map as soon as `c_map`/`at` or live positions arrive.
+            self.map_info.set_text("waiting for the game…")
 
-    def _select_map(self, map_id: int) -> None:
+    def _apply_map_override(self) -> None:
+        """Show a map id the user typed; the server id still wins later."""
+        if self.map_id_entry is None:
+            return
+        text = self.map_id_entry.get_text().strip()
+        try:
+            map_id = int(text)
+        except ValueError:
+            self._set_status("map id must be a number")
+            return
+        if map_id not in self.map_grids:
+            self._set_status(f"map {map_id} has no grid in {self.map_file}")
+            return
+        self.map_override = map_id
+        self._select_map(map_id, source="manual")
+        self._set_status(f"map set to {map_id}")
+
+    def _select_map(self, map_id: int, source: str = "server") -> None:
         grid = self.map_grids.get(map_id)
         if grid is None:
             self._set_status(f"map {map_id} not in {self.map_file}")
             return
 
         self.map_grid = grid
+        self.map_source = source
         # A new map invalidates the old coordinates: do not keep walking a
         # path from the previous map.
         if self.bot_running:
@@ -1926,9 +1968,10 @@ class Application(Gtk.Application):
         self._update_map_size()
         total = grid.width * grid.height
         walkable = grid.walkable_count()
+        suffix = {"auto": " · auto", "manual": " · manual"}.get(source, "")
         self.map_info.set_text(
             f"map {grid.map_id}: {grid.width}x{grid.height}, "
-            f"walkable {100 * walkable / total:.1f}%"
+            f"walkable {100 * walkable / total:.1f}%{suffix}"
         )
         self._set_status(f"loaded map {grid.map_id} ({grid.width}x{grid.height})")
         self._schedule_map_redraw()
@@ -2145,6 +2188,9 @@ class Application(Gtk.Application):
             return True
         world = self.engine.world
         if world.map_id is not None:
+            # The server is authoritative: a manual id only bridges the gap
+            # until the first c_map/at.
+            self.map_override = None
             if world.map_id in self.map_grids:
                 if (
                     self.map_grid is None
@@ -2161,16 +2207,25 @@ class Application(Gtk.Application):
                     f"map {world.map_id} has no grid in {self.map_file}"
                 )
             return True
+        if self.map_override is not None:
+            return True
+        points = self._live_points()
         if self.map_grid is None:
-            fallback = (
-                DEFAULT_MAP_ID
-                if DEFAULT_MAP_ID in self.map_grids
-                else next(iter(self.map_grids))
+            if len(points) < 2:
+                if self.map_info is not None:
+                    self.map_info.set_text("waiting for the game…")
+                return True
+            choice = choose_map_for_positions(self.map_grids, points)
+            if choice is None:
+                return True
+            fraction, map_id = choice
+            self._select_map(map_id, source="auto")
+            self._set_status(
+                f"auto-detected map {map_id} "
+                f"({fraction * 100:.1f}% live positions)"
             )
-            self._select_map(fallback)
             return True
 
-        points = self._live_points()
         if len(points) < 2:
             return True
         choice = choose_map_for_positions(
@@ -2180,7 +2235,7 @@ class Application(Gtk.Application):
             return True
         fraction, map_id = choice
         if map_id != self.map_grid.map_id:
-            self._select_map(map_id)
+            self._select_map(map_id, source="auto")
             self._set_status(
                 f"auto-detected map {map_id} "
                 f"({fraction * 100:.1f}% live positions)"
@@ -2597,7 +2652,11 @@ class Application(Gtk.Application):
                 try:
                     self.client.connect(retries=10, delay=0.2)
                 except ConnectionLost as exc:
-                    GLib.idle_add(self._set_status, f"not connected: {exc}")
+                    GLib.idle_add(
+                        self._set_status,
+                        f"not connected: {exc} — is the logger DLL "
+                        "injected? retrying every second",
+                    )
                     time.sleep(RECONNECT_DELAY)
                     continue
 
@@ -2609,7 +2668,10 @@ class Application(Gtk.Application):
                         if message is not None:
                             self.inbox.put(message)
                 except (ConnectionLost, ProtocolError, OSError) as exc:
-                    GLib.idle_add(self._set_status, f"disconnected: {exc}")
+                    GLib.idle_add(
+                        self._set_status,
+                        f"disconnected: {exc} — reconnecting…",
+                    )
 
                 if not self._closing:
                     # The DLL accepts one host at a time and replaces the old
@@ -2664,10 +2726,9 @@ class Application(Gtk.Application):
                         self._update_spell_desc(info)
                 if packet.opcode in ("c_map", "mapout", "at"):
                     map_id = self.engine.world.map_id
-                    if (
-                        map_id is not None
-                        and self.map_grid is not None
-                        and map_id != self.map_grid.map_id
+                    if map_id is not None and (
+                        self.map_grid is None
+                        or map_id != self.map_grid.map_id
                     ):
                         self._auto_map_tick()
                 self._append(packet)
@@ -3284,6 +3345,9 @@ def run_gui(
     port: int | None = None,
     map_data: str | None = None,
     log_file: str | None = None,
+    map_id: int | None = None,
 ) -> int:
-    app = Application(host, port, map_data, log_file=log_file)
+    app = Application(
+        host, port, map_data, log_file=log_file, initial_map_id=map_id
+    )
     return int(app.run([]))
