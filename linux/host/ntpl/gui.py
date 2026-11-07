@@ -13,6 +13,7 @@ import os
 import queue
 import threading
 import time
+from pathlib import Path
 
 import cairo
 import gi
@@ -61,6 +62,11 @@ from .spawnlog import (
 )
 from .spells import SpellInfo, load_spells
 from .protocol import Kind, Packet, ProtocolError
+
+#: nosapki.com's Time-Space stone icon (64x64 PNG), drawn on the map at a
+#: `gp` destination in the 2xxx range. Missing assets fall back to the ring.
+ASSET_DIR = Path(__file__).with_name("assets")
+TIMESPACE_ICON = ASSET_DIR / "ts-1.png"
 
 MAX_ROWS = 20000
 TRIM_ROWS = 2000
@@ -179,6 +185,8 @@ class Application(Gtk.Application):
         self.map_grid: MapGrid | None = None
         self.map_source: str | None = None
         self.portals = normalize_portals(load_saved_portals())
+        self._timespace_icon: cairo.ImageSurface | None = None
+        self._timespace_icon_loaded = False
         self.monster_names: dict[int, str] = {}
         self.spell_descriptions: dict[int, str] = {}
         self.spells: dict[int, SpellInfo] = {}
@@ -2445,7 +2453,8 @@ class Application(Gtk.Application):
         # Portals: a ring with a diamond centre, drawn after the own marker so
         # a portal under or next to the character stays visible (a filled dot
         # would be hidden by the own dot). Magenta is a normal map portal;
-        # amber marks a Time-Space/instance entrance (destination 2xxx).
+        # amber marks a Time-Space/instance entrance (destination 2xxx), which
+        # also carries the nosapki Time-Space stone icon.
         for (portal_map, px, py), destination in self.portals.items():
             if portal_map != grid.map_id:
                 continue
@@ -2453,14 +2462,18 @@ class Application(Gtk.Application):
                 continue
             cx = px * scale + scale / 2
             cy = py * scale + scale / 2
-            radius = max(6.0, scale * 1.2)
             if is_time_space_map(destination):
-                context.set_source_rgba(1.0, 0.70, 0.0, 1.0)
-            else:
-                context.set_source_rgba(0.85, 0.2, 0.95, 1.0)
+                self._draw_timespace_icon(
+                    context, cx, cy, scale, own == (px, py)
+                )
+                continue
+
+            radius = max(6.0, scale * 1.2)
+            context.set_source_rgba(0.85, 0.2, 0.95, 1.0)
             context.set_line_width(max(2.0, scale * 0.4))
             context.arc(cx, cy, radius, 0, 2 * math.pi)
             context.stroke()
+
             size = max(2.0, scale * 0.35)
             context.move_to(cx, cy - size)
             context.line_to(cx + size, cy)
@@ -2470,6 +2483,65 @@ class Application(Gtk.Application):
             context.fill()
 
         context.restore()
+
+    def _timespace_icon_surface(self) -> cairo.ImageSurface | None:
+        """Load the nosapki Time-Space icon once; None if it is missing."""
+        if self._timespace_icon_loaded:
+            return self._timespace_icon
+        self._timespace_icon_loaded = True
+        try:
+            self._timespace_icon = cairo.ImageSurface.create_from_png(
+                str(TIMESPACE_ICON)
+            )
+        except (OSError, cairo.Error):
+            self._timespace_icon = None
+        return self._timespace_icon
+
+    def _draw_timespace_icon(
+        self,
+        context,
+        cx: float,
+        cy: float,
+        scale: float,
+        standing_on_it: bool,
+    ) -> None:
+        """Draw the nosapki Time-Space stone in a gold frame.
+
+        When the character stands on the entrance the icon is skipped and only
+        the gold ring is drawn, so the own red dot stays readable.
+        """
+        icon = self._timespace_icon_surface()
+        if icon is None:
+            # No asset: an amber ring is still a distinct Time-Space marker.
+            context.set_source_rgba(1.0, 0.70, 0.0, 1.0)
+            context.set_line_width(max(2.0, scale * 0.4))
+            context.arc(cx, cy, max(6.0, scale * 1.2), 0, 2 * math.pi)
+            context.stroke()
+            return
+
+        size = max(22.0, scale * 5.0)
+        if standing_on_it:
+            context.set_source_rgba(1.0, 0.70, 0.0, 1.0)
+            context.set_line_width(max(2.0, scale * 0.4))
+            context.arc(cx, cy, size * 0.62, 0, 2 * math.pi)
+            context.stroke()
+            return
+
+        # Dark disc behind the stone so it reads on white terrain.
+        context.set_source_rgba(0.05, 0.05, 0.08, 0.55)
+        context.arc(cx, cy, size * 0.56, 0, 2 * math.pi)
+        context.fill()
+        context.save()
+        context.translate(cx - size / 2, cy - size / 2)
+        context.scale(size / icon.get_width(), size / icon.get_height())
+        context.set_source_surface(icon, 0, 0)
+        context.paint()
+        context.restore()
+        # Gold frame around the icon.
+        context.set_source_rgba(1.0, 0.70, 0.0, 1.0)
+        context.set_line_width(max(2.0, scale * 0.4))
+        context.arc(cx, cy, size * 0.63, 0, 2 * math.pi)
+        context.stroke()
 
     def _on_map_click(self, gesture, _n_press, x, y) -> None:
         if self.map_grid is None or self.map_area is None:

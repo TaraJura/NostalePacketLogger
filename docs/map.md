@@ -164,9 +164,13 @@ grouped by function:
   from the DLL log's last `at`. On entry the server sends the map's whole
   portal list as `gp <x> <y> <toMap> …`; those are drawn as rings with a
   "Portal → map N" tooltip and persisted in `~/.config/ntpl/portals.json`.
-  A destination in the 2xxx range is a **Time-Space** entrance and is drawn
-  amber ("Time-Space → map N") instead of magenta; live map 4 has
-  `(224,103)→2110` and `(228,53)→2510`. A crossing is the fallback when a
+  A destination in the 2xxx range is a **Time-Space** entrance: it is drawn
+  as the nosapki Time-Space stone in a gold frame instead of the magenta
+  ring, with a "Time-Space → map N" tooltip; live map 4 has `(224,103)→2110`
+  and `(228,53)→2510`. The icon is
+  `linux/host/ntpl/assets/ts-1.png` (source:
+  `nosapki.com/images/nt-images/ts-1.png`); if the asset is missing the
+  marker falls back to an amber ring. A crossing is the fallback when a
   `gp` list was missed.
 - **Character** — live HP and MP bars with current/max/missing values, plus
   map/position/char id. HP and MP are fed by the server's `stat` packets.
