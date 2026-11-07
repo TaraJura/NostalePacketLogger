@@ -74,6 +74,9 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 - [docs/development.md](docs/development.md) — layout, conventions, adding packets
 - [docs/roadmap.md](docs/roadmap.md) — phases and next tasks
 - [docs/troubleshooting.md](docs/troubleshooting.md) — symptom → cause → fix
+- [docs/reusable-projects.md](docs/reusable-projects.md) — MIT-licensed upstream
+  Gameforge/NosTale projects we can reuse (clientless login, launcher
+  emulation, protocol crypto, widget layouts)
 
 ## Status
 

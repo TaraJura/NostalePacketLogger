@@ -17,6 +17,7 @@
 | [development.md](development.md) | you are changing the code: layout, conventions, tests, adding packets |
 | [roadmap.md](roadmap.md) | you want the phases and the next concrete tasks |
 | [troubleshooting.md](troubleshooting.md) | something does not connect, does not appear, or the client crashes |
+| [reusable-projects.md](reusable-projects.md) | you want to reuse the MIT-licensed Gameforge/NosTale projects cloned next to this repo (clientless login, launcher emulation, protocol crypto, widget layouts) |
 | [protocol/](protocol/README.md) | you need the meaning of a specific packet opcode |
 
 The packet wiki in `protocol/` is shared by both platforms: the transport and

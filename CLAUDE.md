@@ -216,7 +216,7 @@ PYTHONPATH=linux/host python3 -m ntpl status
   `docs/feature-review-2026-11-06.md`, `docs/hooking.md`, `docs/ipc.md`,
   `docs/linux.md`, `docs/windows.md`, `docs/development.md`,
   `docs/roadmap.md`, `docs/troubleshooting.md`; packet wiki in
-  `docs/protocol/`.
+  `docs/protocol/`; **upstream reuse** in `docs/reusable-projects.md`.
 
 ## Rules
 
@@ -287,3 +287,15 @@ Next:
    target-filter gap; the UI has an explicit option and docs describe relog.
 7. Reconcile `docs/protocol/` with more live captures, then extend the loop
    with path validation and combat state.
+8. **Reuse the upstream MIT projects** cloned in `~/games/gameforge/`
+   (`nosbazar`, `GflessClient`, `NosTale-Gfless`, `NosTale-Auth`,
+   `nostale-auth`): see `docs/reusable-projects.md`. Two paths: (a) launch the
+   real client without the Gameforge launcher by emulating the
+   `GameforgeClientJSONRPC` pipe and `NoS0577` auth; (b) clientless login with
+   NosBazar's `noscrypto`/session code, which also delivers the login `ski`
+   skill list (the current `slot unknown` cause) and complete entity
+   lifecycles.
+9. The learned skill list is only sent in `ski` at login; the log is
+   truncated on every DLL reinjection, so the spell picker says `slot unknown`
+   until a relog. Persist `ski` (sidecar file / append log) or receive it from
+   a clientless login.
