@@ -48,7 +48,8 @@ u_s 7 1 14881134
       su 1 14881134 1 14881134 873 ...
 ```
 
-Live slot map for character 14881134 (from
+Live slot map for character 14881134 on 2026-11-06, while it carried a
+swordsman SP card (from
 `ski 0 866 866 866 867 868 869 870 871 872 873 874 875 876 ...`, duplicates
 collapsed in order):
 
@@ -62,13 +63,22 @@ collapsed in order):
 | 9 | 875 | Blessing |
 | 10 | 876 | Holy Hammer |
 
-So **slot 0 is the normal auto-attack**; the server reports the character's
-actual basic-attack skill (866 here) in `su`. Sending the vnum instead of the
-slot (`u_s 866 ...`) is answered with `cancel 0 866 -1`. The server also sends
-`cancel 0 <slot> -1` when a cast is not usable. The
-`<skillSlot> <targetType> <targetId>` prefix is verified; later fields are
-still unknown. The bot stores Skill.dat vnums and resolves them to slots via
-the `ski` list (live or backfilled from the DLL log).
+So **slot 0 is the normal auto-attack**, and the skill in that slot is the
+**equipped SP card's basic attack** — the server reports its vnum in `su`.
+The same character on 2026-11-07 with a mage card is answered
+`su 1 14881134 3 3161 260 ...` (Energy Bolt: range 6, cast 0.8 s, cooldown
+0.5 s, MP 0, matching the in-game tooltip), and the sword list above no
+longer applies. Sending a vnum instead of the slot (`u_s 866 ...`) is
+answered with `cancel 0 866 -1`. The server also sends `cancel 0 <slot> -1`
+when a cast is not usable.
+
+`ski` is only sent at login. A host that attaches afterwards can still learn
+the used slots by pairing the client's own `[SEND] u_s <slot> <type> <id>`
+with the answering `[RECV] su <type> <charId> <type> <id> <vnum> ...` (match
+the local char id from `at` and the target). This is what
+`spawnlog.load_skill_slots` and `WorldState.skill_learned` do, so a card swap
+is picked up on the next hit. The `<skillSlot> <targetType> <targetId>` prefix
+is verified; later fields are still unknown.
 
 Target types observed or used by the bot:
 
@@ -114,9 +124,12 @@ linux/scripts/host.sh cast 7 --target-id 14881134 --target-type 1  # self Group 
 linux/scripts/host.sh cast --packet "u_s 0 3 5160"
 ```
 
-The GUI **Skill** field accepts a Skill.dat vnum and maps it to the slot when
-the `ski` list is known; 0 stays the basic attack. The spell rules always store
-the vnum and resolve the slot before sending.
+The GUI **Skill** field accepts a Skill.dat vnum and maps it to the slot from
+`ski`, the DLL-log backfill, or the paired `u_s`/`su` learning; 0 stays the
+basic attack and follows the equipped SP card. A vnum whose slot is still
+unknown is not sent (the server would reject it as a slot) — the status bar
+explains, and using the spell once in-game teaches the slot. The spell rules
+always store the vnum and resolve the slot before sending.
 
 The character must be **standing** (sitting and recovery block actions), the
 target must be in range, and the server confirms a successful cast with an

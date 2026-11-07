@@ -73,7 +73,9 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `target_id` | last `ncif` target |
 | `last_skill` | skill vnum from the last `su` |
 | `skill_pages` / `skill_list` | learned skills from `ski <page> <vnum>...`; `skill_list` is page-ordered and deduplicated; `u_s` uses a zero-based index into it |
-| `skill_slot(vnum)` / `skill_vnum(slot)` | map between Skill.dat vnums and `u_s` slots |
+| `skill_learned` | slot → Skill.dat vnum seen in the client's own `u_s <slot>` and the server's answering `su ... <vnum> ...`; needed because `ski` is only sent at login |
+| `basic_skill` | the vnum the server reports for `u_s 0` — the equipped SP card's basic attack (Energy Bolt 260 on the live mage) |
+| `skill_slot(vnum)` / `skill_vnum(slot)` | map between Skill.dat vnums and `u_s` slots, from `ski` and the learned pairs |
 | `combat` | last 100 combat events (`attacker`, `target`, `skill`, raw args) |
 | `last_packet` | the most recently fed `Packet` |
 
@@ -97,7 +99,8 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `rest` | RECV | `resting` |
 | `cond` | RECV | entity `speed` |
 | `ncif` | SEND | `target_id` |
-| `ski` | RECV | learned skill pages and the ordered `skill_list` used by `u_s` slots |
+| `u_s` | SEND | the last sent `u_s` slot; paired with the next `su` from self to fill `skill_learned` (slot 0 → `basic_skill`) |
+| `ski` | RECV | learned skill pages and the ordered `skill_list` used by `u_s` slots; slot 0 is the basic attack |
 | `su` | RECV | `combat`, `last_skill` (first five ints); if the target is self, `last_attacker_id`/`last_attacker_at` |
 | `stat` | RECV | own HP/MP |
 | `say` | RECV/SEND | `chat` |
@@ -130,7 +133,7 @@ animate a walk:
 | raw move | `SEND\|walk x y checksum speed` | probe `walk -1 -1 0 10` → server `tp`; the client may visibly teleport |
 | sit/stand | `rest 1 1 <charId>` (toggles) | `rest <type> <charId> <state>` (0 stand, 1 sit) |
 | target | `ncif <type> <id>` | no direct reply; used before `u_s` |
-| skill | `u_s <skillSlot> <targetType> <targetId>`; slot 0 = normal attack; `ski` maps slots to Skill.dat vnums | `su <attacker> <target> <skill> …` (normal attack reports 866/868) |
+| skill | `u_s <skillSlot> <targetType> <targetId>`; slot 0 = the SP card's basic attack; `ski` or paired `u_s`/`su` lines map slots to Skill.dat vnums | `su <attacker> <target> <skill> …` (the basic attack reports the card's skill: 260 Energy Bolt, 866 Holy Attack) |
 
 The raw `walk` checksum is `walk_checksum(x, y)` = `1 if (x + y) % 3 == 1 else
 0`; the client's own builder uses exactly this. The client's MoveTo sends a
@@ -210,6 +213,13 @@ wins, and the current map is kept while it is tied for best.
 The GUI's **Map / Bot** tab renders the whole current map (automatically
 switched from `c_map`/`at`), overlays entities with hover tooltips, accepts
 waypoints by click, and draws the 8-direction path as a continuous polyline.
+The **Combat** box shows the values the bot actually enforces for the chosen
+skill — range, cast time, cooldown and MP from Skill.dat — and Skill `0`
+follows the equipped SP card, whose vnum is learned from `u_s 0` + `su`.
+**Search** is the target search radius, while the attack itself is capped by
+the skill's own range. The **Targets** list shows the monster vnums currently
+spawned on the loaded map (plus selected entries marked "not on this map"),
+not the 2,795-entry catalog, so the list matches what is around the character.
 The sidebar also owns the bot configuration:
 
 - `monsternames.py` — `vnum → monster name` and skill descriptions from

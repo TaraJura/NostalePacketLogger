@@ -48,7 +48,7 @@
 | Add spell… picker is empty | `NSgtdData.NOS` is missing or `NTPL_NSGTD` points elsewhere | set `NTPL_NSGTD` / `NTPL_NSTC`; manual vnums still work |
 | Spell rule never casts | not enough MP, target out of the spell's own range, rule/spell cooldown still running, or a higher rule is always winning | check the rule's description metadata; wait, move closer, raise MP, or reorder/disable the higher rule |
 | Rule order is not what I wanted | the list is evaluated 1., 2., … from the top | use the ↑/↓ buttons; the number on the left shows execution priority |
-| Character swings at empty space / “attacks on blind” | UI Range selected a monster outside the skill's real range; the client animates but the server rejects or self-targets | the bot now caps basic attacks at the scanned skill range (866 = 11); use a longer-range spell rule or walk closer. A status message shows the distance |
+| Character swings at empty space / “attacks on blind” | Search radius selected a monster outside the skill's real range; the client animates but the server rejects or self-targets | the bot caps basic attacks at the equipped SP card's Skill.dat range (Energy Bolt 260 = 6, Holy Attack 866 = 11) shown in the Combat box; use a longer-range spell rule or walk closer. A status message shows the distance |
 
 ## Injection
 

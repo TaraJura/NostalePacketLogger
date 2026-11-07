@@ -293,5 +293,66 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(seen, [["a", "b"]])
 
 
+class SkillSlotLearningTests(unittest.TestCase):
+    """SP-card basic skill and `u_s` slot mapping without ``ski``.
+
+    A host that attaches after login never sees the skill list. Pairing the
+    client's own `u_s <slot>` with the answering `su ... <vnum>` still maps
+    the used slots, and slot 0 is the equipped card's basic attack.
+    """
+
+    def setUp(self):
+        self.engine = Engine()
+        # `at` teaches self_id: at <charId> <mapId> <x> <y> ...
+        self.engine.feed(
+            packet(Kind.RECV, "at 14881134 2 110 141 2 0 1 1 -1 0 0")
+        )
+
+    def test_basic_attack_learns_the_sp_card_skill(self):
+        self.engine.feed(packet(Kind.SEND, "u_s 0 3 3161"))
+        world = self.engine.feed(
+            packet(Kind.RECV, "su 1 14881134 3 3161 260 5 11 594")
+        )
+        self.assertEqual(world.basic_skill, 260)
+        self.assertEqual(world.skill_learned, {0: 260})
+        self.assertEqual(world.skill_slot(260), 0)
+        self.assertEqual(world.skill_vnum(0), 260)
+
+    def test_spell_slot_learns_without_ski(self):
+        self.engine.feed(packet(Kind.SEND, "u_s 5 3 3161"))
+        world = self.engine.feed(
+            packet(Kind.RECV, "su 1 14881134 3 3161 855 5 11 594")
+        )
+        self.assertEqual(world.skill_learned, {5: 855})
+        self.assertIsNone(world.basic_skill)
+        self.assertEqual(world.skill_slot(855), 5)
+
+    def test_another_players_hit_does_not_teach(self):
+        self.engine.feed(packet(Kind.SEND, "u_s 0 3 3161"))
+        world = self.engine.feed(
+            packet(Kind.RECV, "su 1 14877915 3 3161 866 5 11 594")
+        )
+        self.assertIsNone(world.basic_skill)
+        self.assertEqual(world.skill_learned, {})
+
+    def test_stale_send_is_not_paired(self):
+        self.engine.feed(packet(Kind.SEND, "u_s 0 3 3161"))
+        world = self.engine.feed(
+            Packet(Kind.RECV, "su 1 14881134 3 3161 260 5 11 594", 10.0)
+        )
+        self.assertIsNone(world.basic_skill)
+        self.assertEqual(world.skill_learned, {})
+
+    def test_ski_slot_zero_is_the_basic_skill(self):
+        world = self.engine.feed(packet(Kind.RECV, "ski 0 260 855 262"))
+        self.assertEqual(world.basic_skill, 260)
+        self.assertEqual(world.skill_slot(855), 1)
+
+    def test_another_players_rest_does_not_take_over_self(self):
+        world = self.engine.feed(packet(Kind.RECV, "rest 1 11361583 0"))
+        self.assertEqual(world.self_id, 14881134)
+        self.assertIsNone(world.resting)
+
+
 if __name__ == "__main__":
     unittest.main()

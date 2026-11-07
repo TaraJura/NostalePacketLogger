@@ -61,22 +61,27 @@ offered as active spells. Examples from the live client:
 
 | vnum | name | `u_s` slot (this character) | MP | target | cooldown | cast |
 |---|---|---|---|---|---|---|
-| 866 | Holy Attack | 0 | 0 | monster | 0.9 s | 0.2 s |
+| 260 | Energy Bolt (mage card) | 0 | 0 | monster | 0.5 s | 0.8 s |
+| 866 | Holy Attack (swordsman card) | 0 | 0 | monster | 0.9 s | 0.2 s |
 | 867 | Healing | 1 | 50 | monster/any | 3 s | 0.2 s |
 | 869 | Mana Shield | 3 | 300 | self | 60 s | 1.0 s |
 | 873 | Group Healing | 7 | 250 | self/any | 20 s | 0.4 s |
 | 876 | Holy Hammer | 10 | 145 | monster | 90 s | 0.7 s |
-| 264 | Magic Missile | depends on class | 35 | monster | 20 s | 1.0 s |
 
 **Important:** the first `u_s` field is the **zero-based slot in the
 character's learned skill list**, not the Skill.dat vnum. The client sends
 `u_s 10 3 <id>` for Holy Hammer and the server answers `su ... 876 ...`; the
 live `ski 0 866 866 866 867 ... 876 ...` list gives the slot. The bot stores
 the **vnum** in the rule (portable) and resolves it to the slot before
-sending, using the live `ski` packet or the DLL-log backfill from startup
-(`spawnlog.load_skill_list`). The rule text shows both the vnum and slot; the
-picker lists the actual learned skills (or all active spells when no skill
-list is known).
+sending, using the live `ski` packet, the DLL-log backfill
+(`spawnlog.load_skill_list`), or — when the host attached after login and
+never saw `ski` — the slots learned from pairing the client's own
+`u_s <slot>` with the answering `su ... <vnum>`
+(`spawnlog.load_skill_slots`, and live in `WorldState.skill_learned`). The
+rule text shows both the vnum and slot. The picker lists all active spells;
+each is marked `slot N`, `not learned` (only when `ski` is known) or `slot
+unknown` (no list seen yet — use the spell once in-game or relog with the
+logger attached).
 
 Each rule has:
 
@@ -99,19 +104,25 @@ change priority; the number on the left shows the current order.
 
 Data-driven checks before a cast:
 
-- **range**: basic attacks use the Skill field's skill range (default basic
-  attack 866 = 11 cells) even when the UI Range is larger. Out-of-range
-  attacks are not sent; the status bar reports the distance and the bot walks
-  the path instead. Use a longer-range spell rule or walk closer.
-- **MP**: if `DATA[8] > current MP`, the rule is skipped (next rule may fit).
+- **basic skill**: Skill `0` is the equipped SP card's basic attack. Its vnum
+  is **detected**, not hardcoded: the server answers `u_s 0` with
+  `su ... 260 ...` (Energy Bolt on the live mage, 866 on the swordsman), and
+  the Combat box shows that record's range, cast time, cooldown and MP. A card
+  swap therefore changes the values at the next hit.
+- **range**: a basic attack is only sent within the detected skill's
+  `TARGET[2]` range (Energy Bolt = 6 cells), even when the **Search** radius
+  is larger. Out-of-range attacks are not sent; the status bar reports the
+  distance and the bot walks the path instead.
+- **MP**: a basic attack with a nonzero `DATA[8]` is not sent when
+  `DATA[8] > current MP`; the status bar says so. Spell rules are skipped.
 - **range**: a monster spell is skipped when the target is farther than
   `TARGET[2]` (`DATA[11]`) cells.
 - **spell cooldown**: the rule's own cooldown is `max(rule.cooldown, catalog
   cooldown)`, so a 90 s spell is not re-cast every few seconds.
-- **cast time**: the walk pause after the cast is at least `DATA[4]`.
+- **cast time**: the next action and the walk pause wait at least `DATA[4]`
+  (plus the Combat **Min delay** floor). The hardcoded 3 s default is gone.
 
-Casting still obeys the global **Cooldown** in Combat. Monster rules require a
-monster in range and send:
+Monster rules require a monster in range and send:
 
 ```
 ncif 3 <entityId>
@@ -163,7 +174,7 @@ Example:
   "skill": 0,
   "skill_template": "u_s {skill} {type} {target}",
   "attack_range": 10,
-  "attack_cooldown": 3.0,
+  "attack_cooldown": 1.0,
   "pickup": true,
   "loot_range": 3,
   "recover": true,

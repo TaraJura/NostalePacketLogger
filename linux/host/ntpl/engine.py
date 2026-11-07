@@ -17,7 +17,7 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .protocol import Packet
+from .protocol import Kind, Packet
 
 
 @dataclass
@@ -71,6 +71,19 @@ class WorldState:
     # carries a zero-based slot in this deduplicated list, not the vnum.
     skill_pages: dict[int, list[int]] = field(default_factory=dict)
     skill_list: list[int] = field(default_factory=list)
+    # Slot -> vnum learned from the client's own `u_s <slot>` answered by the
+    # server's `su ... <vnum> ...`. `ski` is only sent at login, so a host
+    # that attaches later never sees the list; pairing the two packets still
+    # reveals the slots of the skills that were actually used (and handles an
+    # SP card swap without a relog).
+    skill_learned: dict[int, int] = field(default_factory=dict)
+    # The vnum the server reports for `u_s 0`, i.e. the equipped SP card's
+    # basic attack (Energy Bolt 260 on the live mage, Holy Attack 866 on the
+    # swordsman). This is what makes range/cast/cooldown/MP per-card correct
+    # without hardcoding a class skill.
+    basic_skill: int | None = None
+    pending_skill_slot: int | None = None
+    pending_skill_at: float = 0.0
     # Last entity that hit the local player, with the packet timestamp.
     last_attacker_id: int | None = None
     last_attacker_at: float = 0.0
@@ -88,12 +101,16 @@ class WorldState:
         try:
             return self.skill_list.index(vnum)
         except ValueError:
-            return None
+            pass
+        for slot, learned in self.skill_learned.items():
+            if learned == vnum:
+                return slot
+        return None
 
     def skill_vnum(self, slot: int) -> int | None:
         if 0 <= slot < len(self.skill_list):
             return self.skill_list[slot]
-        return None
+        return self.skill_learned.get(slot)
 
 
 def walk_checksum(x: int, y: int) -> int:
@@ -282,6 +299,11 @@ def _on_rest(world: WorldState, packet: Packet) -> None:
     if not values:
         return
     kind, entity_id, state = values
+    # `rest` is also sent for other players (live 2026-11-07: `rest 1
+    # 11361583 0` for Quest22). Once self_id is known, ignore theirs: taking
+    # it would corrupt self_id and the sit/stand state the bot relies on.
+    if world.self_id is not None and entity_id != world.self_id:
+        return
     world.self_id = entity_id
     world.resting = state == 1
     entity = world.entities.get(entity_id)
@@ -329,6 +351,21 @@ def _on_skill_list(world: WorldState, packet: Packet) -> None:
             if vnum not in ordered:
                 ordered.append(vnum)
     world.skill_list = ordered
+    if ordered and world.basic_skill is None:
+        # Slot 0 is the card's basic attack; live `u_s 0` is answered with it
+        # (866 on the 2026-11-06 specialist, 260 on the 2026-11-07 mage).
+        world.basic_skill = ordered[0]
+
+
+def _on_skill_send(world: WorldState, packet: Packet) -> None:
+    # SEND: the client's own `u_s <slot> <targetType> <targetId>`.
+    if packet.direction is not Kind.SEND:
+        return
+    values = packet.ints(1)
+    if not values:
+        return
+    world.pending_skill_slot = values[0]
+    world.pending_skill_at = packet.timestamp
 
 
 def _on_skill_used(world: WorldState, packet: Packet) -> None:
@@ -342,6 +379,23 @@ def _on_skill_used(world: WorldState, packet: Packet) -> None:
         return
     attacker_type, attacker_id, target_type, target_id, skill = values
     world.last_skill = skill
+    if (
+        attacker_type == 1
+        and world.self_id is not None
+        and attacker_id == world.self_id
+    ):
+        # Our own `u_s <slot>` was answered: this is the slot -> vnum mapping
+        # the skill list would have given us. Slot 0 is the basic attack.
+        slot = world.pending_skill_slot
+        if (
+            slot is not None
+            and packet.timestamp - world.pending_skill_at <= 5.0
+        ):
+            world.skill_learned[slot] = skill
+            if slot == 0:
+                world.basic_skill = skill
+        # A stale pending slot must not attach to a later hit.
+        world.pending_skill_slot = None
     if target_type == 1 and target_id == world.self_id:
         # Something is hitting us; remember it so the bot can retaliate.
         world.last_attacker_id = attacker_id
@@ -401,6 +455,7 @@ class Engine:
                 "rest": _on_rest,       # RECV: sit/stand state
                 "cond": _on_condition,  # RECV: entity speed/state
                 "ncif": _on_select,     # SEND: target selection
+                "u_s": _on_skill_send,  # SEND: skill used (slot, not vnum)
                 "ski": _on_skill_list,  # RECV: learned skill list
                 "su": _on_skill_used,   # RECV: a skill hit
                 "stat": _on_stats,      # RECV: own hp/mp

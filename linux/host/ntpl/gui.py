@@ -45,7 +45,7 @@ from .mapdata import (
     terrain_rgb,
 )
 from .monsternames import load_monster_names, load_skill_descriptions
-from .spawnlog import load_skill_list, load_spawns
+from .spawnlog import load_skill_list, load_skill_slots, load_spawns
 from .spells import SpellInfo, load_spells
 from .protocol import Kind, Packet, ProtocolError
 
@@ -175,6 +175,7 @@ class Application(Gtk.Application):
         self.log_vnums: dict[int, int] = {}
         self.log_names: dict[int, str] = {}
         self.log_skill_list: list[int] = []
+        self.log_skill_slots: dict[int, int] = {}
         self.spawns_loaded = False
         self.target_mode = None
         self.target_search = None
@@ -197,8 +198,13 @@ class Application(Gtk.Application):
         self.map_info = None
         self.skill_entry = None
         self.skill_packet_entry = None
+        self.combat_info = None
+        self._combat_info_text = ""
         self.attack_range = None
         self.attack_cooldown = None
+        self.mp_warn_at = 0.0
+        self.slot_warn_at = 0.0
+        self._target_map_vnums: frozenset[int] | None = None
         self.auto_attack_toggle = None
         self.loop_toggle = None
         self.pickup_toggle = None
@@ -295,6 +301,7 @@ class Application(Gtk.Application):
         self._ensure_spells_loaded()
         GLib.timeout_add(250, self._layout_tick)
         GLib.timeout_add(2000, self._auto_map_tick)
+        GLib.timeout_add(1000, self._live_sidebar_tick)
 
     def _layout_tick(self) -> bool:
         """Reflow the Map/Bot page when the window becomes narrow.
@@ -534,28 +541,51 @@ class Application(Gtk.Application):
         )
         self.skill_entry = Gtk.Entry()
         self.skill_entry.set_width_chars(6)
-        # Skill 0 is the normal/basic attack (`u_s 0 3 <monster>`); the server
-        # reports 866/868 in `su`. 866 is not a castable `u_s` skill.
+        # Skill 0 is the equipped SP card's basic attack (`u_s 0 3 <monster>`);
+        # the server reports its vnum in `su` (260 Energy Bolt on the mage).
         self.skill_entry.set_text("0")
-        self.skill_entry.set_tooltip_text("skill vnum; mapped to the u_s skill slot when known (0 = basic attack)")
+        self.skill_entry.set_tooltip_text(
+            "skill vnum; mapped to the u_s skill slot when known "
+            "(0 = the SP card's basic attack)"
+        )
+        self.skill_entry.connect(
+            "changed", lambda *_: self._update_combat_info()
+        )
         self.attack_range = Gtk.SpinButton.new_with_range(1, 40, 1)
         self.attack_range.set_value(10)
+        self.attack_range.set_tooltip_text(
+            "target search radius in cells; the attack itself is limited by "
+            "the skill's own range (shown below)"
+        )
         self.attack_cooldown = Gtk.SpinButton.new_with_range(1, 30, 1)
-        self.attack_cooldown.set_value(3)
+        self.attack_cooldown.set_value(1)
+        self.attack_cooldown.set_tooltip_text(
+            "minimum delay between actions; the skill's own cast time and "
+            "cooldown (shown below) are enforced on top"
+        )
         combat_box.append(
             self._field_row(
                 Gtk.Label(label="Skill"),
                 self.skill_entry,
-                Gtk.Label(label="Range"),
+                Gtk.Label(label="Search"),
                 self.attack_range,
             )
         )
         combat_box.append(
             self._field_row(
-                Gtk.Label(label="Cooldown"),
+                Gtk.Label(label="Min delay"),
                 self.attack_cooldown,
             )
         )
+        self.combat_info = Gtk.Label(label="reading Skill.dat…")
+        self.combat_info.set_xalign(0)
+        self.combat_info.set_wrap(True)
+        self.combat_info.add_css_class("dim-label")
+        self.combat_info.set_tooltip_text(
+            "range, cast time, cooldown and MP from Skill.dat for the skill "
+            "the bot is using; skill 0 follows the equipped SP card"
+        )
+        combat_box.append(self.combat_info)
         self.skill_packet_entry = Gtk.Entry()
         self.skill_packet_entry.set_text("u_s {skill} {type} {target}")
         self.skill_packet_entry.set_tooltip_text(
@@ -805,6 +835,7 @@ class Application(Gtk.Application):
         self.spells_loading = False
         for info in self.spell_rows:
             self._update_spell_desc(info)
+        self._update_combat_info()
         return False
 
     def _ensure_spawns_loaded(self) -> None:
@@ -819,6 +850,7 @@ class Application(Gtk.Application):
         self.spawns_loaded = True
         self.log_vnums, self.log_names = load_spawns(self.log_file)
         self.log_skill_list = load_skill_list(self.log_file)
+        self.log_skill_slots, _ = load_skill_slots(self.log_file)
 
     # -- target filter --------------------------------------------------
 
@@ -863,13 +895,22 @@ class Application(Gtk.Application):
     def _update_target_info(self) -> None:
         if self.target_info is None:
             return
-        known = len(self.monster_names)
+        on_map = len(self._on_map_monster_vnums())
         self.target_info.set_text(
-            f"{len(self.target_vnums)} selected · {known} known monsters"
-            + ("" if known else " (add vnums manually)")
+            f"{len(self.target_vnums)} selected · "
+            f"{on_map} monster kind(s) on this map"
         )
 
+    def _monster_display_name(self, vnum: int) -> str:
+        return self.monster_names.get(vnum, f"vnum {vnum}")
+
     def _refresh_target_list(self) -> None:
+        """List the monsters spawned on the current map, not the whole catalog.
+
+        The static table holds 2,795 entries; showing its first 40 was the
+        confusing part. Selections that are not on this map stay visible (so
+        they can be unchecked) and are marked, instead of hiding the choice.
+        """
         if self.target_list is None:
             return
         while (child := self.target_list.get_first_child()) is not None:
@@ -880,15 +921,19 @@ class Application(Gtk.Application):
             if self.target_search is not None
             else ""
         )
+        on_map = self._on_map_monster_vnums()
+        self._target_map_vnums = on_map
         rows: list[tuple[int, str]] = []
         if query:
-            matches = [
-                (vnum, name)
-                for vnum, name in self.monster_names.items()
-                if query in name.lower()
-                or str(vnum) == query
-                or query in str(vnum)
-            ]
+            matches = []
+            for vnum in on_map:
+                name = self._monster_display_name(vnum)
+                if (
+                    query in name.lower()
+                    or str(vnum) == query
+                    or query in str(vnum)
+                ):
+                    matches.append((vnum, f"{name} ({vnum})"))
             matches.sort(
                 key=lambda item: (
                     0 if str(item[0]) == query else 1,
@@ -898,18 +943,34 @@ class Application(Gtk.Application):
             )
             rows = matches[:60]
         else:
-            rows = [
-                (vnum, self.monster_names.get(vnum, f"vnum {vnum}"))
-                for vnum in sorted(self.target_vnums)
-            ]
-            rows += [
-                (vnum, name)
-                for vnum, name in sorted(self.monster_names.items())
-                if vnum not in self.target_vnums
-            ][:40]
+            for vnum in sorted(
+                self.target_vnums,
+                key=lambda value: (
+                    self._monster_display_name(value).lower(),
+                    value,
+                ),
+            ):
+                name = self._monster_display_name(vnum)
+                suffix = "" if vnum in on_map else ", not on this map"
+                rows.append((vnum, f"{name} ({vnum}{suffix})"))
+            for vnum in sorted(
+                (v for v in on_map if v not in self.target_vnums),
+                key=lambda value: (
+                    self._monster_display_name(value).lower(),
+                    value,
+                ),
+            ):
+                name = self._monster_display_name(vnum)
+                rows.append((vnum, f"{name} ({vnum})"))
 
         if not rows:
-            empty = Gtk.Label(label="no matching monsters")
+            empty = Gtk.Label(
+                label=(
+                    "no matching monsters on this map"
+                    if query
+                    else "no monsters on this map yet"
+                )
+            )
             empty.add_css_class("dim-label")
             empty.set_xalign(0)
             row = Gtk.ListBoxRow()
@@ -919,8 +980,8 @@ class Application(Gtk.Application):
             self.target_list.append(row)
             return
 
-        for vnum, name in rows:
-            check = Gtk.CheckButton(label=f"{name} ({vnum})")
+        for vnum, label in rows:
+            check = Gtk.CheckButton(label=label)
             check.set_active(vnum in self.target_vnums)
             check.set_tooltip_text(f"monster vnum {vnum}")
             check.connect(
@@ -968,9 +1029,79 @@ class Application(Gtk.Application):
 
     # -- spell rules ----------------------------------------------------
 
+    @staticmethod
+    def _combat_stats_text(info: SpellInfo) -> str:
+        """Name and the Skill.dat values the bot actually enforces."""
+        parts = [f"{info.name} ({info.vnum})"]
+        if info.range:
+            parts.append(f"range {info.range}")
+        parts.append(f"cast {info.cast_time:g}s")
+        parts.append(f"CD {info.cooldown:g}s")
+        parts.append(f"{info.mp_cost} MP")
+        return " · ".join(parts)
+
+    def _update_combat_info(self) -> None:
+        """Show the real range/cast/cooldown/MP the bot uses.
+
+        Skill 0 is the client's basic attack, whose vnum depends on the
+        equipped SP card; it is detected from `u_s 0` + `su`, not hardcoded.
+        """
+        if self.combat_info is None:
+            return
+        skill = self._entry_int(self.skill_entry, 0)
+        if not self.spells_loaded:
+            text = "reading Skill.dat…"
+        elif skill > 0:
+            info = self.spells.get(skill)
+            text = (
+                self._combat_stats_text(info)
+                if info is not None
+                else f"skill {skill}: not in Skill.dat"
+            )
+        else:
+            vnum = self._basic_skill_vnum()
+            info = self.spells.get(vnum) if vnum else None
+            if info is None:
+                text = (
+                    "basic attack: skill vnum not detected yet — "
+                    "it is learned from the first hit (u_s 0)"
+                )
+            else:
+                text = "basic: " + self._combat_stats_text(info)
+        if text != self._combat_info_text:
+            self._combat_info_text = text
+            self.combat_info.set_text(text)
+
+    def _on_map_monster_vnums(self) -> frozenset[int]:
+        """Monster vnums currently spawned on the loaded map."""
+        vnums: set[int] = set()
+        for entity in self.engine.world.entities.values():
+            if entity.kind != 3:
+                continue
+            vnum = self._monster_vnum(entity)
+            if vnum > 0:
+                vnums.add(vnum)
+        return frozenset(vnums)
+
+    def _live_sidebar_tick(self) -> bool:
+        """Refresh the combat line and the on-map target list once a second."""
+        if self._closing:
+            return False
+        self._update_combat_info()
+        vnums = self._on_map_monster_vnums()
+        if vnums != self._target_map_vnums:
+            self._target_map_vnums = vnums
+            self._refresh_target_list()
+            self._update_target_info()
+        return True
+
     def _spell_desc_text(self, spell: int) -> str:
         if spell <= 0:
-            return "basic attack (skill 0)"
+            vnum = self._basic_skill_vnum()
+            info = self.spells.get(vnum) if vnum else None
+            if info is None:
+                return "basic attack (slot 0, detected from the first hit)"
+            return f"basic: {self._combat_stats_text(info)}"
         info = self.spells.get(spell)
         if info is None:
             return "unknown spell (not in Skill.dat)"
@@ -982,6 +1113,8 @@ class Application(Gtk.Application):
             parts.append("NOT LEARNED")
         if info.mp_cost:
             parts.append(f"{info.mp_cost} MP")
+        if info.cast_time:
+            parts.append(f"cast {info.cast_time:g}s")
         if info.cooldown:
             parts.append(f"{info.cooldown:g}s CD")
         parts.append(info.target_mode)
@@ -1030,7 +1163,9 @@ class Application(Gtk.Application):
                 subject="always",
                 comparator="below",
                 threshold=50,
-                cooldown=max(1.0, spell.cooldown),
+                # The Skill.dat cooldown; this is a per-card value, so it
+                # follows the equipped SP card's spell record.
+                cooldown=spell.cooldown,
                 target=target,
             )
         )
@@ -1102,18 +1237,9 @@ class Application(Gtk.Application):
                 return
             query = search.get_text().strip().lower()
             known = self._known_skills()
-            if known:
-                spells = [
-                    self.spells[vnum]
-                    for vnum in known
-                    if vnum in self.spells and self.spells[vnum].active
-                ]
-            else:
-                spells = [
-                    spell
-                    for spell in self.spells.values()
-                    if spell.active
-                ]
+            spells = [
+                spell for spell in self.spells.values() if spell.active
+            ]
             spells = [
                 spell
                 for spell in spells
@@ -1129,22 +1255,31 @@ class Application(Gtk.Application):
                     or str(spell.vnum) == query
                     or query in str(spell.vnum)
                 ]
-            if not known:
-                spells.sort(
-                    key=lambda spell: (
-                        0 if str(spell.vnum) == query else 1,
-                        spell.name.lower(),
-                        spell.vnum,
-                    )
+            learned_order = {vnum: i for i, vnum in enumerate(known)}
+            spells.sort(
+                key=lambda spell: (
+                    0 if str(spell.vnum) == query else 1,
+                    learned_order.get(spell.vnum, len(learned_order)),
+                    spell.name.lower(),
+                    spell.vnum,
                 )
+            )
             for spell in spells[:120]:
                 slot = self._skill_slot(spell.vnum)
-                slot_text = f"slot {slot}" if slot is not None else "not learned"
+                if slot is not None:
+                    slot_text = f"slot {slot}"
+                elif known:
+                    slot_text = "not learned"
+                else:
+                    # `ski` is sent at login; without it every slot is
+                    # unknown, and claiming "not learned" would be false.
+                    slot_text = "slot unknown"
                 label = Gtk.Label(
                     label=(
                         f"{spell.name}   (vnum {spell.vnum}, {slot_text})   · "
                         f"{spell.mp_cost} MP · {spell.target_mode} · "
-                        f"{spell.cooldown:g}s CD"
+                        f"{spell.cooldown:g}s CD · cast {spell.cast_time:g}s "
+                        f"· range {spell.range}"
                     )
                 )
                 label.set_xalign(0)
@@ -1153,7 +1288,8 @@ class Application(Gtk.Application):
                 row.set_child(label)
                 row.set_tooltip_text(
                     f"spell {spell.vnum} · range {spell.range} · "
-                    f"cast {spell.cast_time:g}s"
+                    f"cast {spell.cast_time:g}s · {spell.cooldown:g}s CD · "
+                    f"{spell.mp_cost} MP"
                 )
                 row.connect(
                     "activate",
@@ -1172,11 +1308,16 @@ class Application(Gtk.Application):
                 row.set_selectable(False)
                 row.set_activatable(False)
                 listbox.append(row)
-            info.set_text(
-                f"{len(spells)} spell(s) matched · "
-                f"{len(known) if known else len(self.spells)} "
-                f"{'learned' if known else 'scanned'}"
-            )
+            if known:
+                info.set_text(
+                    f"{len(spells)} spell(s) matched · {len(known)} learned"
+                )
+            else:
+                info.set_text(
+                    f"{len(spells)} spell(s) matched · slots unknown — the "
+                    "learned list is sent at login; use a spell once or "
+                    "relog with the logger attached"
+                )
 
         search.connect("search-changed", lambda *_: refresh())
         refresh()
@@ -1267,9 +1408,13 @@ class Application(Gtk.Application):
         sync_condition()
 
         timing = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        cooldown = Gtk.SpinButton.new_with_range(0, 300, 1)
+        cooldown = Gtk.SpinButton.new_with_range(0, 300, 0.5)
+        cooldown.set_digits(1)
         cooldown.set_value(rule.cooldown)
-        cooldown.set_tooltip_text("seconds before this rule may fire again")
+        cooldown.set_tooltip_text(
+            "seconds before this rule may fire again; the spell's own "
+            "Skill.dat cooldown is enforced even when this is 0"
+        )
         target = Gtk.DropDown.new_from_strings(["Monster", "Self"])
         target_index = (
             SPELL_TARGETS.index(rule.target)
@@ -1407,7 +1552,14 @@ class Application(Gtk.Application):
         return percent < rule.threshold
 
     def _known_skills(self) -> list[int]:
+        """The authoritative learned-skill list, when the host saw ``ski``."""
         return self.engine.world.skill_list or self.log_skill_list
+
+    def _learned_slots(self) -> dict[int, int]:
+        """Slot -> vnum seen in `u_s`/`su` pairs (log history + live)."""
+        slots = dict(self.log_skill_slots)
+        slots.update(self.engine.world.skill_learned)
+        return slots
 
     def _skill_slot(self, vnum: int) -> int | None:
         if vnum <= 0:
@@ -1418,14 +1570,42 @@ class Application(Gtk.Application):
                 slot = self.log_skill_list.index(vnum)
             except ValueError:
                 slot = None
+        if slot is None:
+            for learned_slot, learned_vnum in self._learned_slots().items():
+                if learned_vnum == vnum:
+                    slot = learned_slot
+                    break
         return slot
 
-    def _skill_send_id(self, vnum: int) -> int:
-        """Map a Skill.dat vnum to the zero-based `u_s` slot, if known."""
+    def _basic_skill_vnum(self) -> int | None:
+        """The equipped SP card's basic attack vnum (skill slot 0).
+
+        ``su`` answers `u_s 0` with it, so it is live and follows a card
+        swap. Until the first hit, the log's paired packets and the ``ski``
+        list provide it; the old hardcoded 866 was a swordsman skill and gave
+        a mage the wrong range.
+        """
+        world = self.engine.world
+        if world.basic_skill is not None:
+            return world.basic_skill
+        if 0 in self.log_skill_slots:
+            return self.log_skill_slots[0]
+        if world.skill_list:
+            return world.skill_list[0]
+        if self.log_skill_list:
+            return self.log_skill_list[0]
+        return None
+
+    def _skill_send_id(self, vnum: int) -> int | None:
+        """Map a Skill.dat vnum to the zero-based `u_s` slot.
+
+        ``None`` means the slot is unknown (neither `ski` nor a paired
+        `u_s`/`su` seen it). Sending the vnum there would be an invalid slot,
+        so the caller refuses and tells the user instead.
+        """
         if vnum <= 0:
-            return vnum
-        slot = self._skill_slot(vnum)
-        return vnum if slot is None else slot
+            return 0
+        return self._skill_slot(vnum)
 
     def _spell_target(self, rule: SpellRule) -> str:
         """Resolve the target from Skill.dat, with the rule as fallback.
@@ -1466,6 +1646,18 @@ class Application(Gtk.Application):
             if not rule.enabled or rule.spell <= 0:
                 continue
             if known and rule.spell not in known:
+                continue
+            if self._skill_slot(rule.spell) is None:
+                # `u_s` carries a slot, not the vnum. `ski` is only sent at
+                # login; until a `u_s`/`su` pair reveals this spell's slot,
+                # sending it would be invalid. Skip the rule so basic attacks
+                # still run, and say how to fix it.
+                if now >= self.slot_warn_at:
+                    self._set_status(
+                        f"spell {rule.spell}: u_s slot unknown — use it once "
+                        "in game or relog with the logger attached"
+                    )
+                    self.slot_warn_at = now + 15.0
                 continue
             info = self.spells.get(rule.spell)
             cooldown = max(
@@ -1514,14 +1706,18 @@ class Application(Gtk.Application):
             target_type, target_id = 3, monster.entity_id
             self._send(f"ncif 3 {monster.entity_id}")
         send_skill = self._skill_send_id(rule.spell)
+        if send_skill is None:
+            return False
         packet = self._skill_packet(
             target_id, skill=send_skill, target_type=target_type
         )
         self._send(packet)
-        # The global cooldown paces all actions; the spell's own cooldown is
-        # applied per rule in _select_spell_rule so a long spell does not
-        # block basic attacks or the next rule.
+        # The per-rule cooldown (max of the rule and Skill.dat) is enforced in
+        # _select_spell_rule; here only the cast animation plus the Min delay
+        # floor pace the next action.
         cooldown = float(self.attack_cooldown.get_value())
+        if info is not None:
+            cooldown = max(cooldown, info.cast_time)
         self.attack_cooldown_until = now + cooldown
         cast_pause = info.cast_time if info is not None else 0.0
         self.walk_not_before = now + max(
@@ -1529,8 +1725,7 @@ class Application(Gtk.Application):
         )
         self.spell_last_cast[index] = now
         name = info.name if info is not None else str(rule.spell)
-        slot = self._skill_slot(rule.spell)
-        slot_text = f" slot {slot}" if slot is not None else ""
+        slot_text = f" slot {send_skill}"
         self._set_status(
             f"spell {name} (vnum {rule.spell}{slot_text}): {packet}"
         )
@@ -1601,6 +1796,7 @@ class Application(Gtk.Application):
         self.skill_packet_entry.set_text(config.skill_template)
         self.attack_range.set_value(config.attack_range)
         self.attack_cooldown.set_value(config.attack_cooldown)
+        self._update_combat_info()
         self.pickup_toggle.set_active(config.pickup)
         self.loot_range.set_value(config.loot_range)
         self.recover_toggle.set_active(config.recover)
@@ -2509,10 +2705,6 @@ class Application(Gtk.Application):
                     and (values[2], values[3]) == self.pending_target
                 ):
                     self._learn_char_id(values[1])
-        elif packet.opcode == "rest":
-            values = packet.ints(3)
-            if values and values[0] == 1:
-                self._learn_char_id(values[1])
         elif packet.opcode == "at":
             values = packet.ints(1)
             if values:
@@ -2920,13 +3112,14 @@ class Application(Gtk.Application):
                     return True
 
             basic = self._entry_int(self.skill_entry, 0)
+            basic_vnum = basic if basic > 0 else self._basic_skill_vnum()
             basic_info = (
-                self.spells.get(basic) if basic > 0 else self.spells.get(866)
+                self.spells.get(basic_vnum) if basic_vnum else None
             )
             basic_range = float(radius)
             if basic_info is not None and basic_info.range > 0:
-                # The UI Range may be larger than the actual skill (the
-                # server rejects or self-targets out-of-range attacks).
+                # The search radius may be larger than the skill; the server
+                # rejects an out-of-range attack, so the skill's range wins.
                 basic_range = min(basic_range, float(basic_info.range))
             basic_distance = None
             standing_at = self._player_cell()
@@ -2946,19 +3139,61 @@ class Application(Gtk.Application):
                 and basic_in_range
                 and now >= self.attack_cooldown_until
             ):
-                self._send(f"ncif 3 {monster.entity_id}")
-                packet = self._skill_packet(
-                    monster.entity_id,
-                    skill=self._skill_send_id(basic) if basic > 0 else 0,
-                )
-                self._send(packet)
-                cooldown = float(self.attack_cooldown.get_value())
-                self.attack_cooldown_until = now + cooldown
-                # Do not walk inside the skill animation: the server drops
-                # the walk and the bot would skip the whole path.
-                self.walk_not_before = now + self.attack_walk_delay
-                self._set_status(f"attack {monster.entity_id}: {packet}")
-                return True
+                stats = self.engine.world.stats
+                if (
+                    basic_info is not None
+                    and basic_info.mp_cost > 0
+                    and stats.mp < basic_info.mp_cost
+                ):
+                    if now >= self.mp_warn_at:
+                        self._set_status(
+                            f"{basic_info.name}: not enough MP "
+                            f"({stats.mp}/{basic_info.mp_cost})"
+                        )
+                        self.mp_warn_at = now + 10.0
+                else:
+                    send_skill = (
+                        self._skill_send_id(basic) if basic > 0 else 0
+                    )
+                    if send_skill is None:
+                        if now >= self.slot_warn_at:
+                            self._set_status(
+                                f"skill {basic}: u_s slot unknown — use it "
+                                "once in game or relog with the logger attached"
+                            )
+                            self.slot_warn_at = now + 10.0
+                    else:
+                        self._send(f"ncif 3 {monster.entity_id}")
+                        packet = self._skill_packet(
+                            monster.entity_id, skill=send_skill
+                        )
+                        self._send(packet)
+                        # The skill's own cast time and cooldown pace the next
+                        # action; the Min delay spin is only a floor on top.
+                        cooldown = float(self.attack_cooldown.get_value())
+                        if basic_info is not None:
+                            cooldown = max(
+                                cooldown,
+                                basic_info.cooldown,
+                                basic_info.cast_time,
+                            )
+                        else:
+                            cooldown = max(cooldown, 1.0)
+                        self.attack_cooldown_until = now + cooldown
+                        # Do not walk inside the skill animation: the server
+                        # drops the walk and the bot would skip the path.
+                        cast_pause = (
+                            basic_info.cast_time
+                            if basic_info is not None
+                            else 0.0
+                        )
+                        self.walk_not_before = now + max(
+                            self.attack_walk_delay, cast_pause
+                        )
+                        self._set_status(
+                            f"attack {monster.entity_id}: {packet}"
+                        )
+                        return True
 
             if (
                 rule is None

@@ -149,6 +149,12 @@ ranks all grids against every live entity and picks the tightest perfect fit —
 same-layout maps tie on a couple of positions, so the full entity cloud and the
 size tie-break are what make the guess deterministic.
 
+Combat values are per equipped SP card: Skill `0` is the card's basic attack,
+whose vnum the server reports for `u_s 0` (Energy Bolt 260 on the live mage),
+and Skill.dat supplies its range, cast time, cooldown and MP. The Targets list
+is built from the entities currently spawned on the loaded map, so it matches
+the surroundings instead of dumping the static catalog.
+
 Supporting data modules:
 
 - `monsternames.py` — reads `NSlangData_<lang>.NOS`, decodes the client's

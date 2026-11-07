@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ntpl.spawnlog import load_skill_list, load_spawns
+from ntpl.spawnlog import load_skill_list, load_skill_slots, load_spawns
 
 
 class SpawnLogTests(unittest.TestCase):
@@ -44,9 +44,26 @@ class SpawnLogTests(unittest.TestCase):
             [866, 867, 868, 873, 876, 30, 31],
         )
 
+    def test_reads_skill_slots_from_paired_packets(self):
+        log = self._write(
+            "1 [RECV] at 14881134 2 110 141 2 0 1 1\r\n"
+            "2 [SEND] u_s 0 3 3161\r\n"
+            "3 [RECV] su 1 14881134 3 3161 260 5 11\r\n"
+            "4 [SEND] u_s 5 3 3163\r\n"
+            # Another player's hit on the same target must not be paired.
+            "5 [RECV] su 1 14877915 3 3163 866 5 11\r\n"
+            "6 [RECV] su 1 14881134 3 3163 855 5 11\r\n"
+        )
+        slots, self_id = load_skill_slots(log)
+        self.assertEqual(self_id, 14881134)
+        self.assertEqual(slots, {0: 260, 5: 855})
+
     def test_missing_log_is_not_fatal(self):
         self.assertEqual(load_spawns("/nonexistent/NosTalePacketLog.txt"), ({}, {}))
         self.assertEqual(load_skill_list("/nonexistent/NosTalePacketLog.txt"), [])
+        self.assertEqual(
+            load_skill_slots("/nonexistent/NosTalePacketLog.txt"), ({}, None)
+        )
 
 
 if __name__ == "__main__":
