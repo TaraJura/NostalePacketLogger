@@ -138,9 +138,12 @@ PYTHONPATH=linux/host python3 -m ntpl status
   count, id/offset index, zlib blocks; `width:int16`, `height:int16`,
   `width*height` terrain bytes; `0x00` walkable). Live 2026-11-07 maps: **98**
   Comet Meadow (50x45), **103** Deep Cave (55x40), **104** (17x15), and the
-  earlier **2**/1/20. The Map/Bot tab draws the grid, walks the character to a
-  left-clicked cell via the client's MoveTo (or, with **Draw path** on, draws
-  the A* waypoint route that Start follows), computes an
+  earlier **2**/1/20. The Map/Bot tab draws the grid; a left click walks the
+  character there along the A* path in short three-cell MoveTo legs (a single
+  far MOVE makes the client jump), or with **Draw path** on draws the route
+  that Start follows. The own marker follows the DLL's `POS` (polled 2 Hz),
+  so it tracks the real position instead of the walk packet's destination.
+  It computes an
   A* path, and the bot recovers below the HP threshold (sit, wait for full,
   stand), stands (`rest`), picks up own/unowned drops (`get 1 <charId>
   <dropId>`), auto-attacks with Retaliate priority (`ncif` + `u_s`; skill 0 =

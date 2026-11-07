@@ -73,6 +73,8 @@ MAX_ROWS = 20000
 TRIM_ROWS = 2000
 DRAIN_INTERVAL_MS = 50
 BOT_INTERVAL_MS = 200
+#: Click-to-walk tick; short legs are paced by the client's walk packet.
+TRAVEL_INTERVAL_MS = 120
 DEFAULT_SCALE = 3
 # Live positions fed to the attach-time map ranking. More points separate
 # same-layout maps; ranking 779 grids costs ~16 ms at this cap.
@@ -247,6 +249,17 @@ class Application(Gtk.Application):
         self.pending_target: tuple[int, int] | None = None
         self.pending_since = 0.0
         self.pending_until = 0.0
+        # The DLL's real player position (POS), preferred for the own marker
+        # so the map follows the animation instead of the walk packet's
+        # destination.
+        self.pos_cell: tuple[int, int] | None = None
+        self.pos_at = 0.0
+        # Click-to-walk: short client-MoveTo legs along the A* path, so a far
+        # click does not become one long MOVE that the client jumps.
+        self.travel_targets: list[tuple[int, int]] = []
+        self.travel_index = 0
+        self.travel_pending: tuple[tuple[int, int], float, int] | None = None
+        self.travel_timer = None
         self.stand_sent_until = 0.0
         self.attack_cooldown_until = 0.0
         self.walk_not_before = 0.0
@@ -330,6 +343,7 @@ class Application(Gtk.Application):
         GLib.timeout_add(250, self._layout_tick)
         GLib.timeout_add(2000, self._auto_map_tick)
         GLib.timeout_add(1000, self._live_sidebar_tick)
+        GLib.timeout_add(500, self._poll_position)
 
     def _layout_tick(self) -> bool:
         """Reflow the Map/Bot page when the window becomes narrow.
@@ -2015,6 +2029,7 @@ class Application(Gtk.Application):
         # path from the previous map.
         if self.bot_running:
             self._stop_bot()
+        self._stop_travel(quiet=True)
         self.bot_goals = []
         self.waypoints.clear()
         self.path_cells.clear()
@@ -2634,21 +2649,106 @@ class Application(Gtk.Application):
                 if char_id is not None:
                     self._send(f"rest 1 1 {char_id}")
                     self._set_status(f"standing up, then walking to {cell}")
-                    GLib.timeout_add(700, self._walk_click, cell)
+                    GLib.timeout_add(700, self._start_travel, cell)
                     return
-            self._walk_click(cell)
+            self._start_travel(cell)
             return
 
         self.waypoints.append(cell)
         self._rebuild_path()
         self._set_status(f"path drawn to {cell} — press Start to follow")
 
-    def _walk_click(self, cell: tuple[int, int]) -> bool:
-        """Send the client's MoveTo for a map click (click-to-move mode)."""
-        if not self._client_move(cell[0], cell[1]):
+    def _start_travel(self, cell: tuple[int, int]) -> bool:
+        """Walk to a clicked cell in short client-MoveTo legs.
+
+        A single far `MOVE` makes the client jump (and the server correct), so
+        follow the A* path in the same three-cell legs the bot uses. The map
+        itself follows the real position via the POS poll.
+        """
+        self._stop_travel(quiet=True)
+        if self.map_grid is None:
+            self._set_status("no map loaded")
             return False
-        self._set_status(f"walking to {cell}")
+        position = self._player_cell()
+        if position is None:
+            self._set_status("position unknown; cannot walk there")
+            return False
+        if position == cell:
+            self._set_status(f"already at {cell}")
+            return False
+        path = astar(self.map_grid, position, cell)
+        if path is None:
+            self._set_status(f"no path to {cell}")
+            return False
+        targets = [path[i] for i in range(2, len(path), 3)]
+        if not targets or targets[-1] != cell:
+            targets.append(cell)
+        self.travel_targets = targets
+        self.travel_index = 0
+        self.travel_pending = None
+        self.travel_timer = GLib.timeout_add(
+            TRAVEL_INTERVAL_MS, self._travel_tick
+        )
+        self._set_status(f"walking to {cell} ({len(targets)} legs)")
         return False
+
+    def _travel_tick(self) -> bool:
+        if self._closing:
+            self.travel_timer = None
+            return False
+        if self.bot_running or not self.travel_targets:
+            self.travel_timer = None
+            return False
+        now = time.monotonic()
+        if self.travel_pending is not None:
+            target, sent_at, distance = self.travel_pending
+            ready_at = sent_at + max(0.35, distance * self.walk_confirm_delay)
+            position = self.engine.world.position
+            if position == target and now >= ready_at:
+                self.travel_pending = None
+                self.travel_index += 1
+            elif now > sent_at + self.walk_timeout + distance * (
+                self.walk_timeout_per_cell
+            ):
+                # A missed leg (blocked/animating slowly) must not stall the
+                # whole walk; move on to the next one.
+                self.travel_pending = None
+                self.travel_index += 1
+                self._set_status("walk leg timed out; continuing")
+            return True
+
+        if self.travel_index >= len(self.travel_targets):
+            self.travel_targets = []
+            self.travel_timer = None
+            self._set_status("arrived")
+            return False
+
+        target = self.travel_targets[self.travel_index]
+        position = self.engine.world.position
+        if position == target:
+            self.travel_index += 1
+            return True
+        distance = 0
+        if position is not None:
+            distance = max(
+                abs(target[0] - position[0]),
+                abs(target[1] - position[1]),
+            )
+        if not self._client_move(target[0], target[1]):
+            self._stop_travel()
+            return False
+        self.travel_pending = (target, now, distance)
+        return True
+
+    def _stop_travel(self, quiet: bool = False) -> None:
+        self.travel_targets = []
+        self.travel_index = 0
+        self.travel_pending = None
+        if self.travel_timer is not None:
+            GLib.source_remove(self.travel_timer)
+            self.travel_timer = None
+        if not quiet:
+            self._set_status("walk stopped")
 
     # -- map tooltips ---------------------------------------------------
 
@@ -2804,15 +2904,21 @@ class Application(Gtk.Application):
         self.path_cells.clear()
         self.path_index = 0
         self.pending_target = None
+        self._stop_travel(quiet=True)
         if self.map_area is not None:
             self.map_area.queue_draw()
         self._set_status("path cleared")
         self._set_path_info("no path")
 
     def _player_cell(self) -> tuple[int, int] | None:
-        # Prefer the protocol position (`at`/`walk`); the char entity from
-        # `tp`/`mv` is the confirmed fallback. `cond` no longer creates a
-        # phantom entity at (0,0).
+        # Prefer the DLL's real player position (POS): a client `walk` packet
+        # carries the MoveTo destination, so `world.position` jumps ahead of
+        # the animation. POS is polled twice a second while connected.
+        if (
+            self.pos_cell is not None
+            and time.monotonic() - self.pos_at < 1.5
+        ):
+            return self.pos_cell
         if self.engine.world.position is not None:
             return self.engine.world.position
         char_id = self._char_id()
@@ -2932,8 +3038,12 @@ class Application(Gtk.Application):
                             self.engine.world.x = x
                             self.engine.world.y = y
                             self.engine.world.self_id = char_id
+                            self.pos_cell = (x, y)
+                            self.pos_at = time.monotonic()
                             self._learn_char_id(char_id)
-                            self._set_status(f"position {x},{y} (char {char_id})")
+                            # The POS poll runs twice a second; do not flood
+                            # the status bar (it hid action messages).
+                            self._update_char_info()
                             dirty = True
                 else:
                     self._set_status(message.payload)
@@ -3053,6 +3163,22 @@ class Application(Gtk.Application):
             return False
         return True
 
+    def _poll_position(self) -> bool:
+        """Ask the DLL for the client's real position twice a second.
+
+        The client's own `walk` packet carries the MoveTo *destination*, so
+        without this the map marker jumps to the target; POS reports the
+        actual position the client is at right now.
+        """
+        if self._closing:
+            return False
+        if self.client is not None and self.client.connected:
+            try:
+                self.client.send_raw(POS_COMMAND)
+            except (ConnectionLost, ValueError):
+                pass
+        return True
+
     def _set_status(self, text: str) -> None:
         if self.status is not None:
             self.status.set_text(text)
@@ -3164,6 +3290,8 @@ class Application(Gtk.Application):
         self.bot_running = False
         self.start_when_located = False
         self.pending_target = None
+        # Stop a click-to-walk too; Stop is the one "stop moving" button.
+        self._stop_travel(quiet=True)
         if self.bot_timer is not None:
             GLib.source_remove(self.bot_timer)
             self.bot_timer = None
