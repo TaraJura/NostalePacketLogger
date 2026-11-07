@@ -208,9 +208,12 @@ def _on_position(world: WorldState, packet: Packet) -> None:
         pending = world.pending_departure
         if pending is not None:
             # The `at` after a leaving `c_map`/`mapout` names the destination:
-            # the remembered cell is a portal.
+            # the remembered cell is a portal. The arrival cell is the return
+            # portal on the new map (live crossings land on the warp tile), so
+            # record both directions and every map gets the marker at once.
             if map_id != pending[0]:
                 world.portals[(pending[0], pending[1], pending[2])] = map_id
+                world.portals[(map_id, values[2], values[3])] = pending[0]
             world.pending_departure = None
         if world.map_id is not None and map_id != world.map_id:
             # A map change can be seen here even when the host missed the

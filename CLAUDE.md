@@ -31,7 +31,7 @@ GUI has no packets.
 |---|---|
 | `windows/` | Original MSVC/C# implementation, moved unchanged. Builds with Visual Studio; not exercised on this machine. |
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
-| Linux host tests | 103/103 pass (`make -C linux host-test`). |
+| Linux host tests | 104/104 pass (`make -C linux host-test`). |
 | Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live 2026-11-07: map **2** NosVille Meadows (150x150), then map 1 NosVille (160x180) via `c_map`; 2026-11-06: map **20** Mountain Cave 1 (230x260). Map names come from `NSlangData_UK.NOS` → `_code_uk_MapIDData.txt` (`zts<id>e<TAB><name>`, 374 entries). `astar()` is 8-direction with sqrt(2) diagonals and no corner cutting; the path is drawn as a continuous polyline. |
 | Monster names | `NSlangData_UK.NOS` / `_code_uk_monster.txt` parsed by `monsternames.py` (nibble codec + archive reader): 2,795 `vnum → name` entries. The live `in 3 206 5122 ...` spawn is entity 5122, Angry Queen Bee (vnum 206); map tooltips use the name. `spawnlog.py` backfills entities that spawned before the host attached from the DLL's `C:\NosTalePacketLog.txt` (`[RECV] in ...` lines). |
 | Spell catalog | `NSgtdData.NOS` → `Skill.dat` parsed by `spells.py`: 1,964 records, 791 active (`TYPE[0]==1`), with name from the `NAME` zts key, MP cost, range, cast time, cooldown and target type. Live examples: 866 Holy Attack (0 MP/0.9 s), 869 Mana Shield (self, 300 MP/60 s), 876 Holy Hammer (145 MP/90 s). The GUI **Add spell…** picker uses it; the bot enforces MP/range/cooldown/cast time. |
@@ -55,7 +55,7 @@ cd ~/games/gameforge/NostalePacketLogger
 # Linux build (MinGW-w64 i686; installed via apt)
 make -C linux all test-host
 make -C linux check                 # file(1) on the three PE32 outputs
-make -C linux host-test             # 103 stdlib unittest cases
+make -C linux host-test             # 104 stdlib unittest cases
 make -C linux gui-test              # headless GTK4 + map surface smoke
 make -C linux bot-test              # 6 smokes: combat, rules/config, spell order, out-of-range, rejection, recovery
 make -C linux clean
@@ -161,9 +161,13 @@ PYTHONPATH=linux/host python3 -m ntpl status
   the position ranking runs, so the guess is only a last resort.
   **Portals are learned, not static:** on a leaving `c_map`/`mapout` the
   engine remembers the cell the character stood on; the following `at`
-  supplies the destination (`WorldState.portals`, backfilled from the log by
-  `spawnlog.load_portals` and persisted in `~/.config/ntpl/portals.json`).
-  The map draws them as magenta markers with a "Portal → map N" tooltip.
+  supplies the destination and the arrival cell, so a crossing records both
+  the portal on the old map and the **return portal on the new one**
+  (`WorldState.portals`, backfilled by `spawnlog.load_portals`, persisted in
+  `~/.config/ntpl/portals.json`). `normalize_portals` averages markers within
+  two cells for the same destination, so repeated crossings leave one marker.
+  The map draws them as magenta rings with a "Portal → map N" tooltip, after
+  the own marker so a portal under the character stays visible.
   **Combat values come from the equipped SP card, not constants:** `u_s 0` is
   answered by `su ... <vnum> ...` (260 = Energy Bolt on the live mage), and
   the Skill.dat record for that vnum gives range (6), cast time (0.8 s),

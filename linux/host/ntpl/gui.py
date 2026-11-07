@@ -39,10 +39,12 @@ from .mapdata import (
     DEFAULT_NSTC,
     MapDataError,
     MapGrid,
+    add_portal,
     astar,
     choose_map_for_positions,
     load_nstc,
     load_portals as load_saved_portals,
+    normalize_portals,
     save_portals,
     terrain_rgb,
 )
@@ -173,7 +175,7 @@ class Application(Gtk.Application):
         self.map_grids: dict[int, MapGrid] = {}
         self.map_grid: MapGrid | None = None
         self.map_source: str | None = None
-        self.portals = load_saved_portals()
+        self.portals = normalize_portals(load_saved_portals())
         self.monster_names: dict[int, str] = {}
         self.spell_descriptions: dict[int, str] = {}
         self.spells: dict[int, SpellInfo] = {}
@@ -876,10 +878,15 @@ class Application(Gtk.Application):
                 world.self_id = char_id
                 self._learn_char_id(char_id)
         merged = False
-        for key, destination in load_log_portals(self.log_file).items():
-            if self.portals.get(key) != destination:
-                self.portals[key] = destination
+        for (map_id, x, y), destination in load_log_portals(
+            self.log_file
+        ).items():
+            if add_portal(self.portals, map_id, x, y, destination):
                 merged = True
+        normalized = normalize_portals(self.portals)
+        if normalized != self.portals:
+            self.portals = normalized
+            merged = True
         if merged:
             save_portals(self.portals)
 
@@ -1119,10 +1126,13 @@ class Application(Gtk.Application):
         if self._closing:
             return False
         merged = False
-        for key, destination in self.engine.world.portals.items():
-            if self.portals.get(key) != destination:
-                self.portals[key] = destination
+        for (map_id, x, y), destination in self.engine.world.portals.items():
+            if add_portal(self.portals, map_id, x, y, destination):
                 merged = True
+        normalized = normalize_portals(self.portals)
+        if normalized != self.portals:
+            self.portals = normalized
+            merged = True
         if merged:
             save_portals(self.portals)
             if self.map_area is not None:
@@ -2381,22 +2391,6 @@ class Application(Gtk.Application):
             context.set_line_width(1.0)
             context.stroke()
 
-        # learned portals: the cell that teleported us, as a magenta target
-        for (portal_map, px, py), _destination in self.portals.items():
-            if portal_map != grid.map_id:
-                continue
-            if not (0 <= px < grid.width and 0 <= py < grid.height):
-                continue
-            cx = px * scale + scale / 2
-            cy = py * scale + scale / 2
-            radius = max(4.5, scale * 0.9)
-            context.set_source_rgba(0.85, 0.2, 0.95, 1.0)
-            context.arc(cx, cy, radius, 0, 2 * math.pi)
-            context.fill()
-            context.set_source_rgba(1.0, 1.0, 1.0, 1.0)
-            context.arc(cx, cy, radius * 0.45, 0, 2 * math.pi)
-            context.fill()
-
         # own character: a bigger dot plus a facing arrow. The arrow is drawn
         # first so the dot covers its base.
         own = self._player_cell()
@@ -2435,6 +2429,29 @@ class Application(Gtk.Application):
             context.set_line_width(max(1.5, scale * 0.25))
             context.arc(cx, cy, radius + max(1.5, scale * 0.3), 0, 2 * math.pi)
             context.stroke()
+
+        # learned portals: a magenta ring with a diamond centre, drawn after
+        # the own marker so a portal under or next to the character stays
+        # visible (a filled dot would be hidden by the own dot).
+        for (portal_map, px, py), _destination in self.portals.items():
+            if portal_map != grid.map_id:
+                continue
+            if not (0 <= px < grid.width and 0 <= py < grid.height):
+                continue
+            cx = px * scale + scale / 2
+            cy = py * scale + scale / 2
+            radius = max(6.0, scale * 1.2)
+            context.set_source_rgba(0.85, 0.2, 0.95, 1.0)
+            context.set_line_width(max(2.0, scale * 0.4))
+            context.arc(cx, cy, radius, 0, 2 * math.pi)
+            context.stroke()
+            size = max(2.0, scale * 0.35)
+            context.move_to(cx, cy - size)
+            context.line_to(cx + size, cy)
+            context.line_to(cx, cy + size)
+            context.line_to(cx - size, cy)
+            context.close_path()
+            context.fill()
 
         context.restore()
 

@@ -363,14 +363,19 @@ class PortalLearningTests(unittest.TestCase):
             packet(Kind.RECV, "at 14881134 103 20 20 2 0 24 1 -1 0 0")
         )
 
-    def test_crossing_records_the_departure_cell(self):
+    def test_crossing_records_both_sides(self):
         self.engine.feed(packet(Kind.SEND, "walk 20 20 1 10"))
         self.engine.feed(packet(Kind.RECV, "c_map 0 103 0"))
         self.engine.feed(packet(Kind.RECV, "mapout"))
         world = self.engine.feed(
             packet(Kind.RECV, "at 14881134 104 11 9 2 0 25 1 -1 0 0")
         )
-        self.assertEqual(world.portals, {(103, 20, 20): 104})
+        # The departure cell is the portal on the old map; the arrival cell is
+        # the return portal on the new one, so both maps show a marker.
+        self.assertEqual(
+            world.portals,
+            {(103, 20, 20): 104, (104, 11, 9): 103},
+        )
 
     def test_plain_teleport_without_leaving_map_is_not_a_portal(self):
         world = self.engine.feed(

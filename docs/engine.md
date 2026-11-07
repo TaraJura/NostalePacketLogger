@@ -228,11 +228,13 @@ position ranking is only the fallback when the log has no `at`. With no data
 the canvas stays blank and the info says "waiting for the game…".
 **Portals are learned from crossings**, because the client has no static
 portal table: when the leaving `c_map`/`mapout` arrives, the engine remembers
-`(map, x, y)`; the following `at` names the destination and the pair is stored
-in `WorldState.portals`. `spawnlog.load_portals` backfills the session's
-crossings, and the GUI persists them to `~/.config/ntpl/portals.json`
-(`NTPL_PORTALS` overrides), drawing them as magenta markers with a
-"Portal → map N" tooltip.
+`(map, x, y)`; the following `at` names the destination and the arrival cell,
+so a crossing stores the portal on the old map **and the return portal on the
+new map** in `WorldState.portals`. `spawnlog.load_portals` backfills the
+session's crossings; `normalize_portals` averages markers within two cells for
+the same destination (repeated crossings land a cell or two apart), and the
+GUI persists the result to `~/.config/ntpl/portals.json` (`NTPL_PORTALS`
+overrides), drawing magenta rings with a "Portal → map N" tooltip.
 The sidebar also owns the bot configuration:
 
 - `monsternames.py` — `vnum → monster name` and skill descriptions from

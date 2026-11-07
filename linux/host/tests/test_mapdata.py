@@ -13,6 +13,7 @@ from ntpl.mapdata import (
     find_map_for_positions,
     load_nstc,
     load_portals,
+    normalize_portals,
     save_portals,
     terrain_rgb,
 )
@@ -221,6 +222,13 @@ class PortalStoreTests(unittest.TestCase):
                 load_portals(path),
                 {(103, 20, 20): 104, (104, 11, 9): 103},
             )
+
+    def test_normalize_collapses_nearby_markers(self):
+        raw = {(103, 41, 31): 3, (103, 42, 33): 3, (103, 20, 20): 104}
+        self.assertEqual(
+            normalize_portals(raw),
+            {(103, 42, 32): 3, (103, 20, 20): 104},
+        )
 
     def test_missing_file_and_bad_records_are_ignored(self):
         self.assertEqual(load_portals("/nonexistent/portals.json"), {})

@@ -260,6 +260,7 @@ def load_portals(
                 _char_id, at_map, at_x, at_y = at
                 if pending is not None and at_map != pending[0]:
                     portals[(pending[0], pending[1], pending[2])] = at_map
+                    portals[(at_map, at_x, at_y)] = pending[0]
                     pending = None
                 last = (at_x, at_y)
 

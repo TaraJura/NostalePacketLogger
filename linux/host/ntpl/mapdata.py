@@ -345,6 +345,67 @@ def load_portals(path: str | Path | None = None) -> PortalMap:
     return portals
 
 
+def add_portal(
+    portals: PortalMap,
+    map_id: int,
+    x: int,
+    y: int,
+    destination: int,
+    radius: int = 2,
+) -> bool:
+    """Add a portal unless the same map/destination already has one nearby.
+
+    The departure cell is the last client walk before the server's map
+    change, so a repeated crossing can land a cell or two off; one marker is
+    enough. Returns ``True`` when the map changed.
+    """
+    for (other_map, other_x, other_y), other_destination in portals.items():
+        if (
+            other_map == map_id
+            and other_destination == destination
+            and abs(other_x - x) <= radius
+            and abs(other_y - y) <= radius
+        ):
+            return False
+    portals[(map_id, x, y)] = destination
+    return True
+
+
+def normalize_portals(portals: PortalMap, radius: int = 2) -> PortalMap:
+    """Collapse nearby markers for the same map and destination into one.
+
+    A crossing records the last client walk, which can be a cell or two away
+    from the warp tile, and several crossings of the same portal would leave
+    a cluster. Averaging the cluster gives one marker per real portal.
+    """
+    clusters: list[list[tuple[int, int, int]]] = []
+    destinations: list[int] = []
+    for (map_id, x, y), destination in sorted(portals.items()):
+        for index, cluster in enumerate(clusters):
+            if (
+                destinations[index] == destination
+                and cluster[0][0] == map_id
+                and all(
+                    abs(other_x - x) <= radius
+                    and abs(other_y - y) <= radius
+                    for _, other_x, other_y in cluster
+                )
+            ):
+                cluster.append((map_id, x, y))
+                break
+        else:
+            clusters.append([(map_id, x, y)])
+            destinations.append(destination)
+
+    merged: PortalMap = {}
+    for cluster, destination in zip(clusters, destinations):
+        map_id = cluster[0][0]
+        x = round(sum(point[1] for point in cluster) / len(cluster))
+        y = round(sum(point[2] for point in cluster) / len(cluster))
+        merged[(map_id, x, y)] = destination
+    return merged
+
+
 def save_portals(portals: PortalMap, path: str | Path | None = None) -> None:
     """Write the portal map atomically; failures are not fatal."""
     source = Path(path) if path is not None else default_portals_path()
