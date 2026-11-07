@@ -42,3 +42,4 @@ run gui_bot_reject_smoke.py
 run gui_recover_smoke.py
 run gui_recover_mp_smoke.py
 run gui_recover_fight_smoke.py
+run gui_loot_smoke.py

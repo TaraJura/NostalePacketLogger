@@ -208,7 +208,8 @@ grouped by function:
   that is off cooldown, in range and affordable wins. Always + cooldowns forms
   a rotation. Otherwise the equipped SP card's basic attack (slot 0) is the
   fallback.
-- **Loot** — Pickup and loot radius.
+- **Loot** — Pickup. The bot walks to eligible drops up to 20 cells away,
+  picks them up when adjacent, then resumes the path.
 - **Recovery** — Auto-recover HP/MP and the low-HP/MP thresholds.
 - **Configuration** — Save/Load the whole bot configuration as JSON.
 
@@ -230,7 +231,7 @@ The packet **Follow** toggle lives in the Packets tab, not in the window header.
 | Below HP % | HP recovery threshold (default 30) |
 | Auto-recover MP | below the MP threshold, sit and wait for full MP, then stand (after finishing the current kill) |
 | Below MP % | MP recovery threshold (default 30) |
-| Pickup / Loot | pick up your own/unowned drops within the radius |
+| Pickup | walk to your own/unowned drops up to 20 cells away, pick them up when adjacent, then resume the path |
 | Loop | repeat the path when it finishes |
 | Targets | all / only selected / all except selected monster templates (`vnum`); Retaliate respects the same filter |
 | Spell rule | scanned spell + Always/My HP/My MP + below/above + cooldown + Monster/Self target; ordered top to bottom; static MP/range/cooldown checks from Skill.dat |
@@ -271,9 +272,11 @@ honest source.
    HP/MP.
 2. **Stand up** if `WorldState.resting` is true and the char id is known:
    `rest 1 1 <charId>` (the server toggles sit/stand; sitting blocks movement).
-3. **Pick up** if enabled and a drop owned by you (or unowned) is within the
-   loot radius: send `get 1 <charId> <dropId>`. Each drop is tried at most
-   three times; the server's `get` confirmation removes it from
+3. **Pick up** if enabled and a drop owned by you (or unowned) is within
+   20 cells: walk to it with the same client MoveTo legs, send
+   `get 1 <charId> <dropId>` once adjacent, then resume the path. The server
+   rejects `get` from far away, so the walk is required. Each drop is tried
+   at most three times; the server's `get` confirmation removes it from
    `WorldState.drops`.
 4. **Auto-attack / clear before moving.** Combat takes priority over the
    path: while any allowed monster is within attack range the bot stays and
@@ -348,8 +351,8 @@ never sees the `at` packet.
   directions are constant per character. If the game turns in place, the arrow
   does not change until the next move.
 - Pickup only considers drops owned by your char id or unowned (`owner_id` 0);
-  another player's drops are skipped. The default loot radius is 3 cells; the
-  bot does not walk to distant drops by itself yet.
+  another player's drops are skipped. The bot walks to drops up to 20 cells
+  away, picks them up when adjacent, and then resumes its path.
 - The verified `u_s` prefix is `<skill> <targetType> <targetId>`; later
   fields are unknown. `u_s 0 3 <id>` is the normal attack and skill 10 cast
   produced `su ... 876` live. Self-target rules use `u_s <slot> 1 <charId>`;
@@ -396,7 +399,7 @@ never sees the `at` packet.
 ```bash
 make -C linux host-test   # 123 cases incl. synthetic NOS, 8-way A*, checksum, config
 make -C linux gui-test    # GUI + map surface + tooltips + unknown-position guard
-make -C linux bot-test    # 8 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP recovery, finish-kill recovery
+make -C linux bot-test    # 9 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach
 ```
 
 The bot test sends a fake player at (25,117) on map 20, a monster at

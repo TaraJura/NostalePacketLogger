@@ -260,8 +260,8 @@ The bot loop:
 
 - stand up with `rest` when sitting;
 - recover below the configured HP % or MP % (finish the current kill, sit, wait until full, stand);
-- pick up your own/unowned drops in the loot radius (`get 1 <charId>
-  <dropId>`);
+- pick up your own/unowned drops: walk to drops up to 20 cells away and
+  send `get 1 <charId> <dropId>` when adjacent;
 - evaluate ordered spell rules from the scanned Skill.dat catalog (Always or
   my HP/MP below/above threshold; per-rule cooldown, MP, spell range and cast
   time enforced; monster/self target), then auto-attack the nearest allowed

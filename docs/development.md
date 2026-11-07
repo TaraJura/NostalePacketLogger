@@ -30,7 +30,7 @@ The MinGW compiler is `i686-w64-mingw32-g++`. Override with
 ```bash
 make -C linux host-test        # 123 stdlib unittest cases
 make -C linux gui-test         # headless GTK4, needs xvfb
-make -C linux bot-test         # 8 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery
+make -C linux bot-test         # 9 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach
 make -C linux all test-host
 linux/scripts/dev-test-wine.sh 25
 ```

@@ -102,6 +102,11 @@ ATTACK_WALK_DELAY = 0.4
 #: Target acquisition radius when the Combat search field is gone; the
 #: equipped skill's own range is used when it is larger.
 ATTACK_SEARCH_CELLS = 15
+#: The server only accepts `get` when the character is on or next to the
+#: drop, so the bot walks to everything farther than this.
+PICKUP_RANGE_CELLS = 1
+#: Drops farther than this are ignored (usually leftovers from other fights).
+LOOT_APPROACH_CELLS = 20
 DEFAULT_SKILL_TEMPLATE = "u_s {skill} {type} {target}"
 
 # A walk timed out this many times in a row: the server is rejecting the
@@ -274,13 +279,16 @@ class Application(Gtk.Application):
         self.attack_unknown_toggle = None
         self.recover_banner = None
         self.unknown_warn_at = 0.0
-        self.loot_range = None
 
         self.waypoints: list[tuple[int, int]] = []
         self.path_cells: list[tuple[int, int]] = []
         self.bot_goals: list[tuple[int, int]] = []
         self.path_index = 0
         self.pending_target: tuple[int, int] | None = None
+        # True for a drawn-path leg (advance path_index on arrival), False
+        # for a loot or chase leg (resume the path where it was).
+        self.pending_is_path = False
+        self.pending_loot_id: int | None = None
         self.pending_since = 0.0
         self.pending_until = 0.0
         # The DLL's real player position (POS), preferred for the own marker
@@ -852,19 +860,10 @@ class Application(Gtk.Application):
         self.pickup_toggle = Gtk.ToggleButton(label="Pickup")
         self.pickup_toggle.set_active(True)
         self.pickup_toggle.set_tooltip_text(
-            "Pick up your own drops within the loot range"
+            "Pick up your own drops within 10 cells"
         )
         self._bind_toggle_color(self.pickup_toggle)
-        self.loot_range = Gtk.SpinButton.new_with_range(1, 10, 1)
-        self.loot_range.set_value(3)
-        self.loot_range.set_tooltip_text("pickup radius in cells")
-        loot_box.append(
-            self._field_row(
-                self.pickup_toggle,
-                Gtk.Label(label="Radius"),
-                self.loot_range,
-            )
-        )
+        loot_box.append(self._field_row(self.pickup_toggle))
         sidebar.append(self._frame("Loot", loot_box))
 
         # Recovery.
@@ -1980,7 +1979,7 @@ class Application(Gtk.Application):
                 self.pickup_toggle is not None
                 and self.pickup_toggle.get_active()
             ),
-            loot_range=int(self.loot_range.get_value()),
+            loot_range=LOOT_APPROACH_CELLS,
             recover=bool(
                 self.recover_toggle is not None
                 and self.recover_toggle.get_active()
@@ -2011,7 +2010,6 @@ class Application(Gtk.Application):
         self.retaliate_toggle.set_active(config.retaliate)
         self._update_combat_info()
         self.pickup_toggle.set_active(config.pickup)
-        self.loot_range.set_value(config.loot_range)
         self.recover_toggle.set_active(config.recover)
         self.low_hp_pct.set_value(config.low_hp_pct)
         self.recover_mp_toggle.set_active(config.recover_mp)
@@ -3686,22 +3684,19 @@ class Application(Gtk.Application):
                 self._set_status("path finished")
                 self._stop_bot()
 
-    def _approach_cell(
-        self, monster: Entity
-    ) -> tuple[int, int] | None:
-        """A walkable cell to path toward for a monster outside range."""
+    def _walkable_cell(self, x: int, y: int) -> tuple[int, int] | None:
+        """The cell itself when walkable, else a walkable neighbour."""
         grid = self.map_grid
         if grid is None:
             return None
-        cx, cy = monster.x, monster.y
-        if 0 <= cx < grid.width and 0 <= cy < grid.height:
-            if grid.is_walkable(cx, cy):
-                return (cx, cy)
+        if 0 <= x < grid.width and 0 <= y < grid.height:
+            if grid.is_walkable(x, y):
+                return (x, y)
             for dx, dy in (
                 (1, 0), (-1, 0), (0, 1), (0, -1),
                 (1, 1), (-1, -1), (1, -1), (-1, 1),
             ):
-                nx, ny = cx + dx, cy + dy
+                nx, ny = x + dx, y + dy
                 if (
                     0 <= nx < grid.width
                     and 0 <= ny < grid.height
@@ -3709,6 +3704,55 @@ class Application(Gtk.Application):
                 ):
                     return (nx, ny)
         return None
+
+    def _approach_cell(
+        self, monster: Entity
+    ) -> tuple[int, int] | None:
+        """A walkable cell to path toward for a monster outside range."""
+        return self._walkable_cell(monster.x, monster.y)
+
+    def _walk_to_loot(self, drop: GroundItem, now: float) -> bool:
+        """Walk one leg toward a drop, then pick it up and resume.
+
+        `get` is only accepted next to the item; the old code sent it from
+        up to 10 cells away and the server silently rejected it.
+        """
+        if self.pending_target is not None or self.map_grid is None:
+            return False
+        position = self._player_cell()
+        if position is None:
+            return False
+        if now < self.walk_not_before:
+            return True
+        goal = self._walkable_cell(drop.x, drop.y)
+        if goal is None:
+            return False
+        path = astar(self.map_grid, position, goal)
+        if path is None or len(path) < 2:
+            return False
+        leg = path[min(3, len(path) - 1)]
+        if leg == position:
+            return False
+        if not self._client_move(leg[0], leg[1]):
+            return False
+        self.pending_target = leg
+        self.pending_is_path = False
+        self.pending_loot_id = drop.drop_id
+        self.pending_since = now
+        self.pending_distance = max(
+            abs(leg[0] - position[0]), abs(leg[1] - position[1])
+        )
+        self.pending_until = now + min(
+            60.0,
+            max(
+                self.walk_timeout,
+                self.pending_distance * self.walk_timeout_per_cell,
+            ),
+        )
+        self._set_status(
+            f"walking to drop {drop.item_vnum} at {drop.x},{drop.y}"
+        )
+        return True
 
     def _chase_step(
         self, monster: Entity, attack_range: float, now: float
@@ -3740,6 +3784,8 @@ class Application(Gtk.Application):
         if not self._client_move(leg[0], leg[1]):
             return False
         self.pending_target = leg
+        self.pending_is_path = False
+        self.pending_loot_id = None
         self.pending_since = now
         self.pending_distance = max(
             abs(leg[0] - position[0]), abs(leg[1] - position[1])
@@ -3870,6 +3916,8 @@ class Application(Gtk.Application):
                 self.recover_need_hp = hp_low
                 self.recover_need_mp = mp_low
                 self.pending_target = None
+                self.pending_is_path = False
+                self.pending_loot_id = None
                 self.attack_cooldown_until = 0.0
                 reasons = []
                 if hp_low:
@@ -3921,7 +3969,7 @@ class Application(Gtk.Application):
                 self.loop_toggle is not None
                 and self.loop_toggle.get_active()
             )
-            has_next = (
+            has_next = self.pending_is_path and (
                 self.path_index + 1 < len(self.bot_goals) or loop_on
             )
             remaining = None
@@ -3940,8 +3988,11 @@ class Application(Gtk.Application):
                 # still moving, so the drawn-path walk never stops at a leg
                 # boundary (the same rule as click-to-walk).
                 self.pending_target = None
+                self.pending_loot_id = None
                 self.rejected_walks = 0
-                self._advance_path()
+                if self.pending_is_path:
+                    self._advance_path()
+                self.pending_is_path = False
                 return True
             confirmed = world.position == self.pending_target or (
                 self.last_move_time >= self.pending_since
@@ -3953,12 +4004,20 @@ class Application(Gtk.Application):
                 0.35, self.pending_distance * self.walk_confirm_delay
             )
             if confirmed and now >= ready_at:
-                self._set_status(f"arrived at {self.pending_target}")
+                arrived = self.pending_target
+                self._set_status(f"arrived at {arrived}")
                 self.pending_target = None
+                self.pending_loot_id = None
                 self.rejected_walks = 0
-                self._advance_path()
+                if self.pending_is_path:
+                    self._advance_path()
+                self.pending_is_path = False
             elif now > self.pending_until:
                 self.rejected_walks += 1
+                loot_id, self.pending_loot_id = self.pending_loot_id, None
+                if loot_id is not None:
+                    # This drop cannot be reached; stop trying for a while.
+                    self.pickup_ignored[loot_id] = now + 10.0
                 if self.rejected_walks >= MAX_REJECTED_WALKS:
                     self._stop_bot()
                     self._set_status(
@@ -3970,7 +4029,9 @@ class Application(Gtk.Application):
                     f"walk to {self.pending_target} not confirmed; skipping"
                 )
                 self.pending_target = None
-                self._advance_path()
+                if self.pending_is_path:
+                    self._advance_path()
+                self.pending_is_path = False
             return True
 
         char_id = self._char_id()
@@ -3986,9 +4047,20 @@ class Application(Gtk.Application):
             and char_id is not None
             and now >= self.pickup_cooldown_until
         ):
-            drop = self._nearest_drop(int(self.loot_range.get_value()))
+            drop = self._nearest_drop(LOOT_APPROACH_CELLS)
             if drop is not None:
-                if self._send(f"get 1 {char_id} {drop.drop_id}"):
+                position = self._player_cell()
+                distance = None
+                if position is not None:
+                    distance = max(
+                        abs(drop.x - position[0]), abs(drop.y - position[1])
+                    )
+                if distance is not None and distance > PICKUP_RANGE_CELLS:
+                    # Walk to the drop first: `get` from far away is rejected.
+                    if self._walk_to_loot(drop, now):
+                        return True
+                    self.pickup_ignored[drop.drop_id] = now + 5.0
+                elif self._send(f"get 1 {char_id} {drop.drop_id}"):
                     attempts = self.pickup_attempts.get(drop.drop_id, 0) + 1
                     self.pickup_attempts[drop.drop_id] = attempts
                     if attempts >= 3:
@@ -4197,6 +4269,8 @@ class Application(Gtk.Application):
 
         if self._client_move(target[0], target[1]):
             self.pending_target = target
+            self.pending_is_path = True
+            self.pending_loot_id = None
             self.pending_since = now
             # A whole leg takes ~0.45 s per cell. Diagonal legs cover
             # sqrt(2) cells of travel, so pace and time out by Euclidean

@@ -15,7 +15,7 @@ Schema (version 1)::
       "attack_range": 10,
       "attack_cooldown": 0.0,
       "pickup": true,
-      "loot_range": 3,
+      "loot_range": 20,
       "recover": true,
       "low_hp_pct": 30,
       "recover_mp": true,
@@ -111,7 +111,7 @@ class BotConfig:
     attack_range: int = 10
     attack_cooldown: float = 0.0
     pickup: bool = True
-    loot_range: int = 3
+    loot_range: int = 20
     recover: bool = True
     low_hp_pct: float = 30.0
     recover_mp: bool = True
@@ -180,7 +180,7 @@ class BotConfig:
                 data.get("attack_cooldown"), 0.0, 0.0, 30.0
             ),
             pickup=_as_bool(data.get("pickup"), True),
-            loot_range=_as_int(data.get("loot_range"), 3, 1, 10),
+            loot_range=_as_int(data.get("loot_range"), 20, 1, 40),
             recover=_as_bool(data.get("recover"), True),
             low_hp_pct=_as_float(data.get("low_hp_pct"), 30.0, 5.0, 90.0),
             recover_mp=_as_bool(data.get("recover_mp"), True),

@@ -114,7 +114,8 @@ The GTK4 **Map / Bot** tab renders the map (automatic map switch on `c_map`),
 takes click waypoints, computes an **8-direction A\*** path (diagonals, no
 corner cutting, continuous polyline), and can loop it while auto-attacking
 monsters (Retaliate picks the one hitting you), picking up drops, and sitting
-to recover below configurable HP/MP % thresholds (after finishing the current kill). It shows live HP/MP bars plus a red
+to recover below configurable HP/MP % thresholds (after finishing the current kill);
+it walks to drops and picks them up before returning to the path. It shows live HP/MP bars plus a red
 recovery banner, green/red active toggles, hover tooltips with monster names
 from the client's language archive, server-sent portals (`gp`) and Time-Space
 entrances (`wp`, with the nosapki stone icon and the client's own "Required

@@ -244,7 +244,7 @@ both.
 make host-test          # 123 stdlib unit tests: protocol, engine, map, config, spells
 
 make gui-test           # headless GTK4 window + map surface against a fake stream
-make bot-test           # 8 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery
+make bot-test           # 9 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach
 make all test-host
 ./scripts/dev-test-wine.sh 25
 ```
@@ -255,7 +255,7 @@ map switch (the 20→85→20 `c_map` sequence), map tooltips (including a vnum
 backfilled from the DLL log), green/red toggle classes, the recovery banner,
 and the unknown-position path guard. Install `xvfb` if it is missing.
 
-`bot-test` drives the real GTK window against fake servers. The eight smokes
+`bot-test` drives the real GTK window against fake servers. The nine smokes
 cover auto-attack + path movement (`TARGET`, `u_s`, `MOVE`), target filtering +
 conditional spell rules + JSON config round-trip, scanned-spell rotation and
 execution order, three rejected walks, and the sit/wait-for-full-HP recovery
