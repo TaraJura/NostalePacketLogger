@@ -117,7 +117,9 @@ entrances (`wp`, with the nosapki stone icon and the client's own "Required
 Level N" wording), and an explicit unknown-vnum option for monsters that
 spawned before injection. A third top-level **Bot log** tab keeps a
 timestamped, selectable record of every action (attacks, TARGET selections and
-refusals, walks, pickups, recovery, DLL errors) for debugging. Targets can be filtered by monster
+refusals, walks, pickups, recovery, DLL errors) for debugging, and mirrors it
+to `~/.config/ntpl/bot.log` (`NTPL_BOT_LOG` overrides) so it can be tailed
+outside the GUI. Targets can be filtered by monster
 vnum; ordered spell rules cast by HP/MP conditions; the whole bot configuration
 is saved/loaded as JSON. `map` commands inspect/render the grids; `make
 bot-test` exercises the loop, rules, spell order, rejection and recovery against a fake

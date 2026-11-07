@@ -41,7 +41,7 @@
 |---|---|---|
 | `gui.sh` says GTK4/PyGObject is missing | bindings not installed | `sudo apt install python3-gi gir1.2-gtk-4.0` |
 | Window says "not connected" | DLL not injected, game not running, or wrong port | inject first; check `NTPL_PORT` on both sides |
-| Need to know what the bot did | the status bar only shows the latest action | open the top-level **Bot log** tab: every action, TARGET reply and DLL error is kept with a timestamp (Clear log empties it) |
+| Need to know what the bot did | the status bar only shows the latest action | open the top-level **Bot log** tab (or `tail -f ~/.config/ntpl/bot.log`; `NTPL_BOT_LOG` overrides) -- every action, TARGET reply and DLL error is kept with a timestamp (Clear log empties the tab, not the file) |
 | GUI opens but no packets | filter too narrow, or another host is connected | clear the filter; the DLL accepts one host at a time |
 | Bot does not attack in "Only selected" mode | Auto-attack is off; recovery is sitting below the HP threshold; the monster vnum is not selected; or a pre-injection monster has no vnum | check the green/red Auto-attack toggle and the red RECOVERING banner; wait for recovery or turn it off; verify the target list; enable **Also attack monsters with unknown vnum** or let the monster respawn |
 | Map does not switch after a portal | old build read the first `c_map` field (type 0) as the map id | update/restart the GUI; the engine reads the second field and clears stale entities |

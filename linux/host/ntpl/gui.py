@@ -75,6 +75,13 @@ TRIM_ROWS = 2000
 #: chunks so a long session does not grow the text buffer forever.
 LOG_MAX_LINES = 4000
 LOG_TRIM_LINES = 500
+#: The Bot log tab is mirrored to this file so the log is readable outside the
+#: GUI (`tail -f`), survives a restart, and can be inspected by an agent.
+#: NTPL_BOT_LOG overrides the path; the file rotates once when it gets large.
+BOT_LOG_PATH = Path(
+    os.environ.get("NTPL_BOT_LOG", str(Path.home() / ".config/ntpl/bot.log"))
+)
+BOT_LOG_MAX_BYTES = 4 * 1024 * 1024
 DRAIN_INTERVAL_MS = 50
 BOT_INTERVAL_MS = 200
 #: Click-to-walk tick; the next leg is handed to the client before the
@@ -319,6 +326,7 @@ class Application(Gtk.Application):
         self.bot_log_buffer = None
         self._bot_log_lines = 0
         self._bot_log_scroll_scheduled = False
+        self._bot_log_file = None
 
     # -- UI -------------------------------------------------------------
 
@@ -531,7 +539,28 @@ class Application(Gtk.Application):
         scrolled.set_vexpand(True)
         scrolled.set_child(view)
         box.append(scrolled)
+
+        self._open_bot_log_file()
         return box
+
+    def _open_bot_log_file(self) -> None:
+        try:
+            BOT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            if (
+                BOT_LOG_PATH.exists()
+                and BOT_LOG_PATH.stat().st_size > BOT_LOG_MAX_BYTES
+            ):
+                BOT_LOG_PATH.replace(
+                    BOT_LOG_PATH.with_name(BOT_LOG_PATH.name + ".1")
+                )
+            self._bot_log_file = BOT_LOG_PATH.open(
+                "a", encoding="utf-8", buffering=1
+            )
+            self._bot_log_file.write(
+                f"===== {time.strftime('%Y-%m-%d %H:%M:%S')} GUI session =====\n"
+            )
+        except OSError:
+            self._bot_log_file = None
 
     def _log_line(self, text: str) -> None:
         """Append one timestamped action line to the Bot log tab."""
@@ -539,11 +568,15 @@ class Application(Gtk.Application):
         text = text.strip()
         if buffer is None or not text:
             return
+        stamp = time.strftime("%H:%M:%S")
         if self._bot_log_lines:
             buffer.insert(buffer.get_end_iter(), "\n")
-        buffer.insert(
-            buffer.get_end_iter(), f"{time.strftime('%H:%M:%S')}  {text}"
-        )
+        buffer.insert(buffer.get_end_iter(), f"{stamp}  {text}")
+        if self._bot_log_file is not None:
+            try:
+                self._bot_log_file.write(f"{stamp}  {text}\n")
+            except OSError:
+                self._bot_log_file = None
         self._bot_log_lines += 1
         if self._bot_log_lines > LOG_MAX_LINES:
             buffer.delete(

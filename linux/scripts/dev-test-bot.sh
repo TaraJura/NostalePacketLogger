@@ -22,13 +22,15 @@ fi
 # A fresh empty log and portal file keep every run deterministic.
 LOG="$(mktemp)"
 PORTALS="$(mktemp)"
-trap 'rm -f "$LOG" "$PORTALS"' EXIT
+BOTLOG="$(mktemp)"
+trap 'rm -f "$LOG" "$PORTALS" "$BOTLOG"' EXIT
 
 run() {
     xvfb-run -a env GDK_BACKEND=x11 \
         PYTHONPATH="$ROOT/host" \
         NTPL_LOG="$LOG" \
         NTPL_PORTALS="$PORTALS" \
+        NTPL_BOT_LOG="$BOTLOG" \
         python3 "$ROOT/test/$1"
 }
 

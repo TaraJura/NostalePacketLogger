@@ -164,7 +164,9 @@ The sidebar has live HP/MP bars, green/red toggles, a red recovery banner,
 target filters, conditional spell rules and JSON save/load. Server-sent `gp`
 portals and `wp` Time-Space entrances are drawn on the map. The **Bot log**
 tab keeps a timestamped, selectable history of every action (attacks, target
-selections/refusals, walks, pickups, recovery, DLL errors) for debugging.
+selections/refusals, walks, pickups, recovery, DLL errors) for debugging;
+the same lines are appended to `~/.config/ntpl/bot.log` (`NTPL_BOT_LOG`
+overrides), so they can be tailed or read after a restart.
 `--log PATH` (or `NTPL_LOG`) selects the DLL log used to backfill vnums for
 entities that spawned before the GUI attached. See [map.md](map.md) and
 [bot-config.md](bot-config.md).
