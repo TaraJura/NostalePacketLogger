@@ -10,7 +10,6 @@ Schema (version 1)::
       "version": 1,
       "auto_attack": true,
       "retaliate": true,
-      "move_first": true,
       "skill": 0,
       "skill_template": "u_s {skill} {type} {target}",
       "attack_range": 10,
@@ -105,7 +104,6 @@ class SpellRule:
 class BotConfig:
     auto_attack: bool = False
     retaliate: bool = True
-    move_first: bool = True
     skill: int = 0
     skill_template: str = "u_s {skill} {type} {target}"
     attack_range: int = 10
@@ -125,7 +123,6 @@ class BotConfig:
             "version": CONFIG_VERSION,
             "auto_attack": self.auto_attack,
             "retaliate": self.retaliate,
-            "move_first": self.move_first,
             "skill": self.skill,
             "skill_template": self.skill_template,
             "attack_range": self.attack_range,
@@ -167,7 +164,6 @@ class BotConfig:
         return cls(
             auto_attack=_as_bool(data.get("auto_attack"), False),
             retaliate=_as_bool(data.get("retaliate"), True),
-            move_first=_as_bool(data.get("move_first"), True),
             skill=_as_int(data.get("skill"), 0, 0, 10**9),
             skill_template=_as_text(
                 data.get("skill_template"),

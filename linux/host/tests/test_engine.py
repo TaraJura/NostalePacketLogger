@@ -169,6 +169,29 @@ class EngineTests(unittest.TestCase):
         world = self.engine.feed(packet(Kind.RECV, "out 1 7"))
         self.assertNotIn(7, world.entities)
 
+    def test_death_status_removes_the_entity(self):
+        # Live: the server never sends `out` for a killed monster; `st` with
+        # zero current HP is the death notice.
+        self.engine.feed(packet(Kind.RECV, "in 3 500 7 10 20 2 0"))
+        world = self.engine.feed(
+            packet(Kind.RECV, "st 3 7 14 0 1 100 0 108 481 108 0")
+        )
+        self.assertNotIn(7, world.entities)
+
+    def test_alive_status_keeps_the_entity(self):
+        self.engine.feed(packet(Kind.RECV, "in 3 500 7 10 20 2 0"))
+        world = self.engine.feed(
+            packet(Kind.RECV, "st 3 7 14 0 100 100 481 108 481 108 0")
+        )
+        self.assertIn(7, world.entities)
+
+    def test_short_or_bad_status_is_ignored(self):
+        self.engine.feed(packet(Kind.RECV, "in 3 500 7 10 20 2 0"))
+        world = self.engine.feed(packet(Kind.RECV, "st 3 7 14"))
+        self.assertIn(7, world.entities)
+        world = self.engine.feed(packet(Kind.RECV, "st x 7 14 0 1 100 0 1 2"))
+        self.assertIn(7, world.entities)
+
     def test_drop_and_get(self):
         # Live: drop 1046 13961541 29 180 635 0 14881134
         world = self.engine.feed(

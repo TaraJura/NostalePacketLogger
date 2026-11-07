@@ -192,7 +192,7 @@ grouped by function:
   The own marker follows the DLL's real player position (`POS`, polled twice
   a second), not the walk packet's destination, so the dot tracks the
   actual movement instead of jumping ahead.
-- **Combat** — Auto-attack, Retaliate, Move first, Skill, Search (target
+- **Combat** — Auto-attack, Retaliate, Skill, Search (target
   radius), Min delay and the skill template. The line under Skill shows the
   selected skill's Skill.dat range/cast/cooldown/MP; Skill `0` follows the
   equipped SP card (the server reports its vnum for `u_s 0`).
@@ -222,7 +222,6 @@ The packet **Follow** toggle lives in the Packets tab, not in the window header.
 
 | Control | Effect |
 |---|---|
-| Move first | attack while walking; turn off to clear nearby monsters before moving on (default on) |
 | Retaliate | attack the monster that most recently hit you first, if in range |
 | Auto-recover | below the HP threshold, sit and wait for full HP, then stand |
 | Below HP % | recovery threshold (default 30) |
@@ -270,23 +269,20 @@ honest source.
    loot radius: send `get 1 <charId> <dropId>`. Each drop is tried at most
    three times; the server's `get` confirmation removes it from
    `WorldState.drops`.
-4. **Move first / Auto-attack.** Auto-attack is not disabled by the path: with
-   **Move first** on (the default) the bot attacks whenever the cooldown is
-   ready and then resumes the path after the attack animation, so monsters
-   along the route are fought without waiting for the area to be clear. With
-   Move first **off** it holds the current position and keeps attacking until
-   no monster is within range, then moves on ("clear the area"). With no path,
-   Start still runs stationary combat, pickup and recovery.
+4. **Auto-attack / clear before moving.** Combat takes priority over the
+   path: while any allowed monster is within attack range the bot stays and
+   keeps attacking (the skill's cast time and cooldown pace it); when none is
+   left it takes the next path leg. With no path, Start runs stationary
+   combat, pickup and recovery, and an out-of-range target is chased on foot
+   (one A* leg at a time) until it is in range — the game's
+   click-a-monster behaviour.
    Target choice: with **Retaliate** on, first try the most recent `su`
    attacker that hit you (within 5 s); otherwise pick the nearest `kind == 3`
    entity within range. Both paths apply the **Targets** filter.
-   When the chosen monster is outside the attack range (a short-range skill
-   with a larger **Search** radius), the bot selects it and walks one A* leg
-   toward it, attacking as soon as it is in range — the same behaviour as
-   clicking an out-of-range monster in the game. With **Move first** off it
-   keeps its ground and only reports the out-of-range target. A killed
-   monster gets no `out` packet, so a `TARGET` refusal also removes it from
-   the entity list; the bot then picks a live monster.
+   A killed monster gets no `out` packet: the server's `st` status packet
+   (current HP reaches 0) removes it from the entity list immediately, so the
+   bot picks a live monster instead of attacking the corpse. A `TARGET`
+   refusal is the fallback removal.
    Spell rules are evaluated before the basic attack in list order: the first
    enabled rule that is off its per-rule cooldown, has enough MP, has the
    target in spell range and whose condition (Always or HP/MP threshold) is

@@ -95,7 +95,6 @@ def main() -> int:
             app.path_cells = []
             app.auto_attack_toggle.set_active(True)
             app.retaliate_toggle.set_active(False)
-            app.move_first_toggle.set_active(True)
             app.skill_entry.set_text("0")
             app.attack_range.set_value(40)  # UI range is larger than 866
             app.attack_cooldown.set_value(1)

@@ -718,23 +718,15 @@ class Application(Gtk.Application):
         self.retaliate_toggle.set_tooltip_text(
             "Prioritise the monster that is currently hitting you"
         )
-        self.move_first_toggle = Gtk.ToggleButton(label="Move first")
-        self.move_first_toggle.set_active(True)
-        self.move_first_toggle.set_tooltip_text(
-            "Attack while following the path and keep walking between "
-            "attacks; turn off to clear the area before moving on"
-        )
         for toggle in (
             self.auto_attack_toggle,
             self.retaliate_toggle,
-            self.move_first_toggle,
         ):
             self._bind_toggle_color(toggle)
         combat_box.append(
             self._field_row(
                 self.auto_attack_toggle,
                 self.retaliate_toggle,
-                self.move_first_toggle,
             )
         )
         self.skill_entry = Gtk.Entry()
@@ -2006,10 +1998,6 @@ class Application(Gtk.Application):
                 self.retaliate_toggle is not None
                 and self.retaliate_toggle.get_active()
             ),
-            move_first=bool(
-                self.move_first_toggle is not None
-                and self.move_first_toggle.get_active()
-            ),
             skill=self._entry_int(self.skill_entry, 0),
             skill_template=(
                 self.skill_packet_entry.get_text().strip()
@@ -2054,7 +2042,6 @@ class Application(Gtk.Application):
             self._stop_bot()
         self.auto_attack_toggle.set_active(config.auto_attack)
         self.retaliate_toggle.set_active(config.retaliate)
-        self.move_first_toggle.set_active(config.move_first)
         self.skill_entry.set_text(str(config.skill))
         self.skill_packet_entry.set_text(config.skill_template)
         self.attack_range.set_value(config.attack_range)
@@ -3948,11 +3935,6 @@ class Application(Gtk.Application):
                     )
                 return True
 
-        move_first = (
-            self.move_first_toggle is not None
-            and self.move_first_toggle.get_active()
-            and bool(self.bot_goals)
-        )
         auto_attack = (
             self.auto_attack_toggle is not None
             and self.auto_attack_toggle.get_active()
@@ -4084,11 +4066,12 @@ class Application(Gtk.Application):
                 and monster is not None
                 and not basic_in_range
                 and now >= self.attack_cooldown_until
-                and self.move_first_toggle is not None
-                and self.move_first_toggle.get_active()
+                and not self.bot_goals
             ):
-                # Like clicking a monster in game: walk to it, then attack
-                # as soon as it is in range.
+                # Stationary combat, like clicking a monster in game: walk to
+                # it, then attack as soon as it is in range. With a drawn
+                # path the bot clears what is already in range and then keeps
+                # following the route instead of detouring.
                 if self._chase_step(monster, basic_range, now):
                     return True
 
@@ -4104,14 +4087,9 @@ class Application(Gtk.Application):
                 )
                 self.out_of_range_warn_at = now + 10.0
 
-            if (
-                monster is not None
-                and not move_first
-                and (rule is not None or basic_in_range)
-            ):
-                # Clear-the-area mode: stay on this position until the
-                # nearby monsters are dead. Move first keeps walking
-                # between attacks instead.
+            if monster is not None and (rule is not None or basic_in_range):
+                # Kill what is already in range before taking the next path
+                # leg; the route resumes when no attackable monster is left.
                 return True
 
         if not self.bot_goals:

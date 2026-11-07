@@ -1,12 +1,13 @@
 """Headless bot smoke test.
 
 A fake server sends the minimum live state: a player at (25,117) on map 20 and
-a monster at (25,118). The GUI loads the real map, starts the bot with a short
-path, and the test checks that the bot sent:
+two monsters in range. The GUI loads the real map, starts the bot with a short
+path, and the test checks that the bot cleared the area before walking:
 
-    TARGET|500          (select the monster in the client)
-    u_s 0 3 500         (auto-attack: u_s 0 = normal/basic attack)
-    walk 25 118 0 10    (first path cell)
+    TARGET|501          (select the retaliating monster in the client)
+    u_s 0 3 501         (auto-attack: u_s 0 = normal/basic attack)
+    ... both monsters die (the fake answers every u_s with a death `st`) ...
+    walk 25 118 0 10    (first path cell, only after the area is clear)
 
 The fake server answers each walk with a server `tp`, so the path loop advances
 without the game.
@@ -95,6 +96,21 @@ class FakeServer:
                         )
                     except OSError:
                         return
+                elif text.startswith("SEND|u_s "):
+                    # One-hit kills: announce the death so clear-before-move
+                    # can proceed to the other monster and then the path.
+                    parts = text.split()
+                    if len(parts) >= 4:
+                        entity_id = parts[3]
+                        try:
+                            self.connection.sendall(
+                                (
+                                    f"RECV|st 3 {entity_id} 15 0 1 100 0 "
+                                    "119 513 119 0\n"
+                                ).encode()
+                            )
+                        except OSError:
+                            return
                 elif text == "POS":
                     try:
                         self.connection.sendall(
@@ -144,15 +160,13 @@ def main() -> int:
             app.path_cells = [(26, 119)]
             app.loop_toggle.set_active(False)
             app.auto_attack_toggle.set_active(True)
-            # Move first is on by default: it must still auto-attack, then
-            # resume the path instead of waiting for the area to be clear.
-            app.move_first_toggle.set_active(True)
+            # Clear in-range monsters first, then continue the path.
             app.skill_entry.set_text("0")
-            app.attack_cooldown.set_value(10)
+            app.attack_cooldown.set_value(1)
             app.attack_walk_delay = 0.1
             app.walk_timeout = 0.5
             app._start_bot()
-            GLib.timeout_add(2500, check)
+            GLib.timeout_add(4000, check)
         except Exception as exc:  # noqa: BLE001 - report, do not crash GTK
             result["detail"] = f"start exception: {exc!r}"
             app.quit()

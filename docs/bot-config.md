@@ -39,7 +39,7 @@ target was found; enable the checkbox to attack them anyway. This is also
 saved as `attack_unknown` in the JSON configuration.
 
 The UI makes toggle state explicit: active toggles (Loop, Auto-attack,
-Retaliate, Move first, Pickup, Auto-recover) are **green**, inactive ones are
+Retaliate, Pickup, Auto-recover) are **green**, inactive ones are
 **red**. While Auto-recover is active and HP is below the threshold, a red
 **RECOVERING** banner explains that attacks and movement are paused; the
 recovery check runs before targeting and spell rules.
@@ -172,7 +172,6 @@ Example:
   "version": 1,
   "auto_attack": true,
   "retaliate": true,
-  "move_first": true,
   "skill": 0,
   "skill_template": "u_s {skill} {type} {target}",
   "attack_range": 10,

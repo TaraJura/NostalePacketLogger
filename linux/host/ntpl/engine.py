@@ -325,6 +325,27 @@ def _on_despawn(world: WorldState, packet: Packet) -> None:
         world.entities.pop(values[1], None)
 
 
+def _on_status(world: WorldState, packet: Packet) -> None:
+    # st <type> <id> <level> <unknown> <state> <unknown> <hp> <unknown>
+    #    <hpMax> ... -- live monster status (2026-11-07, map 3):
+    #   alive: st 3 3481 14 0 100 100 481 108 481 108 0
+    #   dead:  st 3 3481 14 0 1   100 0   108 481 108 0
+    # The server does not send `out` for a killed monster; the zero current
+    # HP here is its death notice, so drop the entity at once instead of
+    # letting the bot select the corpse (the client object is already gone).
+    args = packet.args
+    if len(args) < 9:
+        return
+    try:
+        kind = int(args[0])
+        entity_id = int(args[1])
+        hp = int(args[6])
+    except (ValueError, IndexError):
+        return
+    if kind in (2, 3) and hp == 0:
+        world.entities.pop(entity_id, None)
+
+
 def _on_teleport(world: WorldState, packet: Packet) -> None:
     values = packet.ints(4)  # <type> <id> <x> <y>
     if not values:
@@ -529,6 +550,7 @@ class Engine:
                 "get": _on_get,         # RECV: pickup confirmation
                 "in": _on_spawn,        # RECV: entity spawned
                 "out": _on_despawn,     # RECV: entity despawned
+                "st": _on_status,       # RECV: entity HP/status (death)
                 "tp": _on_teleport,     # RECV: entity teleported / server position
                 "rest": _on_rest,       # RECV: sit/stand state
                 "cond": _on_condition,  # RECV: entity speed/state

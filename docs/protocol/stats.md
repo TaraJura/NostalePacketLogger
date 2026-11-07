@@ -27,6 +27,35 @@ stat 2991 2991 3727 3727 0 99328
 
 ---
 
+## `st` (RECV)
+
+Entity status, used by the server to report monster HP. Observed live on
+2026-11-07 (map 3); the client does not send `out` for a killed monster, so
+this packet is the only death notice.
+
+**Format**: `st <entityType> <entityId> <level> <unknown> <state> <unknown> <hp> <unknown> <hpMax> <unknown> <unknown>`
+
+**Live examples**:
+```
+st 3 3481 14 0 100 100 481 108 481 108 0   # alive: current HP 481
+st 3 3481 14 0 1 100 0 108 481 108 0       # dead:  current HP 0
+```
+
+| Field | Observed |
+|-------|----------|
+| entityType | `3` for monsters |
+| entityId | matches `mv`/`in` |
+| level | 14 or 15 for the map-3 monsters |
+| state | `1` on the dead packet, `100` while alive (inferred) |
+| hp | current HP; **0 means the monster died** |
+| hpMax | matches the alive `hp` |
+
+The host uses only the type, entity id and `hp` fields: a zero current HP
+removes the entity from `WorldState.entities`, so the bot stops selecting a
+dead monster.
+
+---
+
 ## `rest` (SEND and RECV)
 
 Sit/stand toggle and its server state.

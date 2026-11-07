@@ -109,6 +109,7 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `ski` | RECV | learned skill pages and the ordered `skill_list` used by `u_s` slots; slot 0 is the basic attack |
 | `su` | RECV | `combat`, `last_skill` (first five ints); if the target is self, `last_attacker_id`/`last_attacker_at` |
 | `stat` | RECV | own HP/MP |
+| `st` | RECV | monster status; `hp == 0` removes the entity (kill, no `out` is sent) |
 | `say` | RECV/SEND | `chat` |
 
 Parsing is deliberately tolerant: a short packet, a non-numeric field, or an
