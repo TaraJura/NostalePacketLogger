@@ -65,7 +65,8 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `facing` | last movement direction `(dx, dy)`, each -1/0/1; drives the GUI arrow; `None` until the first walk |
 | `entities` | `dict[int, Entity]` keyed by **entityId** (never vnum) |
 | `drops` | `dict[int, GroundItem]` keyed by drop id: item vnum, x, y, amount, owner char id |
-| `portals` | `(mapId, x, y) → destination mapId` learned from real crossings (the cell held when the leaving `c_map`/`mapout` arrived, plus the following `at`) |
+| `gates` | `(mapId, x, y) → destination mapId` from the server's `gp` portal list, sent on map entry; authoritative and complete per visited map |
+| `portals` | `(mapId, x, y) → destination mapId` learned from real crossings (departure cell + the following `at` arrival); fallback when `gp` was missed |
 | `stats` | `CharacterStats(hp, hp_max, mp, mp_max)` from `stat`; drives the bars and recovery |
 | `last_attacker_id` / `last_attacker_at` | last entity that hit the local player and the packet timestamp; Retaliate uses it (5 s window) |
 | `chat` | last 200 `(type, id, message)` tuples from `say` |
@@ -101,6 +102,7 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `cond` | RECV | entity `speed` |
 | `ncif` | SEND | `target_id` |
 | `u_s` | SEND | the last sent `u_s` slot; paired with the next `su` from self to fill `skill_learned` (slot 0 → `basic_skill`) |
+| `gp` | RECV | the entered map's portal list → `gates` (`gp <x> <y> <toMap> …`) |
 | `ski` | RECV | learned skill pages and the ordered `skill_list` used by `u_s` slots; slot 0 is the basic attack |
 | `su` | RECV | `combat`, `last_skill` (first five ints); if the target is self, `last_attacker_id`/`last_attacker_at` |
 | `stat` | RECV | own HP/MP |
@@ -226,15 +228,17 @@ last `at` plus the client's own `walk` lines** (`spawnlog.load_last_position`),
 so a window attached after login shows the real map instead of guessing; the
 position ranking is only the fallback when the log has no `at`. With no data
 the canvas stays blank and the info says "waiting for the game…".
-**Portals are learned from crossings**, because the client has no static
-portal table: when the leaving `c_map`/`mapout` arrives, the engine remembers
-`(map, x, y)`; the following `at` names the destination and the arrival cell,
-so a crossing stores the portal on the old map **and the return portal on the
-new map** in `WorldState.portals`. `spawnlog.load_portals` backfills the
-session's crossings; `normalize_portals` averages markers within two cells for
-the same destination (repeated crossings land a cell or two apart), and the
-GUI persists the result to `~/.config/ntpl/portals.json` (`NTPL_PORTALS`
-overrides), drawing magenta rings with a "Portal → map N" tooltip.
+**Portals come from the server**: on map entry it sends `gp <x> <y> <toMap>
+…` for every portal of that map (see [protocol/map.md](protocol/map.md)),
+stored in `WorldState.gates` — exact and complete for every visited map.
+Crossing learning is the fallback when a `gp` list was missed: when the
+leaving `c_map`/`mapout` arrives the engine remembers `(map, x, y)`, and the
+following `at` names the destination and the arrival cell, so both sides go
+into `WorldState.portals`. `spawnlog.load_gates`/`load_portals` backfill from
+the DLL log; `set_gate` lets an exact gate replace a nearby crossing guess,
+`normalize_portals` averages leftover clusters, and the GUI persists the
+result to `~/.config/ntpl/portals.json` (`NTPL_PORTALS` overrides), drawing
+magenta rings with a "Portal → map N" tooltip.
 The sidebar also owns the bot configuration:
 
 - `monsternames.py` — `vnum → monster name` and skill descriptions from

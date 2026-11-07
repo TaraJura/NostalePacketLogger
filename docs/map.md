@@ -161,9 +161,11 @@ grouped by function:
   on the `c_map`/`at` pair as soon as the packet arrives (the 2 s auto-map
   tick remains only as a fallback). Note that the map id is the **second**
   `c_map` field — the first is a type. A GUI started mid-session seeds the map
-  from the DLL log's last `at`, and the cell held when leaving a map is
-  remembered as a **portal** (magenta marker, "Portal → map N" tooltip,
-  persisted in `~/.config/ntpl/portals.json`).
+  from the DLL log's last `at`. On entry the server sends the map's whole
+  portal list as `gp <x> <y> <toMap> …`; those are drawn as magenta rings
+  with a "Portal → map N" tooltip and persisted in
+  `~/.config/ntpl/portals.json`. A crossing is the fallback when a `gp` list
+  was missed.
 - **Character** — live HP and MP bars with current/max/missing values, plus
   map/position/char id. HP and MP are fed by the server's `stat` packets.
   While recovering, a red **RECOVERING** banner states the HP percentage and
@@ -378,14 +380,12 @@ is sent and the status says “not attacking”. See
 - Live maps on 2026-11-07: **98** Comet Meadow (50x45), **103** Deep Cave
   (55x40) and **104** (17x15); earlier that day map 2/1, and map 20 on
   2026-11-06 (100 % of 173,503 `mv` samples on walkable cells there).
-- Portals are learned live: at 15:49 the character crossed 103 → 104 from
-  (20,20) and returned from (11,9); the GUI learned `(103,20,20)→104` and
-  `(104,11,9)→103` from the departure and arrival cells, drew both and
-  persisted them. Later crossings 103 ↔ 3 added `(103,42,32)→3` and
-  `(3,44,12)→103`; markers recorded a cell or two apart are averaged, so one
-  ring is shown per real portal. The client has no static portal table — the
-  departure cell plus the following `at` is the source, so a map only shows
-  portals that have actually been crossed.
+- Portals are server-sent: entering a map sends `gp <x> <y> <toMap> …` for
+  every portal of that map. 2026-11-07: map 103 has `(20,20)→104` and
+  `(42,32)→3`; map 3 (Mine Plains) has `(10,208)→6`, `(19,7)→7`,
+  `(45,12)→103`, `(156,2)→4` and `(178,189)→2`; map 104 has `(11,9)→103`.
+  The GUI stores, draws and persists the whole list (`WorldState.gates`);
+  crossing learning remains the fallback when a `gp` list was missed.
 - The basic skill follows the equipped SP card: `u_s 0` was answered with
   `su ... 260 ...` (Energy Bolt, range 6/cast 0.8 s/CD 0.5 s/0 MP) and later
   with `su ... 855 ...` (Fire Bolt, 40 MP) after a card change; the Combat box

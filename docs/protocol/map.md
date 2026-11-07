@@ -54,6 +54,37 @@ changes, and the GUI selects the new map immediately.
 
 ---
 
+## `gp` (RECV)
+
+The map's **portal list**, sent right after entering a map (after `at` and
+the entering `c_map`). This is the authoritative portal source; no client
+data file contains it.
+
+**Format**: `gp <x> <y> <destinationMapId> <unknown> <portalIndex> <unknown>`
+
+`<portalIndex>` is a small zero-based counter (0, 1, 2, …) within the map's
+list; the other unknown fields were `-1` and `0` in every capture. The packet
+carries **no source map id** — it is the map that was just entered.
+
+Captured live on 2026-11-07:
+
+```
+16:41:46.966 [RECV] gp 20 20 104 -1 0 0     # on map 103
+16:41:46.966 [RECV] gp 42 32 3 -1 1 0       # on map 103
+16:42:46.570 [RECV] gp 10 208 6 -1 0 0      # on map 3 (Mine Plains)
+16:42:46.570 [RECV] gp 19 7 7 -1 1 0
+16:42:46.570 [RECV] gp 45 12 103 -1 2 0
+16:42:46.570 [RECV] gp 156 2 4 -1 3 0
+16:42:46.570 [RECV] gp 178 189 2 -1 4 0
+```
+
+The positions match the observed crossings exactly: map 103's `(20,20)` is
+the portal to 104 and `(42,32)` the one to 3; map 3's `(45,12)` is the
+return to 103. The engine stores these in `WorldState.gates`; crossing
+learning (`portals`) is only the fallback when a `gp` was missed.
+
+---
+
 ## Map IDs (Known)
 
 Only ids observed in packets are listed; more are added by visiting maps.

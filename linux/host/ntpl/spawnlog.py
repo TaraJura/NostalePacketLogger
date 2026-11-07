@@ -30,6 +30,7 @@ _CMAP_MARKER = "[RECV] c_map "
 _MAPOUT_MARKER = "[RECV] mapout"
 _MV_MARKER = "[RECV] mv "
 _TP_MARKER = "[RECV] tp "
+_GP_MARKER = "[RECV] gp "
 _ENTITY = re.compile(r"^([23]) (\d+) (\d+) ")
 _PLAYER = re.compile(r"^1 (.+) - (\d+) ")
 
@@ -201,6 +202,48 @@ def load_last_position(
                 map_id = change[1]
 
     return map_id, x, y, self_id
+
+
+def load_gates(
+    path: str | Path | None = None,
+) -> dict[tuple[int, int, int], int]:
+    """Return ``(mapId, x, y) -> destination`` from the log's `gp` lines.
+
+    The server sends a map's whole portal list right after entering it::
+
+        gp <x> <y> <toMapId> <unknown> <index> <unknown>
+
+    The packet carries no map id, so the last `at` or entering `c_map` gives
+    the current map. These are authoritative; crossing learning is only the
+    fallback when `gp` was missed.
+    """
+    source = Path(path) if path is not None else default_log_path()
+    gates: dict[tuple[int, int, int], int] = {}
+    if source is None:
+        return gates
+    try:
+        log = open(source, "r", encoding="latin1", errors="replace")
+    except OSError:
+        return gates
+
+    current_map: int | None = None
+    with log:
+        for line in log:
+            change = _ints_after(line, _CMAP_MARKER, 3)
+            if change:
+                if change[2] == 1:
+                    current_map = change[1]
+                continue
+            at = _ints_after(line, _AT_MARKER, 4)
+            if at:
+                current_map = at[1]
+                continue
+            gate = _ints_after(line, _GP_MARKER, 3)
+            if gate and current_map is not None:
+                x, y, destination = gate
+                if x >= 0 and y >= 0 and destination > 0:
+                    gates[(current_map, x, y)] = destination
+    return gates
 
 
 def load_portals(

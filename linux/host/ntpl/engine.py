@@ -61,9 +61,12 @@ class WorldState:
     facing: tuple[int, int] | None = None
     entities: dict[int, Entity] = field(default_factory=dict)
     drops: dict[int, GroundItem] = field(default_factory=dict)
-    # Portals are server-side warp tiles with no client table; learn them
-    # from real crossings: (mapId, x, y) held when the leaving `c_map`/
-    # `mapout` arrived, plus the destination map from the following `at`.
+    # Portals are server-side warp tiles with no client table. The server
+    # sends the whole list of a map's portals in `gp` packets when entering;
+    # those are authoritative. Crossings are the fallback when `gp` was
+    # missed: (mapId, x, y) held when the leaving `c_map`/`mapout` arrived,
+    # plus the destination map from the following `at`.
+    gates: dict[tuple[int, int, int], int] = field(default_factory=dict)
     portals: dict[tuple[int, int, int], int] = field(default_factory=dict)
     pending_departure: tuple[int, int, int] | None = None
     stats: CharacterStats = field(default_factory=CharacterStats)
@@ -360,6 +363,22 @@ def _on_select(world: WorldState, packet: Packet) -> None:
         world.target_id = values[1]
 
 
+def _on_gate(world: WorldState, packet: Packet) -> None:
+    # gp <x> <y> <toMapId> <unknown> <index> <unknown> -- the map's portals,
+    # sent after `at`/`c_map` on entry. Live 2026-11-07 on map 3:
+    #   gp 10 208 6 -1 0 0
+    #   gp 19 7 7 -1 1 0
+    #   gp 45 12 103 -1 2 0
+    #   gp 156 2 4 -1 3 0
+    #   gp 178 189 2 -1 4 0
+    values = packet.ints(3)
+    if not values or world.map_id is None:
+        return
+    x, y, destination = values
+    if x >= 0 and y >= 0 and destination > 0:
+        world.gates[(world.map_id, x, y)] = destination
+
+
 def _on_skill_list(world: WorldState, packet: Packet) -> None:
     # ski <page> <vnum> <vnum> ... ; duplicates are skill ranks/variants.
     # The client's u_s slot is the index in the deduplicated, page-ordered
@@ -480,6 +499,7 @@ class Engine:
                 "cond": _on_condition,  # RECV: entity speed/state
                 "ncif": _on_select,     # SEND: target selection
                 "u_s": _on_skill_send,  # SEND: skill used (slot, not vnum)
+                "gp": _on_gate,         # RECV: the map's portal list
                 "ski": _on_skill_list,  # RECV: learned skill list
                 "su": _on_skill_used,   # RECV: a skill hit
                 "stat": _on_stats,      # RECV: own hp/mp

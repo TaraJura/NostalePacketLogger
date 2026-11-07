@@ -371,6 +371,40 @@ def add_portal(
     return True
 
 
+def set_gate(
+    portals: PortalMap,
+    map_id: int,
+    x: int,
+    y: int,
+    destination: int,
+    radius: int = 3,
+) -> bool:
+    """Add a portal from the server's `gp` list, the authoritative source.
+
+    A crossing-derived guess for the same destination within ``radius`` is
+    removed, so the exact gate position replaces it instead of being averaged
+    with it. Returns ``True`` when the map changed.
+    """
+    changed = False
+    for (other_map, other_x, other_y), other_destination in list(
+        portals.items()
+    ):
+        if (
+            other_map == map_id
+            and other_destination == destination
+            and abs(other_x - x) <= radius
+            and abs(other_y - y) <= radius
+            and (other_x, other_y) != (x, y)
+        ):
+            del portals[(other_map, other_x, other_y)]
+            changed = True
+    key = (map_id, x, y)
+    if portals.get(key) != destination:
+        portals[key] = destination
+        changed = True
+    return changed
+
+
 def normalize_portals(portals: PortalMap, radius: int = 2) -> PortalMap:
     """Collapse nearby markers for the same map and destination into one.
 

@@ -46,10 +46,12 @@ from .mapdata import (
     load_portals as load_saved_portals,
     normalize_portals,
     save_portals,
+    set_gate,
     terrain_rgb,
 )
 from .monsternames import load_monster_names, load_skill_descriptions
 from .spawnlog import (
+    load_gates,
     load_last_position,
     load_portals as load_log_portals,
     load_skill_list,
@@ -878,6 +880,11 @@ class Application(Gtk.Application):
                 world.self_id = char_id
                 self._learn_char_id(char_id)
         merged = False
+        # `gp` is the server's own portal list: exact and complete per map.
+        for (map_id, x, y), destination in load_gates(self.log_file).items():
+            if set_gate(self.portals, map_id, x, y, destination):
+                merged = True
+        # Crossings fill in maps whose `gp` was missed.
         for (map_id, x, y), destination in load_log_portals(
             self.log_file
         ).items():
@@ -1126,6 +1133,9 @@ class Application(Gtk.Application):
         if self._closing:
             return False
         merged = False
+        for (map_id, x, y), destination in self.engine.world.gates.items():
+            if set_gate(self.portals, map_id, x, y, destination):
+                merged = True
         for (map_id, x, y), destination in self.engine.world.portals.items():
             if add_portal(self.portals, map_id, x, y, destination):
                 merged = True

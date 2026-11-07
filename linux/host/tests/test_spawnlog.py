@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from ntpl.spawnlog import (
+    load_gates,
     load_last_position,
     load_portals,
     load_skill_list,
@@ -72,6 +73,16 @@ class SpawnLogTests(unittest.TestCase):
             "4 [RECV] c_map 0 104 1\r\n"
         )
         self.assertEqual(load_last_position(log), (104, 22, 22, 14881134))
+
+    def test_reads_the_map_portal_list_from_gp(self):
+        log = self._write(
+            "1 [RECV] at 14881134 3 45 12 2 0 2 1\r\n"
+            "2 [RECV] gp 10 208 6 -1 0 0\r\n"
+            "3 [RECV] gp 45 12 103 -1 2 0\r\n"
+        )
+        self.assertEqual(
+            load_gates(log), {(3, 10, 208): 6, (3, 45, 12): 103}
+        )
 
     def test_reads_portals_from_crossings(self):
         log = self._write(

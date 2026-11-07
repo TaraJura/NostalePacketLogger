@@ -15,6 +15,7 @@ from ntpl.mapdata import (
     load_portals,
     normalize_portals,
     save_portals,
+    set_gate,
     terrain_rgb,
 )
 
@@ -222,6 +223,12 @@ class PortalStoreTests(unittest.TestCase):
                 load_portals(path),
                 {(103, 20, 20): 104, (104, 11, 9): 103},
             )
+
+    def test_set_gate_replaces_a_nearby_crossing_guess(self):
+        portals = {(3, 44, 12): 103, (3, 10, 208): 6}
+        changed = set_gate(portals, 3, 45, 12, 103)
+        self.assertTrue(changed)
+        self.assertEqual(portals, {(3, 45, 12): 103, (3, 10, 208): 6})
 
     def test_normalize_collapses_nearby_markers(self):
         raw = {(103, 41, 31): 3, (103, 42, 33): 3, (103, 20, 20): 104}

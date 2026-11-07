@@ -390,6 +390,30 @@ class PortalLearningTests(unittest.TestCase):
         )
         self.assertEqual(self.engine.world.portals, {})
 
+    def test_gate_list_adds_every_portal_on_the_map(self):
+        # `gp` carries no map id: it arrives after `at` on map entry.
+        self.engine.feed(
+            packet(Kind.RECV, "at 14881134 3 45 12 2 0 2 1 -1 0 0")
+        )
+        for line in (
+            "gp 10 208 6 -1 0 0",
+            "gp 19 7 7 -1 1 0",
+            "gp 45 12 103 -1 2 0",
+            "gp 156 2 4 -1 3 0",
+            "gp 178 189 2 -1 4 0",
+        ):
+            world = self.engine.feed(packet(Kind.RECV, line))
+        self.assertEqual(
+            world.gates,
+            {
+                (3, 10, 208): 6,
+                (3, 19, 7): 7,
+                (3, 45, 12): 103,
+                (3, 156, 2): 4,
+                (3, 178, 189): 2,
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
