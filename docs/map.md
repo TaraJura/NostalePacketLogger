@@ -280,15 +280,24 @@ honest source.
    Target choice: with **Retaliate** on, first try the most recent `su`
    attacker that hit you (within 5 s); otherwise pick the nearest `kind == 3`
    entity within range. Both paths apply the **Targets** filter.
+   When the chosen monster is outside the attack range (a short-range skill
+   with a larger **Search** radius), the bot selects it and walks one A* leg
+   toward it, attacking as soon as it is in range — the same behaviour as
+   clicking an out-of-range monster in the game. With **Move first** off it
+   keeps its ground and only reports the out-of-range target. A killed
+   monster gets no `out` packet, so a `TARGET` refusal also removes it from
+   the entity list; the bot then picks a live monster.
    Spell rules are evaluated before the basic attack in list order: the first
    enabled rule that is off its per-rule cooldown, has enough MP, has the
    target in spell range and whose condition (Always or HP/MP threshold) is
    true is cast on the monster or on yourself. **Always** plus cooldowns is a
    rotation. If none matches, the **Skill** from Combat is used (`0` = basic
    attack). Monster casts first select the monster in the client
-   (`TARGET|id`, which makes the client send its own `ncif 3 <id>`); the
-   skill itself goes out on a later tick, once the selection is
-   confirmed. Self casts use target type 1 and the char id. The rule stores the Skill.dat
+   (`TARGET|id`, which makes the client send its own `ncif 3 <id>`), then send
+   `u_s` in the same tick: the DLL handles both commands in order, so the
+   selection is applied first. A refusal arrives asynchronously and the
+   entity is dropped from the world state. Self casts use target type 1 and
+   the char id. The rule stores the Skill.dat
    vnum; the bot resolves it to the zero-based `u_s` slot from the learned
    `ski` list (e.g. 876 → slot 10) before sending. Cast time from Skill.dat
    extends the walk pause.
@@ -398,8 +407,9 @@ loop. The rules smoke presents two monsters (vnum 201 nearer, vnum 200
 farther), allows only vnum 200, sets HP to 40 % and a spell rule (spell 7, my
 HP below 50 %), then asserts `TARGET|500` + `u_s 7 3 500`, no traffic to 501,
 no basic attack, and that save/load restores the config. The out-of-range
-smoke sets UI Range 40 with a monster 35 cells away and asserts no `TARGET`/`u_s`
-is sent and the status says “not attacking”. See
+smoke sets UI Range 40 with a monster 35 cells away and asserts the bot
+selects it (`TARGET|5087`), sends a `MOVE` toward it, sends no `ncif`/`u_s`
+from where it stands, and reports “chasing monster 5087”. See
 [bot-config.md](bot-config.md).
 
 ## Live status

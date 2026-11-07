@@ -60,7 +60,9 @@ one byte per cell; `0x00` walkable). Live maps so far include **2, 3, 4, 20,
 - Auto-attack targets the nearest allowed monster: `TARGET|id` selects it in
   the client (target ring + the client's own `ncif`, which the server
   validates), then `u_s 0 3 <id>` on a cooldown; Retaliate prioritises the
-  attacker and a refused target is skipped for a few seconds.
+  attacker; a refused target is dropped from the world state and skipped
+  for a few seconds, and an out-of-range target is chased on foot until it
+  is in range (the game's click-a-monster behaviour).
 - The bot stands first (`rest`) and walks three-cell legs through the
   client's own MoveTo; while a leg runs it polls `POS` and hands the next leg
   off one cell early (the click-to-walk rule), so walking is continuous.

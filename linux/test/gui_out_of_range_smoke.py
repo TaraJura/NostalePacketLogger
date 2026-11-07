@@ -1,11 +1,11 @@
-"""Headless regression test: never attack a monster outside the skill range.
+"""Headless regression test: chase, never attack, outside the skill range.
 
 The live 2026-11-06 late session showed the bot sending `u_s 0 3 5087` at a
 bee 38 cells away while the UI Range was large enough to select it; the client
 played the attack animation at empty space and the server reported a
 self-target. The scanned basic skill (866) has range 11, so this smoke sets
-UI Range 40, places the monster 38 cells away and asserts that the bot sends
-no ncif/u_s and reports the out-of-range target instead.
+UI Range 40 and places the monster 35 cells away. The bot must select it,
+send a MOVE toward it and send no ncif/u_s from where it stands.
 
 Run through scripts/dev-test-bot.sh (Xvfb).
 """
@@ -118,17 +118,23 @@ def main() -> int:
             attacks = [
                 line
                 for line in lines
-                if line.startswith(("TARGET|", "SEND|ncif", "SEND|u_s"))
+                if line.startswith(("SEND|ncif", "SEND|u_s"))
             ]
+            targets = [
+                line for line in lines if line.startswith("TARGET|")
+            ]
+            moves = [line for line in lines if line.startswith("MOVE|")]
             status = app.status.get_text()
             result["ok"] = (
                 not attacks
-                and "not attacking" in status
+                and "TARGET|5087" in targets
+                and bool(moves)
+                and "chasing" in status
                 and app.bot_running
             )
             result["detail"] = (
-                f"attacks={attacks} running={app.bot_running} "
-                f"status={status!r}"
+                f"attacks={attacks} targets={targets} moves={moves} "
+                f"running={app.bot_running} status={status!r}"
             )
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"check exception: {exc!r}"

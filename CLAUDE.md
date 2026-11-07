@@ -156,9 +156,12 @@ PYTHONPATH=linux/host python3 -m ntpl status
   A* path, and the bot recovers below the HP threshold (sit, wait for full,
   stand), stands (`rest`), picks up own/unowned drops (`get 1 <charId>
   <dropId>`), auto-attacks with Retaliate priority (`TARGET|id` selects the
-  monster in the client, then `u_s`; skill 0 = normal attack) and walks in
-  three-cell legs through the client's own MoveTo
-  (`MOVE|x y`), pacing each leg by distance so the animation stays continuous.
+  monster in the client, then `u_s`; skill 0 = normal attack), chases a
+  target that is outside attack range (select, walk one leg, attack once in
+  range) and walks in three-cell legs through the client's own MoveTo
+  (`MOVE|x y`), handing the next leg off one cell early so walking is
+  continuous. A killed monster gets no `out`, so a TARGET refusal drops the
+  entity from the world state and the bot picks a live one.
   **Move first** (default on) attacks while a path is active and walks on
   between attacks; with it off the bot clears nearby monsters before moving.
   **Targets** filters by monster template vnum (all / only selected / all

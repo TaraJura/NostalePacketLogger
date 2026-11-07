@@ -92,8 +92,11 @@ own MoveTo, so the game pathfinds, animates and sends its `walk`; the tool
 waits for `world.position` to match. Targeting is client-authoritative too:
 `TARGET|id` runs the client's own selector, so the monster is highlighted and
 the client sends its own `ncif`; the server validates the following `u_s`
-against that selection. Attacks are confirmed by `su`; a `cancel`/timeout is
-reported as a tool error, not silently swallowed.
+against that selection. If the client refuses the target (killed monsters get
+no `out`, so the world state can lag), the tool raises and drops that entity
+from its state, so the next call can pick a live one. Attacks are confirmed
+by `su`; a `cancel`/timeout is reported as a tool error, not silently
+swallowed.
 
 ## Security
 

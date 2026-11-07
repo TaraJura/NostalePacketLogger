@@ -31,7 +31,7 @@
 | `rest` toggles twice | two identical packets were sent | send `rest 1 1 <charId>` once per state change |
 | Client looks stuck after many injected walks | injected walks can desync the client | use `MOVE`; if already desynced, relog/restart the client |
 | Spell vnum unknown | the client's hotbar mapping is not documented | cast once manually and read `su 1 <charId> ...` from the log |
-| `TARGET <id> ERR entity not found` | the server/engine knows the monster, but the client has no live object for it (despawned, left the interest area, or the id was reused) | the bot blocks that id for 5 s and picks the nearest other monster; check the **Bot log** tab. If every monster fails, the client build moved the entity layout |
+| `TARGET <id> ERR entity not found` | the server/engine knows the monster, but the client has no live object for it (despawned, left the interest area, or the id was reused) | the bot drops that entity from the world state (the server sends no `out` for kills), blocks the id for 5 s and picks the nearest live monster; check the **Bot log** tab. If every monster fails, the client build moved the entity layout |
 | `TARGET <id> ERR client refused the selection` | the object is dead, off-map, or not targetable (type `0xA9 == 4`) | expected for a stale target; the bot skips it for 5 s. See the **Bot log** tab for the exact reply |
 | Attacks land on the previously clicked monster | the injected `ncif` cannot change the client's own selection | re-inject the current DLL (0.2.x) and use `TARGET\|id`; check the Bot log for `monster <id> selected ...` |
 
@@ -52,7 +52,7 @@
 | Add spell… picker is empty | `NSgtdData.NOS` is missing or `NTPL_NSGTD` points elsewhere | set `NTPL_NSGTD` / `NTPL_NSTC`; manual vnums still work |
 | Spell rule never casts | not enough MP, target out of the spell's own range, rule/spell cooldown still running, or a higher rule is always winning | check the rule's description metadata; wait, move closer, raise MP, or reorder/disable the higher rule |
 | Rule order is not what I wanted | the list is evaluated 1., 2., … from the top | use the ↑/↓ buttons; the number on the left shows execution priority |
-| Character swings at empty space / “attacks on blind” | Search radius selected a monster outside the skill's real range; the client animates but the server rejects or self-targets | the bot caps basic attacks at the equipped SP card's Skill.dat range (Energy Bolt 260 = 6, Holy Attack 866 = 11) shown in the Combat box; use a longer-range spell rule or walk closer. A status message shows the distance |
+| Character swings at empty space / “attacks on blind” | Search radius selected a monster outside the skill's real range; the client animates but the server rejects or self-targets | the bot caps basic attacks at the equipped SP card's Skill.dat range (Energy Bolt 260 = 6, Holy Attack 866 = 11) shown in the Combat box and now walks to an out-of-range target before attacking (Move first on); the status shows “chasing monster …” |
 
 ## Injection
 

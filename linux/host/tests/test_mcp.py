@@ -6,6 +6,7 @@ import threading
 import time
 import unittest
 
+from ntpl.engine import Entity
 from ntpl.mcp_server import Broker, GameService, McpServer, ToolError
 
 
@@ -220,9 +221,13 @@ class TargetSelectionTests(unittest.TestCase):
         self.assertIn("TARGET|5160", self.broker.sent)
 
     def test_select_target_reports_a_refusal(self):
+        with self.service.lock:
+            self.service.engine.world.entities[5160] = Entity(5160, 3)
         self.feed_after("TARGET 5160 ERR entity not found in client memory")
         with self.assertRaises(ToolError):
             self.service._select_target(5160)
+        # Killed monsters get no `out`; the client is the source of truth.
+        self.assertNotIn(5160, self.service.engine.world.entities)
 
 
 if __name__ == "__main__":

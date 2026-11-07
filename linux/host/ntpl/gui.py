@@ -3321,10 +3321,21 @@ class Application(Gtk.Application):
                             blocked = int(parts[1])
                         except ValueError:
                             blocked = None
+                        reason = " ".join(parts[3:])
                         if blocked is not None:
                             self.target_blocked[blocked] = (
                                 time.monotonic() + TARGET_BLOCK_S
                             )
+                            if (
+                                "entity not found" in reason
+                                or "client refused" in reason
+                            ):
+                                # The client has no live object for it. The
+                                # server sends no `out` for a killed monster,
+                                # so without this the bot keeps selecting the
+                                # corpse and every attack is cancelled.
+                                self.engine.world.entities.pop(blocked, None)
+                                dirty = True
                         self._set_status(message.payload)
                     elif len(parts) >= 5 and parts[2] == "OK":
                         self._log_line(
@@ -3665,6 +3676,77 @@ class Application(Gtk.Application):
                 self._set_status("path finished")
                 self._stop_bot()
 
+    def _approach_cell(
+        self, monster: Entity
+    ) -> tuple[int, int] | None:
+        """A walkable cell to path toward for a monster outside range."""
+        grid = self.map_grid
+        if grid is None:
+            return None
+        cx, cy = monster.x, monster.y
+        if 0 <= cx < grid.width and 0 <= cy < grid.height:
+            if grid.is_walkable(cx, cy):
+                return (cx, cy)
+            for dx, dy in (
+                (1, 0), (-1, 0), (0, 1), (0, -1),
+                (1, 1), (-1, -1), (1, -1), (-1, 1),
+            ):
+                nx, ny = cx + dx, cy + dy
+                if (
+                    0 <= nx < grid.width
+                    and 0 <= ny < grid.height
+                    and grid.is_walkable(nx, ny)
+                ):
+                    return (nx, ny)
+        return None
+
+    def _chase_step(
+        self, monster: Entity, attack_range: float, now: float
+    ) -> bool:
+        """Walk one leg toward an out-of-range target.
+
+        The game's own behaviour when a monster is clicked: select it, walk
+        into range, then attack. The search radius still bounds which
+        monsters are considered, so the bot does not run across the map.
+        """
+        if self.pending_target is not None or self.map_grid is None:
+            return False
+        position = self._player_cell()
+        if position is None:
+            return False
+        if now < self.walk_not_before:
+            return True
+        goal = self._approach_cell(monster)
+        if goal is None:
+            return False
+        path = astar(self.map_grid, position, goal)
+        if path is None or len(path) < 2:
+            return False
+        leg = path[min(3, len(path) - 1)]
+        if leg == position:
+            return False
+        if not self._ensure_target(monster.entity_id, now):
+            return False
+        if not self._client_move(leg[0], leg[1]):
+            return False
+        self.pending_target = leg
+        self.pending_since = now
+        self.pending_distance = max(
+            abs(leg[0] - position[0]), abs(leg[1] - position[1])
+        )
+        self.pending_until = now + min(
+            60.0,
+            max(
+                self.walk_timeout,
+                self.pending_distance * self.walk_timeout_per_cell,
+            ),
+        )
+        self._set_status(
+            f"chasing monster {monster.entity_id} at "
+            f"{monster.x},{monster.y}"
+        )
+        return True
+
     def _nearest_monster(self, radius: int) -> Entity | None:
         position = self._player_cell()
         if position is None:
@@ -3996,6 +4078,19 @@ class Application(Gtk.Application):
                             f"attack {monster.entity_id}: {packet}"
                         )
                         return True
+
+            if (
+                rule is None
+                and monster is not None
+                and not basic_in_range
+                and now >= self.attack_cooldown_until
+                and self.move_first_toggle is not None
+                and self.move_first_toggle.get_active()
+            ):
+                # Like clicking a monster in game: walk to it, then attack
+                # as soon as it is in range.
+                if self._chase_step(monster, basic_range, now):
+                    return True
 
             if (
                 rule is None

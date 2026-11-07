@@ -265,9 +265,11 @@ The bot loop:
   time enforced; monster/self target), then auto-attack the nearest allowed
   monster (Retaliate first): `TARGET|id` makes the client select it (target
   ring + the client's own `ncif`, which the server checks), then a
-  configurable `u_s` template; skill 0 is the normal attack. A DLL without
-  `TARGET` is detected from its `unknown command` reply and the bot falls back
-  to injecting `ncif`;
+  configurable `u_s` template in the same tick; skill 0 is the normal attack.
+  A DLL without `TARGET` is detected from its `unknown command` reply and the
+  bot falls back to injecting `ncif`. A target outside attack range is chased
+  with a walk leg and attacked once in range; a TARGET refusal drops the
+  entity (the server sends no `out` for kills) so the bot moves on;
 - walk three-cell legs via the DLL's `MOVE|x y`, which runs the client's own
   pathfinding and animation; POS is polled during a leg and the next leg is
   handed off one cell early (the same rule as click-to-walk), so the walk is

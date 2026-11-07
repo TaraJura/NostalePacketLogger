@@ -810,6 +810,11 @@ class GameService:
             )
         parts = text.split()
         if len(parts) < 3 or parts[2] != "OK":
+            if "entity not found" in text or "client refused" in text:
+                # The client removed the object (killed monsters get no
+                # `out` packet); drop it so later calls pick a live target.
+                with self.lock:
+                    self.engine.world.entities.pop(target_id, None)
             raise ToolError(text)
         return {"ok": True, "target_id": target_id, "status": text}
 
