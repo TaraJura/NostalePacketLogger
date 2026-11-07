@@ -667,6 +667,18 @@ def cmd_gui(args: argparse.Namespace) -> int:
     return run_gui(args.host, args.port, args.map_data, args.log)
 
 
+def cmd_mcp(args: argparse.Namespace) -> int:
+    from .mcp_server import run_mcp
+
+    return run_mcp(
+        host=args.host,
+        port=args.port,
+        listen_port=args.listen,
+        map_file=args.map_data,
+        log_file=args.log,
+    )
+
+
 # --------------------------------------------------------------------- main
 
 
@@ -789,6 +801,31 @@ def build_parser() -> argparse.ArgumentParser:
         "(default: NTPL_LOG or the Wine prefix's C:\\NosTalePacketLog.txt)",
     )
     gui.set_defaults(handler=cmd_gui)
+
+    mcp = sub.add_parser(
+        "mcp",
+        help="MCP server over stdio for agents; owns the DLL link and "
+        "rebroadcasts it to the GUI/CLI",
+    )
+    _add_connection(mcp)
+    mcp.add_argument(
+        "--listen",
+        type=int,
+        default=47822,
+        help="local port for the GUI/CLI rebroadcast (0 = off; "
+        "default: %(default)s)",
+    )
+    mcp.add_argument(
+        "--map-data",
+        default=None,
+        help="NStcData.NOS path for pathing and map tools",
+    )
+    mcp.add_argument(
+        "--log",
+        default=None,
+        help="DLL packet log used to seed the map, portals and vnums",
+    )
+    mcp.set_defaults(handler=cmd_mcp)
 
     return parser
 

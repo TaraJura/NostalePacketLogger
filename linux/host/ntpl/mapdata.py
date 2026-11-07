@@ -310,6 +310,17 @@ def terrain_rgb(value: int | None) -> tuple[int, int, int]:
 
 PortalMap = dict[tuple[int, int, int], int]
 
+#: NosTale Time-Space (instance/raid) maps live in the 2xxx range; a gateway
+#: whose destination is in this range is a Time-Space entrance, not a normal
+#: map portal (live 2026-11-07: map 4 has gp destinations 2110 and 2510).
+TIME_SPACE_MIN = 2000
+TIME_SPACE_MAX = 2999
+
+
+def is_time_space_map(map_id: int | None) -> bool:
+    """True for a Time-Space/instance destination map id."""
+    return map_id is not None and TIME_SPACE_MIN <= map_id <= TIME_SPACE_MAX
+
 
 def default_portals_path() -> Path:
     """``NTPL_PORTALS``, or ``$XDG_CONFIG_HOME/ntpl/portals.json``."""

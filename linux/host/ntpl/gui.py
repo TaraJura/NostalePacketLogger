@@ -42,6 +42,7 @@ from .mapdata import (
     add_portal,
     astar,
     choose_map_for_positions,
+    is_time_space_map,
     load_nstc,
     load_portals as load_saved_portals,
     normalize_portals,
@@ -468,6 +469,7 @@ class Application(Gtk.Application):
             '<span foreground="#33e633">●</span> player   '
             '<span foreground="#4d80ff">●</span> NPC/pet   '
             '<span foreground="#d933f2">◉</span> portal   '
+            '<span foreground="#ffb300">◉</span> time-space   '
             '<span foreground="#ffd91a">●</span> drop   '
             '<span foreground="#00e5e5">·</span> path'
         )
@@ -2440,10 +2442,11 @@ class Application(Gtk.Application):
             context.arc(cx, cy, radius + max(1.5, scale * 0.3), 0, 2 * math.pi)
             context.stroke()
 
-        # learned portals: a magenta ring with a diamond centre, drawn after
-        # the own marker so a portal under or next to the character stays
-        # visible (a filled dot would be hidden by the own dot).
-        for (portal_map, px, py), _destination in self.portals.items():
+        # Portals: a ring with a diamond centre, drawn after the own marker so
+        # a portal under or next to the character stays visible (a filled dot
+        # would be hidden by the own dot). Magenta is a normal map portal;
+        # amber marks a Time-Space/instance entrance (destination 2xxx).
+        for (portal_map, px, py), destination in self.portals.items():
             if portal_map != grid.map_id:
                 continue
             if not (0 <= px < grid.width and 0 <= py < grid.height):
@@ -2451,7 +2454,10 @@ class Application(Gtk.Application):
             cx = px * scale + scale / 2
             cy = py * scale + scale / 2
             radius = max(6.0, scale * 1.2)
-            context.set_source_rgba(0.85, 0.2, 0.95, 1.0)
+            if is_time_space_map(destination):
+                context.set_source_rgba(1.0, 0.70, 0.0, 1.0)
+            else:
+                context.set_source_rgba(0.85, 0.2, 0.95, 1.0)
             context.set_line_width(max(2.0, scale * 0.4))
             context.arc(cx, cy, radius, 0, 2 * math.pi)
             context.stroke()
@@ -2607,9 +2613,14 @@ class Application(Gtk.Application):
             cx, cy = self._map_cell_screen(px, py)
             distance = math.hypot(x - cx, y - cy)
             if distance <= radius and (best is None or distance < best[0]):
+                label = (
+                    "Time-Space"
+                    if is_time_space_map(destination)
+                    else "Portal"
+                )
                 best = (
                     distance,
-                    f"Portal\nposition {px}, {py}\nto map {destination}",
+                    f"{label}\nposition {px}, {py}\nto map {destination}",
                 )
 
         return best[1] if best is not None else None

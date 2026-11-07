@@ -11,6 +11,7 @@ from ntpl.mapdata import (
     astar,
     choose_map_for_positions,
     find_map_for_positions,
+    is_time_space_map,
     load_nstc,
     load_portals,
     normalize_portals,
@@ -223,6 +224,12 @@ class PortalStoreTests(unittest.TestCase):
                 load_portals(path),
                 {(103, 20, 20): 104, (104, 11, 9): 103},
             )
+
+    def test_time_space_map_range(self):
+        self.assertTrue(is_time_space_map(2110))
+        self.assertTrue(is_time_space_map(2510))
+        self.assertFalse(is_time_space_map(4))
+        self.assertFalse(is_time_space_map(None))
 
     def test_set_gate_replaces_a_nearby_crossing_guess(self):
         portals = {(3, 44, 12): 103, (3, 10, 208): 6}
