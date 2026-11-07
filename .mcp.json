@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "nostale": {
+      "command": "python3",
+      "args": ["-m", "ntpl", "mcp"],
+      "env": {
+        "PYTHONPATH": "linux/host"
+      }
+    }
+  }
+}

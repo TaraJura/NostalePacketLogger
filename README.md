@@ -22,7 +22,7 @@ shared: the transport differs, the game's packets do not.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 84 Python unit tests
+make -C linux host-test                      # 115 Python unit tests
 make -C linux gui-test                       # headless GTK4 + map smoke (xvfb)
 make -C linux bot-test                       # 6 fake-server bot smokes
 
@@ -34,6 +34,10 @@ linux/scripts/inject.sh
 linux/scripts/host.sh status
 linux/scripts/host.sh monitor
 linux/scripts/gui.sh
+
+# agent access (MCP over stdio; owns the DLL link, GUI joins on 47822)
+PYTHONPATH=linux/host python3 -m ntpl mcp
+linux/scripts/gui.sh --port 47822
 ```
 
 ## Quick start on Windows
@@ -54,6 +58,8 @@ Start with [docs/architecture.md](docs/architecture.md), then:
   the Map/Bot tab, path loop, auto-attack and tooltips
 - [docs/bot-config.md](docs/bot-config.md) — monster target filters,
   conditional spell rules and JSON export/import
+- [docs/mcp.md](docs/mcp.md) — MCP server for agents: state, movement,
+  combat, raw packets, and the local broker that lets the GUI watch too
 - [docs/handoff-2026-11-06.md](docs/handoff-2026-11-06.md) — current state and
   the exact post-reboot reinjection + auto-attack test procedure
 - [docs/live-session-2026-11-06.md](docs/live-session-2026-11-06.md) — what was

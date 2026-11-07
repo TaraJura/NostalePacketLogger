@@ -117,11 +117,15 @@ class BrokerTests(unittest.TestCase):
         dll.listen(1)
         dll_port = dll.getsockname()[1]
         received: list[str] = []
+        send_position = threading.Event()
 
         def serve_dll() -> None:
             connection, _ = dll.accept()
+            connection.sendall(b"STATUS|fake-dll\n")
+            # Send the live line only after the downstream client attached,
+            # so the broadcast (not just the status replay) is exercised.
+            send_position.wait(3)
             connection.sendall(
-                b"STATUS|fake-dll\n"
                 b"RECV|at 14881134 4 33 143 2 0 2 1 -1 0 0\n"
             )
             try:
@@ -158,9 +162,14 @@ class BrokerTests(unittest.TestCase):
         client.settimeout(3)
         data = b""
         deadline = time.time() + 3
-        while time.time() < deadline and b"RECV|at " not in data:
+        while time.time() < deadline and b"STATUS|fake-dll" not in data:
             data += client.recv(65536)
         self.assertIn(b"STATUS|fake-dll", data)
+
+        send_position.set()
+        deadline = time.time() + 3
+        while time.time() < deadline and b"RECV|at " not in data:
+            data += client.recv(65536)
         self.assertIn(b"RECV|at 14881134 4 33 143", data)
         self.assertEqual(packets[0].opcode, "at")
 

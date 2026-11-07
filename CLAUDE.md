@@ -31,11 +31,12 @@ GUI has no packets.
 |---|---|
 | `windows/` | Original MSVC/C# implementation, moved unchanged. Builds with Visual Studio; not exercised on this machine. |
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
-| Linux host tests | 107/107 pass (`make -C linux host-test`). |
+| Linux host tests | 115/115 pass (`make -C linux host-test`). |
+| MCP (agent access) | `python3 -m ntpl mcp` speaks MCP JSON-RPC over stdio and exposes 20 tools (state, entities, drops, map, portals, A* path, spells, move/travel, attack/cast, raw send, rest, pickup, wait, memory). It owns the DLL's single host connection and rebroadcasts it on `127.0.0.1:47822`; run the GUI with `--port 47822`. `.mcp.json` is committed; docs in `docs/mcp.md`. |
 | Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live 2026-11-07: map **2** NosVille Meadows (150x150), then map 1 NosVille (160x180) via `c_map`; 2026-11-06: map **20** Mountain Cave 1 (230x260). Map names come from `NSlangData_UK.NOS` → `_code_uk_MapIDData.txt` (`zts<id>e<TAB><name>`, 374 entries). `astar()` is 8-direction with sqrt(2) diagonals and no corner cutting; the path is drawn as a continuous polyline. |
 | Monster names | `NSlangData_UK.NOS` / `_code_uk_monster.txt` parsed by `monsternames.py` (nibble codec + archive reader): 2,795 `vnum → name` entries. The live `in 3 206 5122 ...` spawn is entity 5122, Angry Queen Bee (vnum 206); map tooltips use the name. `spawnlog.py` backfills entities that spawned before the host attached from the DLL's `C:\NosTalePacketLog.txt` (`[RECV] in ...` lines). |
 | Spell catalog | `NSgtdData.NOS` → `Skill.dat` parsed by `spells.py`: 1,964 records, 791 active (`TYPE[0]==1`), with name from the `NAME` zts key, MP cost, range, cast time, cooldown and target type. Live examples: 866 Holy Attack (0 MP/0.9 s), 869 Mana Shield (self, 300 MP/60 s), 876 Holy Hammer (145 MP/90 s). The GUI **Add spell…** picker uses it; the bot enforces MP/range/cooldown/cast time. |
-| Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), automatic whole-map (contain-fit) view with no manual map/scale/center controls, **immediate map switch** from `c_map`/`at` (the map id is the second `c_map` field), **attach-time auto-detect** when no map id was seen (all live entities, tightest perfect fit — same-layout maps tie on positions alone), structured sidebar (Character HP/MP bars + recovery banner, Path, Combat with green/red toggles, Targets with an unknown-vnum option, Spells, Loot, Recovery, Configuration), drops + 8-direction A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover + **Move first** (attack while progressing; off = clear the area), monster target filters (all/only/except by vnum), ordered spell rules from the scanned Skill.dat catalog (Always/my HP/my MP, cooldown, MP/range/cast-time checks, monster/self), JSON save/load of the whole bot config, bigger own dot + facing arrow, and hover tooltips for players/monsters/NPCs/drops. **Combat reads Skill.dat:** Skill `0` is the equipped SP card's basic attack, detected from `u_s 0` + `su` (Energy Bolt 260 on the live mage, not the old hardcoded 866), and its range/cast/cooldown/MP drive the attack (range 6 beats Search 10); Min delay (default 1 s) is only a floor. The **Targets** list shows only monster vnums spawned on the current map (selected ones not on it stay marked). At startup the GUI **seeds the map id, position and char id from the DLL log's last `at` + own walks**, so an attach-after-login shows the real map (the label marks a position-only guess `· auto`; with no data the canvas stays blank "waiting for the game…"). **Portals are server-sent**: on map entry the server sends `gp <x> <y> <toMap> …` for every portal of that map, stored in `WorldState.gates`, drawn as magenta rings with a "Portal → map N" tooltip and persisted in `~/.config/ntpl/portals.json` (`NTPL_PORTALS` overrides); a crossing is only the fallback when a `gp` list was missed. The spell picker always lists all active spells and marks `slot N` / `not learned` (only when `ski` is known) / `slot unknown` (no list — use the spell once or relog); slots are learned from `u_s`/`su` pairs because `ski` is sent at login. `make gui-test` and `make bot-test` (6 smokes) pass. |
+| Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), automatic whole-map (contain-fit) view with no manual map/scale/center controls, **immediate map switch** from `c_map`/`at` (the map id is the second `c_map` field), **attach-time auto-detect** when no map id was seen (all live entities, tightest perfect fit — same-layout maps tie on positions alone), structured sidebar (Character HP/MP bars + recovery banner, Path, Combat with green/red toggles, Targets with an unknown-vnum option, Spells, Loot, Recovery, Configuration), drops + 8-direction A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover + **Move first** (attack while progressing; off = clear the area), monster target filters (all/only/except by vnum), ordered spell rules from the scanned Skill.dat catalog (Always/my HP/my MP, cooldown, MP/range/cast-time checks, monster/self), JSON save/load of the whole bot config, bigger own dot + facing arrow, and hover tooltips for players/monsters/NPCs/drops. **Combat reads Skill.dat:** Skill `0` is the equipped SP card's basic attack, detected from `u_s 0` + `su` (Energy Bolt 260 on the live mage, not the old hardcoded 866), and its range/cast/cooldown/MP drive the attack (range 6 beats Search 10); Min delay (default 1 s) is only a floor. The **Targets** list shows only monster vnums spawned on the current map (selected ones not on it stay marked). At startup the GUI **seeds the map id, position and char id from the DLL log's last `at` + own walks**, so an attach-after-login shows the real map (the label marks a position-only guess `· auto`; with no data the canvas stays blank "waiting for the game…"). **Portals are server-sent**: on map entry the server sends `gp <x> <y> <toMap> …` for every portal of that map, stored in `WorldState.gates`, drawn as rings with a "Portal → map N" tooltip and persisted in `~/.config/ntpl/portals.json` (`NTPL_PORTALS` overrides); a crossing is only the fallback when a `gp` list was missed. A destination in the 2xxx range is a **Time-Space** entrance and is drawn amber instead of magenta (live map 4: (224,103)→2110, (228,53)→2510). The spell picker always lists all active spells and marks `slot N` / `not learned` (only when `ski` is known) / `slot unknown` (no list — use the spell once or relog); slots are learned from `u_s`/`su` pairs because `ski` is sent at login. `make gui-test` and `make bot-test` (6 smokes) pass. |
 | x86 hook stubs | `HookStubTest.exe` (Wine) calls the real `hooks.S` detours and verifies the EDX packet pointer at `20(%ebp)`, the original-call replay and the send trampoline. Passes. |
 | GUI | Headless GTK4 smoke test passes (`make -C linux gui-test`, Xvfb): fake stream → 2 rows + STATUS in the status bar. |
 | Injector | Verified under Wine end-to-end against both the fake target and the live client (PID 1216): remote `LoadLibraryA` succeeds and the DLL starts. |
@@ -55,7 +56,8 @@ cd ~/games/gameforge/NostalePacketLogger
 # Linux build (MinGW-w64 i686; installed via apt)
 make -C linux all test-host
 make -C linux check                 # file(1) on the three PE32 outputs
-make -C linux host-test             # 107 stdlib unittest cases
+make -C linux host-test             # 115 stdlib unittest cases
+PYTHONPATH=linux/host python3 -m ntpl mcp   # MCP stdio server + broker on 47822
 make -C linux gui-test              # headless GTK4 + map surface smoke
 make -C linux bot-test              # 6 smokes: combat, rules/config, spell order, out-of-range, rejection, recovery
 make -C linux clean
@@ -115,7 +117,10 @@ PYTHONPATH=linux/host python3 -m ntpl status
   `botconfig.py`
   (JSON bot configuration: target filters, spell rules, validation and atomic
   save/load), `cli.py` (`walk` waits for the server's `tp`/`mv`; `cast` waits
-  for `su`), `gui.py` (packet table + Map/Bot tab). Standard library only
+  for `su`), `gui.py` (packet table + Map/Bot tab), `mcp_server.py` (MCP
+  stdio server + `Broker`: the broker owns the DLL's one host connection and
+  fans out `RECV`/`SEND`/`STATUS` to the GUI/CLI on 47822; tools read
+  `WorldState` and act through the same commands). Standard library only
   outside the GUI (PyGObject + pycairo for the window).
 - **Sit/stand:** `rest 1 1 <charId>` toggles; the server answers
   `rest <type> <charId> <state>` with 0 = standing, 1 = sitting. Sitting
@@ -237,7 +242,11 @@ Next:
 
 1. Fully done: live path loop, auto-attack, pickup, map switching and the
    skill hook; normal attack is `u_s 0 3 <id>` (the server reports skill
-   866/868 in `su`).
+   866/868 in `su`; 260/855 after the SP card changes).
+2. **Agentic play:** the MCP server is live-ready (`ntpl mcp`); next is a
+   live agent session against the game. Game data/icon source suggested by
+   the owner: **nosapki.com** (community DB) for map/monster/item icons —
+   not integrated yet; the GUI currently draws vector markers only.
 2. ~~Capture the client's own `walk`/`u_s` SEND packets~~ — done: the send
    hook sees `walk`, and the skill hook captures `u_s` at `0x72D5B2`.
 3. Map switching is live-verified for the `c_map` 20↔85 portal capture; more

@@ -6,6 +6,7 @@
 | [engine.md](engine.md) | you are writing a host, bot or automation: Python API, `WorldState`, handlers, CLI commands, confirmations |
 | [map.md](map.md) | maps, walkability, A*, the Map/Bot tab, path loop and auto-attack |
 | [bot-config.md](bot-config.md) | monster target filters, conditional spell rules, JSON export/import |
+| [mcp.md](mcp.md) | expose the engine to an AI agent over MCP: tools, the DLL broker, Claude Code config, security |
 | [handoff-2026-11-06.md](handoff-2026-11-06.md) | **read after a reboot**: current state, why Gameforge shows "Ve hře", exact reinjection + auto-attack test procedure |
 | [live-session-2026-11-06.md](live-session-2026-11-06.md) | what was verified on the running client, the bugs fixed, the mechanics learned, open items |
 | [feature-review-2026-11-06.md](feature-review-2026-11-06.md) | feature inventory, automated coverage and the live combination-test matrix |

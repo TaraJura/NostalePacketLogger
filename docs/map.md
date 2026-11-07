@@ -162,10 +162,12 @@ grouped by function:
   tick remains only as a fallback). Note that the map id is the **second**
   `c_map` field — the first is a type. A GUI started mid-session seeds the map
   from the DLL log's last `at`. On entry the server sends the map's whole
-  portal list as `gp <x> <y> <toMap> …`; those are drawn as magenta rings
-  with a "Portal → map N" tooltip and persisted in
-  `~/.config/ntpl/portals.json`. A crossing is the fallback when a `gp` list
-  was missed.
+  portal list as `gp <x> <y> <toMap> …`; those are drawn as rings with a
+  "Portal → map N" tooltip and persisted in `~/.config/ntpl/portals.json`.
+  A destination in the 2xxx range is a **Time-Space** entrance and is drawn
+  amber ("Time-Space → map N") instead of magenta; live map 4 has
+  `(224,103)→2110` and `(228,53)→2510`. A crossing is the fallback when a
+  `gp` list was missed.
 - **Character** — live HP and MP bars with current/max/missing values, plus
   map/position/char id. HP and MP are fed by the server's `stat` packets.
   While recovering, a red **RECOVERING** banner states the HP percentage and

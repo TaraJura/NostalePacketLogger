@@ -21,6 +21,7 @@ PacketClient ──► Message/Packet ──► Engine ──► WorldState
 | `mapdata.py` | `NStcData.NOS` parser, terrain palette, A*, map ranking |
 | `cli.py` | command line actions and confirmations |
 | `gui.py` | GTK4 window: packet table + Map/Bot tab |
+| `mcp_server.py` | MCP stdio server + local broker: agent tools and a fan-out of the DLL stream for the GUI/CLI |
 
 ## PacketClient
 
