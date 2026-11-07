@@ -6,7 +6,7 @@ import threading
 import time
 import unittest
 
-from ntpl.mcp_server import Broker, GameService, McpServer
+from ntpl.mcp_server import Broker, GameService, McpServer, ToolError
 
 
 class FakeBroker:
@@ -186,6 +186,43 @@ class BrokerTests(unittest.TestCase):
         client.sendall(b"QUIT|\n")
         time.sleep(0.3)
         self.assertFalse(any("QUIT" in chunk for chunk in received))
+
+
+class TargetSelectionTests(unittest.TestCase):
+    def setUp(self):
+        self.portals_env = os.environ.get("NTPL_PORTALS")
+        os.environ["NTPL_PORTALS"] = "/nonexistent/portals.json"
+        self.broker = FakeBroker()
+        self.service = GameService(
+            self.broker,
+            map_file="/nonexistent/NStcData.NOS",
+            log_file="/nonexistent/NosTalePacketLog.txt",
+        )
+
+    def tearDown(self):
+        if self.portals_env is None:
+            os.environ.pop("NTPL_PORTALS", None)
+        else:
+            os.environ["NTPL_PORTALS"] = self.portals_env
+
+    def feed_after(self, text: str) -> None:
+        def feed() -> None:
+            time.sleep(0.05)
+            self.service._feed_status(text)
+
+        threading.Thread(target=feed, daemon=True).start()
+
+    def test_select_target_uses_the_dll(self):
+        self.feed_after("TARGET 5160 0x08A00000 0x087B4DD8")
+        result = self.service._select_target(5160)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["target_id"], 5160)
+        self.assertIn("TARGET|5160", self.broker.sent)
+
+    def test_select_target_reports_a_refusal(self):
+        self.feed_after("TARGET: entity not found in client memory")
+        with self.assertRaises(ToolError):
+            self.service._select_target(5160)
 
 
 if __name__ == "__main__":

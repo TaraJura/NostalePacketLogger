@@ -258,7 +258,12 @@ def cmd_cast(args: argparse.Namespace) -> int:
             # The character cannot cast while sitting.
             client.send_packet(f"rest 1 1 {args.stand}")
         if not args.no_select and args.target_id is not None:
-            client.send_packet(f"ncif {args.target_type} {args.target_id}")
+            if args.target_type == 3:
+                # Select the monster in the client so it sends its own ncif;
+                # the server validates u_s against that selection.
+                client.send_raw(f"TARGET|{args.target_id}")
+            else:
+                client.send_packet(f"ncif {args.target_type} {args.target_id}")
         client.send_packet(packet)
         print("sent:", packet)
 

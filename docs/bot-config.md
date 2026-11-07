@@ -122,10 +122,12 @@ Data-driven checks before a cast:
 - **cast time**: the next action and the walk pause wait at least `DATA[4]`
   (plus the Combat **Min delay** floor). The hardcoded 3 s default is gone.
 
-Monster rules require a monster in range and send:
+Monster rules require a monster in range; the client selects it first
+(`TARGET|entityId` → the client's own `ncif 3 <entityId>`) and the skill goes
+out on a later tick, once the engine or the DLL confirms the selection:
 
 ```
-ncif 3 <entityId>
+TARGET|entityId
 u_s <spell> 3 <entityId>
 ```
 
@@ -239,5 +241,5 @@ touching the UI.
   90 s cooldown) and 866 (Holy Attack): 876 must cast first, then 866 twice
   while 876 is on cooldown; no raw vnums.
 - `linux/test/gui_out_of_range_smoke.py` — UI Range 40, monster 35 cells
-  away, basic skill range 11: no ncif/u_s is sent and the status shows the
+  away, basic skill range 11: no TARGET/u_s is sent and the status shows the
   out-of-range target.

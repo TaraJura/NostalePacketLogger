@@ -78,7 +78,18 @@ class FakeServer:
                 line, buffer = buffer.split(b"\n", 1)
                 text = line.decode("utf-8", "replace")
                 self.received.append(text)
-                if text == "POS":
+                if text.startswith("TARGET|"):
+                    entity_id = text.split("|", 1)[1]
+                    try:
+                        self.connection.sendall(
+                            (
+                                f"STATUS|TARGET {entity_id} "
+                                "0x08A00000 0x087B4DD8\n"
+                            ).encode()
+                        )
+                    except OSError:
+                        return
+                elif text == "POS":
                     try:
                         self.connection.sendall(
                             b"STATUS|POS 25 117 14881134\n"
@@ -142,7 +153,10 @@ def main() -> int:
     def check() -> bool:
         try:
             lines = list(server.received)
-            has_target = any(line == "SEND|ncif 3 500" for line in lines)
+            has_target = any(
+                line == "TARGET|500" or line == "SEND|ncif 3 500"
+                for line in lines
+            )
             has_spell = any(line == "SEND|u_s 1 3 500" for line in lines)
             ignored_other = not any("501" in line for line in lines)
             no_basic = not any(line.startswith("SEND|u_s 0 ") for line in lines)

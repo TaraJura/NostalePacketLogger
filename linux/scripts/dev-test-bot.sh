@@ -3,7 +3,8 @@
 #
 #   ./scripts/dev-test-bot.sh
 #
-# Checks that the map loads and that the bot sends ncif + u_s (auto-attack)
+# Checks that the map loads and that the bot selects (TARGET, ncif fallback),
+# attacks (u_s)
 # and walk (path loop) against a fake server. Needs Xvfb, not the game.
 
 set -euo pipefail

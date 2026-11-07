@@ -4,7 +4,7 @@ A fake server sends the minimum live state: a player at (25,117) on map 20 and
 a monster at (25,118). The GUI loads the real map, starts the bot with a short
 path, and the test checks that the bot sent:
 
-    ncif 3 500          (select the monster)
+    TARGET|500          (select the monster in the client)
     u_s 0 3 500         (auto-attack: u_s 0 = normal/basic attack)
     walk 25 118 0 10    (first path cell)
 
@@ -84,6 +84,17 @@ class FakeServer:
                             )
                         except OSError:
                             return
+                elif text.startswith("TARGET|"):
+                    entity_id = text.split("|", 1)[1]
+                    try:
+                        self.connection.sendall(
+                            (
+                                f"STATUS|TARGET {entity_id} "
+                                "0x08A00000 0x087B4DD8\n"
+                            ).encode()
+                        )
+                    except OSError:
+                        return
                 elif text == "POS":
                     try:
                         self.connection.sendall(
@@ -150,8 +161,13 @@ def main() -> int:
     def check() -> bool:
         try:
             lines = list(server.received)
-            # 501 is hitting us; Retaliate must prefer it over the closer 500.
-            has_ncif = any("SEND|ncif 3 501" in line for line in lines)
+            # 501 is hitting us; Retaliate must prefer it over the closer
+            # 500. The bot selects it in the client (TARGET) or, when the
+            # DLL is old, falls back to an injected ncif.
+            has_select = any(
+                line == "TARGET|501" or "SEND|ncif 3 501" in line
+                for line in lines
+            )
             has_skill = any(
                 line.startswith("SEND|u_s") and "0 3 501" in line
                 for line in lines
@@ -179,7 +195,7 @@ def main() -> int:
                 and skill_index < move_index
             )
             result["ok"] = (
-                has_ncif
+                has_select
                 and has_skill
                 and has_move
                 and has_get
@@ -187,7 +203,7 @@ def main() -> int:
                 and ordered
             )
             result["detail"] = (
-                f"ncif={has_ncif} skill={has_skill} move={has_move} "
+                f"select={has_select} skill={has_skill} move={has_move} "
                 f"pickup={has_get} no_injected_walk={no_injected_walk} "
                 f"skill_before_move={ordered} lines={lines[-12:]}"
             )

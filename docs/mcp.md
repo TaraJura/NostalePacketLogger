@@ -63,11 +63,11 @@ Start the game and inject the DLL as usual first; the broker retries until
 | `game_spells` | learned slots with Skill.dat range/cast/CD/MP | — |
 | `game_move` | `MOVE\|x y` (client MoveTo, animated) | own `walk` SEND / position |
 | `game_travel` | A* + short MoveTo legs | per leg |
-| `game_attack` | `ncif` + `u_s <slot> 3 <id>` | server `su` |
-| `game_cast` | `ncif` + `u_s <slot> <type> <id>` | server `su` |
+| `game_attack` | `TARGET\|id` (client selects the monster and sends its own `ncif`) + `u_s <slot> 3 <id>` | DLL `TARGET` reply + server `su` |
+| `game_cast` | `TARGET\|id` for monsters (injected `ncif` for players) + `u_s <slot> <type> <id>` | server `su` |
 | `game_cast_spell` | same by Skill.dat vnum, slot resolved from `ski`/learning | server `su` |
 | `game_send` | one raw packet | — |
-| `game_select` | `ncif <type> <id>` | — |
+| `game_select` | `TARGET\|id` for monsters (target ring + client `ncif`); injected `ncif` for players | DLL `TARGET` reply |
 | `game_rest` | sit/stand toggle | `rest` echo |
 | `game_pickup` | `get 1 <charId> <dropId>` | server `get` |
 | `game_wait_for` | wait for an opcode/substring | the packet |
@@ -89,8 +89,11 @@ The **Game state** resource (`ntpl://game/state`) returns the same JSON as
 
 Movement is client-authoritative: `game_move`/`game_travel` call the client's
 own MoveTo, so the game pathfinds, animates and sends its `walk`; the tool
-waits for `world.position` to match. Attacks are confirmed by `su`; a
-`cancel`/timeout is reported as a tool error, not silently swallowed.
+waits for `world.position` to match. Targeting is client-authoritative too:
+`TARGET|id` runs the client's own selector, so the monster is highlighted and
+the client sends its own `ncif`; the server validates the following `u_s`
+against that selection. Attacks are confirmed by `su`; a `cancel`/timeout is
+reported as a tool error, not silently swallowed.
 
 ## Security
 

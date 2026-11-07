@@ -128,7 +128,7 @@ is ignored, never fatal.
 |---|---|---|
 | move | `MOVE\|x y` (client MoveTo) | the client's own `walk` SEND / `world.position` |
 | sit/stand | `rest 1 1 <charId>` (toggles) | `rest <type> <charId> <state>` (0 stand, 1 sit) |
-| target | `ncif <type> <id>` | no direct reply; used before a skill |
+| target | `TARGET\|entityId` (client selector) or `ncif <type> <id>` | `STATUS\|TARGET` + the client's own `ncif` SEND |
 | skill | `u_s …` | `su <attacker> <target> <skill> …` |
 
 Sitting regenerates HP/MP but **blocks movement**; stand before walking. The
@@ -176,7 +176,8 @@ The bot runs on the GLib main loop:
 3. pick up own/unowned drops in range;
 4. evaluate ordered spell rules (Always or my HP/MP conditions; per-rule and
    catalog cooldowns, MP, range, cast time) and the target filter, then cast
-   or auto-attack (`ncif` + configurable `u_s`); Retaliate first;
+   or auto-attack (`TARGET\|id` selects the monster in the client, then a
+   configurable `u_s`); Retaliate first;
 5. walk the next multi-cell leg through the DLL's `MOVE|x y` command, which
    calls the client's own MoveTo/pathfinding, so the client animates and sends
    its own `walk` packet; confirm from `world.position`.

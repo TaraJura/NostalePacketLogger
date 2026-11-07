@@ -31,7 +31,7 @@ GUI has no packets.
 |---|---|
 | `windows/` | Original MSVC/C# implementation, moved unchanged. Builds with Visual Studio; not exercised on this machine. |
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
-| Linux host tests | 117/117 pass (`make -C linux host-test`). |
+| Linux host tests | 119/119 pass (`make -C linux host-test`). |
 | MCP (agent access) | `python3 -m ntpl mcp` speaks MCP JSON-RPC over stdio and exposes 21 tools (state, entities, drops, map, portals, time-spaces, A* path, spells, move/travel, attack/cast, raw send, rest, pickup, wait, memory). It owns the DLL's single host connection and rebroadcasts it on `127.0.0.1:47822`; run the GUI with `--port 47822`. `.mcp.json` is committed; docs in `docs/mcp.md`. |
 | Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live 2026-11-07: map **2** NosVille Meadows (150x150), then map 1 NosVille (160x180) via `c_map`; 2026-11-06: map **20** Mountain Cave 1 (230x260). Map names come from `NSlangData_UK.NOS` → `_code_uk_MapIDData.txt` (`zts<id>e<TAB><name>`, 374 entries). `astar()` is 8-direction with sqrt(2) diagonals and no corner cutting; the path is drawn as a continuous polyline. |
 | Monster names | `NSlangData_UK.NOS` / `_code_uk_monster.txt` parsed by `monsternames.py` (nibble codec + archive reader): 2,795 `vnum → name` entries. The live `in 3 206 5122 ...` spawn is entity 5122, Angry Queen Bee (vnum 206); map tooltips use the name. `spawnlog.py` backfills entities that spawned before the host attached from the DLL's `C:\NosTalePacketLog.txt` (`[RECV] in ...` lines). |
@@ -41,7 +41,7 @@ GUI has no packets.
 | GUI | Headless GTK4 smoke test passes (`make -C linux gui-test`, Xvfb): fake stream → 2 rows + STATUS in the status bar. |
 | Injector | Verified under Wine end-to-end against both the fake target and the live client (PID 1216): remote `LoadLibraryA` succeeds and the DLL starts. |
 | Wine integration | Verified with Wine 11 + the fake target: DLL loads, listens on `127.0.0.1:47821`, host gets `STATUS`, `SEND` command path answers. Hooks correctly reported `NOT-FOUND` because the fake target is not the game. |
-| Real client | **Verified live 2026-11-06.** Injected into PID 1216 (Wine 11): both hooks ACTIVE (`recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`), drops 0. `rest` controls sit/stand. Movement uses the DLL's `MOVE\|x y`, which calls the client's own MoveTo (`0x565E88`): the client pathfinds, animates and sends its own `walk`; `POS` reads its local position. The GUI bot walked `(26,133)→(23,130)` as six client walk packets (no injected walks or teleports). Raw injected walks need the checksum `1 if (x+y)%3 == 1` and are not animated. |
+| Real client | **Verified live 2026-11-06.** Injected into PID 1216 (Wine 11): both hooks ACTIVE (`recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`), drops 0. `rest` controls sit/stand. Movement uses the DLL's `MOVE\|x y`, which calls the client's own MoveTo (`0x565E88`): the client pathfinds, animates and sends its own `walk`; `POS` reads its local position. The GUI bot walked `(26,133)→(23,130)` as six client walk packets (no injected walks or teleports). Raw injected walks need the checksum `1 if (x+y)%3 == 1` and are not animated. **TARGET verified live 2026-11-07** (v0.2.0, PID 1188): `TARGET|8684` → client `[SEND] ncif 3 8684` → `su ... 3 8684 855 ...`; the DLL runs the client's selector at `0x56964C`. |
 | Skill hook | Captures the client's own `u_s` builder at the `0x72D5B2` call site (packet in ECX); status shows `skill=ACTIVE`. Normal attack is `u_s 0 3 <id>`; the server answers with the card's basic skill (`su ... 260 ...` on the live mage 2026-11-07, `866/868` on the swordsman 2026-11-06). `u_s 866` itself is answered with `cancel 0 866 -1`. Live auto-attack verified. |
 | GUI | PyGObject 3.56 / GTK 4.22 present; `ntpl.gui` imports. Not opened on a display in this environment. |
 
@@ -101,7 +101,9 @@ PYTHONPATH=linux/host python3 -m ntpl status
   (4096 slots of 2048 bytes each), logs to `C:\NosTalePacketLog.txt`, and serves
   `TYPE|PAYLOAD` lines over TCP `127.0.0.1:47821`. `MOVE|x y` calls the
   client's own MoveTo (`0x565E88`, packed x/y), so movement is pathfound and
-  animated by the game; `POS` reads the local player object.
+  animated by the game; `POS` reads the local player object; `TARGET|entityId`
+  calls the client's own selector (`0x56964C`, controller `[[0x795200]]`), so
+  the client highlights the monster and sends its own `ncif`.
 - **Injector** (`linux/src/injector/`): expands `VirtualAllocEx` +
   `WriteProcessMemory` + `CreateRemoteThread(LoadLibraryA)`, with a real
   `WaitForSingleObject` / `GetExitCodeThread` check. Enumerates Windows PIDs by
@@ -128,8 +130,12 @@ PYTHONPATH=linux/host python3 -m ntpl status
   does not echo its own `mv`; wait for the server's `tp` after a walk.
 - **Combat:** the server sends `su <attackerType> <attackerId> <targetType>
   <targetId> <skillVnum> ...` for every hit; the engine records the first five
-  fields. `ntpl cast <slot> --target-id <id>` sends `ncif` then a default
-  `u_s <skillSlot> <targetType> <targetId>` and waits for `su`. The first
+  fields. `ntpl cast <slot> --target-id <id>` makes the client select the
+  monster (`TARGET|id`, which sends the client's own `ncif`; a player target
+  still uses an injected `ncif`), then sends a default
+  `u_s <skillSlot> <targetType> <targetId>` and waits for `su`. The server
+  validates the skill target against the client's selection, so an injected
+  `ncif` alone does not redirect the attack. The first
   field is a zero-based **skill slot** from `ski`, not the Skill.dat vnum
   (`u_s 0` = normal attack, `u_s 10` → `su ... 876`); later fields are
   unknown. Use `--packet` for a literal
@@ -140,14 +146,18 @@ PYTHONPATH=linux/host python3 -m ntpl status
   Comet Meadow (50x45), **103** Deep Cave (55x40), **104** (17x15), and the
   earlier **2**/1/20. The Map/Bot tab draws the grid; a left click walks the
   character there along the A* path in short three-cell MoveTo legs (a single
-  far MOVE makes the client jump), or with **Draw path** on draws the route
-  that Start follows. The own marker follows the DLL's `POS` (polled 2 Hz),
+  far MOVE makes the client jump), or with **Draw path** on plans a route:
+  the first click sets its starting point (cyan ring, not tied to the
+  character), later clicks add waypoints, and Start first walks to that start
+  point and then follows the route. The own marker follows the DLL's `POS`
+  (polled 2 Hz),
   so it tracks the real position instead of the walk packet's destination.
   It computes an
   A* path, and the bot recovers below the HP threshold (sit, wait for full,
   stand), stands (`rest`), picks up own/unowned drops (`get 1 <charId>
-  <dropId>`), auto-attacks with Retaliate priority (`ncif` + `u_s`; skill 0 =
-  normal attack) and walks in three-cell legs through the client's own MoveTo
+  <dropId>`), auto-attacks with Retaliate priority (`TARGET|id` selects the
+  monster in the client, then `u_s`; skill 0 = normal attack) and walks in
+  three-cell legs through the client's own MoveTo
   (`MOVE|x y`), pacing each leg by distance so the animation stays continuous.
   **Move first** (default on) attacks while a path is active and walks on
   between attacks; with it off the bot clears nearby monsters before moving.
@@ -217,9 +227,11 @@ PYTHONPATH=linux/host python3 -m ntpl status
   `<tlhelp32.h>`, `<winsock2.h>`, `<ws2tcpip.h>`. Capitalised includes fail.
 - **The DLL uses no libwinpthread.** Keep using `CRITICAL_SECTION` / the
   atomic queue, not `std::mutex` or `std::thread`.
-- **Wine prefixes:** use a dedicated NosTale prefix. Do not inject into
-  `~/.wine` (WarCraft III/Battle.net) or the Gameforge client prefix in
-  `~/games/gameforge/prefix`. Do not kill a client the user is using.
+- **Wine prefix:** the game runs under the Gameforge prefix
+  (`~/games/gameforge/prefix`, its Wine 11). Inject only into
+  `NostaleClientX.exe` (the window is `NosTale - <pid>`), never into
+  `gfclient.exe`/`WebHelper.exe`, and never into `~/.wine`
+  (WarCraft III/Battle.net). Do not kill a client the user is using.
 - **Delphi string ownership:** `send_packet` frees its buffer after the call,
   mirroring the original. If crashes appear right after a manual send,
   investigate this first (`docs/hooking.md`).
@@ -242,10 +254,14 @@ First packet-driven game actions are confirmed on the live client:
 2. Sit/stand is controlled by `rest`.
 3. The client's own MoveTo (`MOVE|x y`) walks and animates the character; it
    sends its own `walk` packets. `POS` reads its local position.
-4. The engine parses the resulting `tp`/`rest`/`cond`/`stat` stream.
-5. The `NStcData.NOS` map parser identified map **20** (230x260); the Map/Bot
+4. The client's own selector (`TARGET|id`) selects the monster and sends its
+   own `ncif`; live 2026-11-07 the server then answered `u_s 0 3 8684` with
+   `su ... 3 8684 ...` instead of the previously clicked id.
+5. The engine parses the resulting `tp`/`rest`/`cond`/`stat` stream.
+6. The `NStcData.NOS` map parser identified map **20** (230x260); the Map/Bot
    tab renders it, draws 8-direction A* paths and runs the loop/auto-attack.
-   The bot smokes send `ncif`/`u_s`/`MOVE` and pass.
+   The bot smokes send `ncif`/`u_s`/`MOVE` and pass; `TARGET` is verified
+   live (see 4).
 
 Next:
 
@@ -257,13 +273,13 @@ Next:
    nosapki is integrated (`assets/ts-1.png`); the same source
    (`nosapki.com/images/nt-images/`, `images/map_previews/<map>.png`) can
    supply monster/map icons next.
-2. ~~Capture the client's own `walk`/`u_s` SEND packets~~ — done: the send
+3. ~~Capture the client's own `walk`/`u_s` SEND packets~~ — done: the send
    hook sees `walk`, and the skill hook captures `u_s` at `0x72D5B2`.
-3. Map switching is live-verified for the `c_map` 20↔85 portal capture; more
+4. Map switching is live-verified for the `c_map` 20↔85 portal capture; more
    maps will confirm the parser and 8-direction A* on other grids.
-4. Self-target shape (`u_s <slot> 1 <charId>`) is live-captured
+5. Self-target shape (`u_s <slot> 1 <charId>`) is live-captured
    (`u_s 7 1 14881134` → `su ... 873`); no remaining protocol guess.
-5. Unknown-vnum monsters that existed before DLL injection remain the main
+6. Unknown-vnum monsters that existed before DLL injection remain the main
    target-filter gap; the UI has an explicit option and docs describe relog.
-4. Reconcile `docs/protocol/` with more live captures, then extend the loop
+7. Reconcile `docs/protocol/` with more live captures, then extend the loop
    with path validation and combat state.

@@ -248,8 +248,8 @@ map switch (the 20→85→20 `c_map` sequence), map tooltips (including a vnum
 backfilled from the DLL log), green/red toggle classes, the recovery banner,
 and the unknown-position path guard. Install `xvfb` if it is missing.
 
-`bot-test` drives the real GTK window against fake servers. The five smokes
-cover auto-attack + path movement (`ncif`, `u_s`, `MOVE`), target filtering +
+`bot-test` drives the real GTK window against fake servers. The six smokes
+cover auto-attack + path movement (`TARGET`, `u_s`, `MOVE`), target filtering +
 conditional spell rules + JSON config round-trip, scanned-spell rotation and
 execution order, three rejected walks, and the sit/wait-for-full-HP recovery
 loop. They need `xvfb`, but no game. `bot-test` uses the real map archive when

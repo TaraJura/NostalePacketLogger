@@ -73,8 +73,14 @@ MAX_ROWS = 20000
 TRIM_ROWS = 2000
 DRAIN_INTERVAL_MS = 50
 BOT_INTERVAL_MS = 200
-#: Click-to-walk tick; short legs are paced by the client's walk packet.
-TRAVEL_INTERVAL_MS = 120
+#: Click-to-walk tick; the next leg is handed to the client before the
+#: character reaches the end of the current one, so the walk never stops at a
+#: leg boundary. POS is polled faster while travelling to see the real cell.
+TRAVEL_INTERVAL_MS = 100
+TRAVEL_HANDOFF_CELLS = 1
+TRAVEL_MIN_LEG_S = 0.35
+TRAVEL_POS_POLL_S = 0.2
+TRAVEL_LEG_TIMEOUT_S = 5.0
 DEFAULT_SCALE = 3
 # Live positions fed to the attach-time map ranking. More points separate
 # same-layout maps; ranking 779 grids costs ~16 ms at this cap.
@@ -94,6 +100,11 @@ RECONNECT_DELAY = 1.0
 # correction arrives. MOVE avoids that.
 MOVE_PREFIX = "MOVE|"
 POS_COMMAND = "POS"
+# Target selection goes through the client's own selector in the DLL:
+#   TARGET|entityId -> the client highlights the monster and sends its ncif
+# The server validates u_s against the client's local selection, so an
+# injected ncif alone is not enough.
+TARGET_PREFIX = "TARGET|"
 
 
 class PacketRow(GObject.Object):
@@ -232,6 +243,17 @@ class Application(Gtk.Application):
         self.mp_warn_at = 0.0
         self.slot_warn_at = 0.0
         self._target_map_vnums: frozenset[int] | None = None
+        # TARGET support is expected from the current DLL; an old DLL answers
+        # "unknown command" and the bot falls back to an injected ncif.
+        self.dll_target_supported = True
+        self.last_target_reply = ""
+        # Two-step attack: TARGET first, then u_s on a later tick once the
+        # client has confirmed the selection.
+        self.target_request_id: int | None = None
+        self.target_request_at = 0.0
+        self.target_confirmed_id: int | None = None
+        self.target_confirmed_at = 0.0
+        self.target_waiting: int | None = None
         self.auto_attack_toggle = None
         self.loop_toggle = None
         self.draw_path_toggle = None
@@ -258,8 +280,13 @@ class Application(Gtk.Application):
         # click does not become one long MOVE that the client jumps.
         self.travel_targets: list[tuple[int, int]] = []
         self.travel_index = 0
-        self.travel_pending: tuple[tuple[int, int], float, int] | None = None
+        self.travel_pending: tuple[tuple[int, int], float] | None = None
         self.travel_timer = None
+        self.travel_on_arrival = None
+        self._travel_pos_at = 0.0
+        # Draw path: the first click sets the route's start; Start walks the
+        # character there first, then follows the drawn waypoints.
+        self.path_start: tuple[int, int] | None = None
         self.stand_sent_until = 0.0
         self.attack_cooldown_until = 0.0
         self.walk_not_before = 0.0
@@ -557,8 +584,10 @@ class Application(Gtk.Application):
         self.draw_path_toggle = Gtk.ToggleButton(label="Draw path")
         self.draw_path_toggle.set_active(False)
         self.draw_path_toggle.set_tooltip_text(
-            "On: a map click draws the A* path that Start will make the bot "
-            "follow. Off: the character walks to the clicked cell immediately."
+            "On: the first map click sets the route start (cyan ring), later "
+            "clicks add waypoints. Start walks the character to the start "
+            "point first, then follows the drawn route. Off: a map click "
+            "walks the character there immediately."
         )
         self._bind_toggle_color(self.draw_path_toggle)
         path_box.append(self.draw_path_toggle)
@@ -805,10 +834,12 @@ class Application(Gtk.Application):
         hint = Gtk.Label(
             label=(
                 "Click the map and the character walks there. Turn on Draw "
-                "path to plan waypoints instead: the A* path is drawn and "
-                "Start makes the bot follow it. Combat picks the monster "
-                "hitting you first (Retaliate), then the nearest one. Low HP "
-                "sits until full."
+                "path to plan a route instead: the first click sets its "
+                "start, later clicks add waypoints, and Start walks to the "
+                "start point before following the route. Combat selects the "
+                "monster in the client first (target ring), then attacks; it "
+                "picks the one hitting you first (Retaliate), then the "
+                "nearest. Low HP sits until full."
             )
         )
         hint.set_xalign(0)
@@ -1816,7 +1847,10 @@ class Application(Gtk.Application):
             if monster is None:
                 return False
             target_type, target_id = 3, monster.entity_id
-            self._send(f"ncif 3 {monster.entity_id}")
+            # Select in the client first; the skill goes out on a later tick,
+            # once the client confirms its selection.
+            if not self._ensure_target(monster.entity_id, now):
+                return False
         send_skill = self._skill_send_id(rule.spell)
         if send_skill is None:
             return False
@@ -1824,6 +1858,7 @@ class Application(Gtk.Application):
             target_id, skill=send_skill, target_type=target_type
         )
         self._send(packet)
+        self._target_used()
         # The per-rule cooldown (max of the rule and Skill.dat) is enforced in
         # _select_spell_rule; here only the cast animation plus the Min delay
         # floor pace the next action.
@@ -2033,6 +2068,7 @@ class Application(Gtk.Application):
         self.bot_goals = []
         self.waypoints.clear()
         self.path_cells.clear()
+        self.path_start = None
         self.path_index = 0
         self.pending_target = None
         self._build_map_surface()
@@ -2376,9 +2412,10 @@ class Application(Gtk.Application):
         # separate squares.
         if self.path_cells:
             points = list(self.path_cells)
-            own = self._player_cell()
-            if own is not None:
-                points.insert(0, own)
+            if self.path_start is None:
+                own = self._player_cell()
+                if own is not None:
+                    points.insert(0, own)
             context.set_source_rgba(0.0, 0.9, 0.9, 0.9)
             context.set_line_cap(cairo.LINE_CAP_ROUND)
             context.set_line_join(cairo.LINE_JOIN_ROUND)
@@ -2415,6 +2452,21 @@ class Application(Gtk.Application):
                 0,
                 2 * math.pi,
             )
+            context.fill()
+
+        # planned route start (Draw path): a cyan ring, not tied to the
+        # character; Start walks there first.
+        if self.path_start is not None:
+            x, y = self.path_start
+            cx = x * scale + scale / 2
+            cy = y * scale + scale / 2
+            radius = max(4.0, scale * 0.8)
+            context.set_source_rgba(0.0, 0.9, 0.9, 0.95)
+            context.set_line_width(max(1.8, scale * 0.3))
+            context.arc(cx, cy, radius, 0, 2 * math.pi)
+            context.stroke()
+            context.set_source_rgba(1.0, 1.0, 1.0, 0.95)
+            context.arc(cx, cy, radius * 0.45, 0, 2 * math.pi)
             context.fill()
 
         # entities
@@ -2630,16 +2682,21 @@ class Application(Gtk.Application):
             if self.waypoints:
                 self.waypoints.pop()
                 self._rebuild_path()
+            elif self.path_start is not None:
+                self.path_start = None
+                self._rebuild_path()
+                self._set_status("start point cleared")
             return
 
         if not self.map_grid.is_walkable(*cell):
             self._set_status(f"cell {cell} is blocked")
             return
 
-        planning = self.bot_running or (
+        draw_path = bool(
             self.draw_path_toggle is not None
             and self.draw_path_toggle.get_active()
         )
+        planning = self.bot_running or draw_path
         if not planning:
             # Walk there now through the client's own MoveTo (pathfinding and
             # animation are the game's). Sitting blocks movement, so stand
@@ -2654,16 +2711,29 @@ class Application(Gtk.Application):
             self._start_travel(cell)
             return
 
+        if not self.bot_running and draw_path and self.path_start is None:
+            # The first Draw path press defines where the route begins; it is
+            # not anchored to the character.
+            self.path_start = cell
+            self.waypoints.clear()
+            self._rebuild_path()
+            self._set_status(f"start point {cell}; click to add waypoints")
+            return
+
         self.waypoints.append(cell)
         self._rebuild_path()
         self._set_status(f"path drawn to {cell} — press Start to follow")
 
-    def _start_travel(self, cell: tuple[int, int]) -> bool:
+    def _start_travel(
+        self, cell: tuple[int, int], on_arrival=None
+    ) -> bool:
         """Walk to a clicked cell in short client-MoveTo legs.
 
         A single far `MOVE` makes the client jump (and the server correct), so
         follow the A* path in the same three-cell legs the bot uses. The map
-        itself follows the real position via the POS poll.
+        itself follows the real position via the POS poll. ``on_arrival`` runs
+        when the last leg is reached (used to start a planned route at its
+        start point).
         """
         self._stop_travel(quiet=True)
         if self.map_grid is None:
@@ -2686,11 +2756,36 @@ class Application(Gtk.Application):
         self.travel_targets = targets
         self.travel_index = 0
         self.travel_pending = None
+        self.travel_on_arrival = on_arrival
+        self._travel_pos_at = 0.0
         self.travel_timer = GLib.timeout_add(
             TRAVEL_INTERVAL_MS, self._travel_tick
         )
         self._set_status(f"walking to {cell} ({len(targets)} legs)")
         return False
+
+    def _travel_request_position(self, now: float) -> None:
+        """Poll POS faster while travelling, to see the real cell."""
+        if now - self._travel_pos_at < TRAVEL_POS_POLL_S:
+            return
+        self._travel_pos_at = now
+        if self.client is not None and self.client.connected:
+            try:
+                self.client.send_raw(POS_COMMAND)
+            except (ConnectionLost, ValueError):
+                pass
+
+    def _finish_travel(self) -> None:
+        self.travel_targets = []
+        self.travel_index = 0
+        self.travel_pending = None
+        if self.travel_timer is not None:
+            GLib.source_remove(self.travel_timer)
+            self.travel_timer = None
+        callback, self.travel_on_arrival = self.travel_on_arrival, None
+        self._set_status("arrived")
+        if callback is not None:
+            GLib.idle_add(callback)
 
     def _travel_tick(self) -> bool:
         if self._closing:
@@ -2700,50 +2795,67 @@ class Application(Gtk.Application):
             self.travel_timer = None
             return False
         now = time.monotonic()
+        self._travel_request_position(now)
+        actual = self._player_cell()
+
         if self.travel_pending is not None:
-            target, sent_at, distance = self.travel_pending
-            ready_at = sent_at + max(0.35, distance * self.walk_confirm_delay)
-            position = self.engine.world.position
-            if position == target and now >= ready_at:
-                self.travel_pending = None
-                self.travel_index += 1
-            elif now > sent_at + self.walk_timeout + distance * (
-                self.walk_timeout_per_cell
+            target, sent_at = self.travel_pending
+            last_leg = self.travel_index >= len(self.travel_targets) - 1
+            remaining = None
+            if actual is not None:
+                remaining = max(
+                    abs(actual[0] - target[0]),
+                    abs(actual[1] - target[1]),
+                )
+            if last_leg:
+                if actual == target:
+                    self._finish_travel()
+                    return False
+            elif (
+                remaining is not None
+                and remaining <= TRAVEL_HANDOFF_CELLS
+                and now - sent_at >= TRAVEL_MIN_LEG_S
             ):
-                # A missed leg (blocked/animating slowly) must not stall the
-                # whole walk; move on to the next one.
-                self.travel_pending = None
+                # Hand the next leg to the client while the character is
+                # still moving, so it keeps walking instead of stopping at
+                # every three-cell boundary.
                 self.travel_index += 1
+                self.travel_pending = None
+                return True
+            if (
+                not last_leg
+                and actual == target
+                and now - sent_at >= TRAVEL_MIN_LEG_S
+            ):
+                # POS unavailable/stale: fall back to the walk destination.
+                self.travel_index += 1
+                self.travel_pending = None
+                return True
+            if now - sent_at > TRAVEL_LEG_TIMEOUT_S:
+                self.travel_index += 1
+                self.travel_pending = None
                 self._set_status("walk leg timed out; continuing")
             return True
 
         if self.travel_index >= len(self.travel_targets):
-            self.travel_targets = []
-            self.travel_timer = None
-            self._set_status("arrived")
+            self._finish_travel()
             return False
 
         target = self.travel_targets[self.travel_index]
-        position = self.engine.world.position
-        if position == target:
+        if actual == target:
             self.travel_index += 1
             return True
-        distance = 0
-        if position is not None:
-            distance = max(
-                abs(target[0] - position[0]),
-                abs(target[1] - position[1]),
-            )
         if not self._client_move(target[0], target[1]):
             self._stop_travel()
             return False
-        self.travel_pending = (target, now, distance)
+        self.travel_pending = (target, now)
         return True
 
     def _stop_travel(self, quiet: bool = False) -> None:
         self.travel_targets = []
         self.travel_index = 0
         self.travel_pending = None
+        self.travel_on_arrival = None
         if self.travel_timer is not None:
             GLib.source_remove(self.travel_timer)
             self.travel_timer = None
@@ -2902,6 +3014,7 @@ class Application(Gtk.Application):
     def _clear_path(self) -> None:
         self.waypoints.clear()
         self.path_cells.clear()
+        self.path_start = None
         self.path_index = 0
         self.pending_target = None
         self._stop_travel(quiet=True)
@@ -2931,12 +3044,22 @@ class Application(Gtk.Application):
     def _rebuild_path(self) -> None:
         self.path_cells = []
         self.path_index = 0
-        if self.map_grid is None or not self.waypoints:
+        if self.map_grid is None:
+            return
+        if not self.waypoints:
             if self.map_area is not None:
                 self.map_area.queue_draw()
+            if self.path_start is not None:
+                self._set_path_info(
+                    f"start {self.path_start} · click waypoints"
+                )
             return
 
-        current = self._player_cell()
+        # A planned route starts at the first clicked point (Draw path), not
+        # at the character; Start walks to that point first.
+        current = self.path_start
+        if current is None:
+            current = self._player_cell()
         if current is None:
             self.path_cells = []
             if self.map_area is not None:
@@ -2948,7 +3071,7 @@ class Application(Gtk.Application):
             self.path_cells = []
             if self.map_area is not None:
                 self.map_area.queue_draw()
-            self._set_status(f"own position {current} is not walkable")
+            self._set_status(f"path start {current} is not walkable")
             return
 
         path: list[tuple[int, int]] = []
@@ -2963,7 +3086,11 @@ class Application(Gtk.Application):
         self.path_cells = path
         if self.map_area is not None:
             self.map_area.queue_draw()
-        self._set_status(f"path: {len(path)} cells, {len(self.waypoints)} waypoint(s)")
+        origin = "start" if self.path_start is not None else "you"
+        self._set_status(
+            f"path from {origin}: {len(path)} cells, "
+            f"{len(self.waypoints)} waypoint(s)"
+        )
         self._set_path_info(
             f"path: {len(path)} cells · {len(self.waypoints)} waypoint(s)"
         )
@@ -3045,6 +3172,31 @@ class Application(Gtk.Application):
                             # the status bar (it hid action messages).
                             self._update_char_info()
                             dirty = True
+                elif message.payload.startswith("TARGET "):
+                    # DLL confirmation for a bot selection; keep the status
+                    # bar for the attack action itself.
+                    self.last_target_reply = message.payload
+                    parts = message.payload.split()
+                    try:
+                        self.target_confirmed_id = int(parts[1])
+                        self.target_confirmed_at = time.monotonic()
+                    except (IndexError, ValueError):
+                        pass
+                    dirty = True
+                elif message.payload.startswith("TARGET:"):
+                    # The client refused the selection (dead, off-map, ...):
+                    # do not attack with a stale target.
+                    self.target_confirmed_id = None
+                    self._set_status(message.payload)
+                elif message.payload.startswith(
+                    "unknown command: TARGET"
+                ):
+                    if self.dll_target_supported:
+                        self.dll_target_supported = False
+                        self._set_status(
+                            "DLL is too old for target selection; "
+                            "falling back to ncif (re-inject the new DLL)"
+                        )
                 else:
                     self._set_status(message.payload)
             elif message.kind is Kind.QUIT:
@@ -3223,6 +3375,65 @@ class Application(Gtk.Application):
             return False
         return True
 
+    def _client_target(self, entity_id: int) -> bool:
+        """Ask the DLL to select the monster in the client.
+
+        Returns False when the DLL does not support TARGET (or the link is
+        down); the caller then falls back to injecting ncif.
+        """
+        if not self.dll_target_supported:
+            return False
+        if self.client is None or not self.client.connected:
+            return False
+        try:
+            self.client.send_raw(f"{TARGET_PREFIX}{entity_id}")
+        except (ConnectionLost, ValueError):
+            return False
+        return True
+
+    def _ensure_target(self, entity_id: int, now: float) -> bool:
+        """True once the DLL confirmed the client has the entity selected.
+
+        The server validates `u_s` against the client's own selection, so the
+        bot never attacks in the same tick it asks for a TARGET: it waits for
+        the DLL's ``STATUS|TARGET`` confirmation, which is sent only after the
+        client's selector has stored the entity as the current target. A
+        confirmation is used once (the caller clears it after sending the
+        skill), so every attack re-verifies the selection instead of trusting
+        an old target id. The request is retried once a second.
+        """
+        if (
+            self.target_confirmed_id == entity_id
+            and self.target_confirmed_at >= self.target_request_at
+        ):
+            self.target_waiting = None
+            return True
+        if not self.dll_target_supported:
+            # Old DLL: keep the previous behaviour, an injected ncif.
+            self.target_waiting = None
+            self._send(f"ncif 3 {entity_id}")
+            return True
+        if (
+            self.target_request_id != entity_id
+            or now - self.target_request_at >= 1.0
+        ):
+            self.target_request_id = entity_id
+            self.target_request_at = now
+            self.target_confirmed_id = None
+            self.target_waiting = entity_id
+            if not self._client_target(entity_id):
+                self.target_waiting = None
+                self._send(f"ncif 3 {entity_id}")
+                return True
+            self._set_status(f"selecting monster {entity_id}…")
+        else:
+            self.target_waiting = entity_id
+        return False
+
+    def _target_used(self) -> None:
+        """Drop the selection confirmation after a skill went out."""
+        self.target_confirmed_id = None
+
     def _start_bot(self) -> None:
         if self.bot_running:
             return
@@ -3239,12 +3450,28 @@ class Application(Gtk.Application):
             ):
                 self._set_status("add waypoints or enable combat/pickup")
                 return
-        if self._player_cell() is None:
+        position = self._player_cell()
+        if position is None:
             self.start_when_located = True
             self._request_position()
             self._set_status(
                 "locating character; starting when the position arrives"
             )
+            return
+        if self.path_start is not None and position != self.path_start:
+            # Draw path defines a route that does not depend on where the
+            # character stands. Start walks to its starting point first, then
+            # the idle callback runs this method again for the route itself.
+            self.start_when_located = False
+            start = self.path_start
+            self._set_path_info(f"walking to route start {start}…")
+            self._start_travel(start, self._start_bot)
+            # _start_travel always returns False (it doubles as a GLib
+            # timeout callback); a running timer means it started.
+            if self.travel_timer is None:
+                self._set_path_info(
+                    f"could not walk to the route start {start}"
+                )
             return
         # The client's MoveTo already does the pathfinding and animation. Give
         # it a multi-cell leg per call instead of one cell: a per-cell MOVE
@@ -3290,6 +3517,9 @@ class Application(Gtk.Application):
         self.bot_running = False
         self.start_when_located = False
         self.pending_target = None
+        self.target_waiting = None
+        self.target_confirmed_id = None
+        self.target_request_id = None
         # Stop a click-to-walk too; Stop is the one "stop moving" button.
         self._stop_travel(quiet=True)
         if self.bot_timer is not None:
@@ -3524,6 +3754,9 @@ class Application(Gtk.Application):
                     rule_index, rule, monster, char_id, now
                 ):
                     return True
+                if self.target_waiting is not None:
+                    # Waiting for the client's selection; do not walk away.
+                    return True
 
             basic = self._entry_int(self.skill_entry, 0)
             basic_vnum = basic if basic > 0 else self._basic_skill_vnum()
@@ -3577,11 +3810,13 @@ class Application(Gtk.Application):
                             )
                             self.slot_warn_at = now + 10.0
                     else:
-                        self._send(f"ncif 3 {monster.entity_id}")
+                        if not self._ensure_target(monster.entity_id, now):
+                            return True
                         packet = self._skill_packet(
                             monster.entity_id, skill=send_skill
                         )
                         self._send(packet)
+                        self._target_used()
                         # The skill's own cast time and cooldown pace the next
                         # action; the Min delay spin is only a floor on top.
                         cooldown = float(self.attack_cooldown.get_value())

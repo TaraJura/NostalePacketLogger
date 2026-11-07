@@ -77,7 +77,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 84 unit tests pass, the GTK4 window and six bot
+The Linux port builds, its 119 unit tests pass, the GTK4 window and six bot
 smoke tests pass, and the real injector has been run against the **live
 NosTale client** under Wine 11:
 
@@ -91,8 +91,11 @@ NosTale client** under Wine 11:
   only the server, and the correction teleports the client;
 - the live GUI bot walked `(26,133)→(23,130)` as six client `[SEND] walk`
   packets, with no injected walks, probes or teleports;
-- auto-attack is `ncif 3 <id>` + `u_s 0 3 <id>`; the server answers with
-  `su ... 866/868 ...`, and pickup/ground drops are confirmed with `get`;
+- auto-attack selects the monster in the client (`TARGET|id`, so the client
+  highlights it and sends its own `ncif 3 <id>`) and then sends
+  `u_s 0 3 <id>`; the server answers with `su ... 866/868 ...`, and
+  pickup/ground drops are confirmed with `get`. Live 2026-11-07:
+  `TARGET|8684` → client `[SEND] ncif 3 8684` → `su ... 3 8684 855 ...`;
 - the skill hook captures the client's own `u_s` packets (`skill=ACTIVE`).
 
 `linux/scripts/host.sh walk X Y` uses `MOVE` and waits for the client's own

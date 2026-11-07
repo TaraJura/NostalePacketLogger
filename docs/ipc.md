@@ -32,6 +32,7 @@ more `|` characters.
 | `STATUS|<text>` | both | human-readable state, hook addresses, drop counters, errors |
 | `MOVE|<x> <y>` | host → DLL | run the client's own MoveTo/pathfinding, so it walks visibly |
 | `POS` | host → DLL | reply `STATUS|POS <x> <y> <charId>` from the local player object |
+| `TARGET|<entityId>` | host → DLL | select the entity in the client (target ring + the client's own `ncif`) |
 | `QUIT|` | host → DLL | unhook and stop the server; the module stays mapped until the game exits |
 
 The `SEND` overloading is inherited from the original two-pipe design and is
@@ -84,6 +85,32 @@ at +6, uint32 char id at +0x24. The reply is
 Both commands validate the expected client-build prologue/pointers and return
 `STATUS|MOVE: client build mismatch` or `STATUS|POS: ... not readable` instead
 of crashing after a client patch.
+
+### Targeting command
+
+`TARGET|<entityId>` selects a monster through the client's own selector
+(`0x56964C` in this build, `EAX` = the selection controller from
+`[[0x795200]]`, `EDX` = the entity object). The client then highlights the
+target and **sends its own `ncif`**, which is the part the server validates:
+injecting `ncif` alone tells the server about a target the client never
+selected, and the next `u_s` is redirected to (or cancelled because of) the
+client's real selection.
+
+The entity object is found by scanning for the id, then validating the object
+layout: in-module vtable at +0, kind 1-2 at +4, the id at +8, a live flag at
++0x33, and the targetable type byte at +0xA9. A small cache keeps the last
+eight ids, so only the first selection of each monster pays for the scan
+(~0.5 s). The reply is:
+
+```
+STATUS|TARGET 8684 0x089305D0 0x087B4DD8     # id, entity object, controller
+STATUS|TARGET: entity not found in client memory
+STATUS|TARGET: client refused the selection   # dead, off-map, not targetable
+STATUS|TARGET: client build mismatch
+```
+
+The client's own `ncif` appears in the normal `SEND|ncif ...` stream, so a host
+can confirm the selection from packets alone.
 
 `FAILED` means the signature was found but the byte patch failed; `NOT-FOUND`
 means the client build does not match the signatures. Both are non-fatal: the

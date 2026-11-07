@@ -4,6 +4,7 @@
 #include <string>
 
 #include "clientmove.h"
+#include "clienttarget.h"
 #include "config.h"
 #include "log.h"
 #include "memory.h"
@@ -113,6 +114,32 @@ void handle_command(const std::string& command) {
         char reply[80] = {0};
         std::snprintf(reply, sizeof(reply), "STATUS|POS %d %d %lu", x, y,
                       char_id);
+        tcpserver::send_line(reply);
+        return;
+    }
+
+    // TARGET|entityId -- select an entity through the client's own selection
+    // routine. The client highlights it and sends its own `ncif`; the server
+    // then accepts the following `u_s` for this target.
+    if (command.compare(0, 7, "TARGET|") == 0) {
+        unsigned long id = 0;
+        if (std::sscanf(command.c_str() + 7, "%lu", &id) != 1 || id == 0) {
+            tcpserver::send_line("STATUS|usage: TARGET|entityId");
+            return;
+        }
+
+        unsigned long entity = 0;
+        unsigned long controller = 0;
+        std::string error;
+        if (!client_target(id, entity, controller, error)) {
+            tcpserver::send_line("STATUS|" + error);
+            return;
+        }
+
+        char reply[128] = {0};
+        std::snprintf(reply, sizeof(reply),
+                      "STATUS|TARGET %lu 0x%08lX 0x%08lX", id, entity,
+                      controller);
         tcpserver::send_line(reply);
         return;
     }

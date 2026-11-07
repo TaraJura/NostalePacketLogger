@@ -725,7 +725,9 @@ class GameService:
             self_id = self._world().self_id
         start = time.time()
         if target_type == 3:
-            self._send(f"ncif 3 {target_id}")
+            # The client has to select the monster itself (target ring +
+            # its own ncif); the server validates u_s against that.
+            self._select_target(target_id)
         else:
             self._send(f"ncif {target_type} {target_id}")
         self._send(f"u_s {slot} {target_type} {target_id}")
@@ -773,8 +775,44 @@ class GameService:
         return {"ok": True, "sent": text}
 
     def game_select(self, target_id: int, target_type: int = 3) -> dict[str, Any]:
+        if target_type == 3:
+            result = self._select_target(target_id)
+            result["target_type"] = target_type
+            return result
         self._send(f"ncif {target_type} {target_id}")
         return {"ok": True, "target_id": target_id, "target_type": target_type}
+
+    def _select_target(
+        self, target_id: int, timeout: float = 5.0
+    ) -> dict[str, Any]:
+        """Select an entity through the client's own selector (TARGET).
+
+        An injected ncif only tells the server; the client keeps its old
+        selection and the server then rejects/redirects the next u_s. TARGET
+        makes the client change its selection and send its own ncif.
+        """
+        start = time.time()
+        self._send(f"TARGET|{target_id}")
+
+        def answered():
+            with self.lock:
+                for stamp, text in reversed(self.statuses):
+                    if stamp < start:
+                        break
+                    if text.startswith("TARGET "):
+                        return text
+                    if text.startswith("TARGET:"):
+                        return text
+            return None
+
+        text = self._wait(answered, timeout)
+        if text is None:
+            raise ToolError(
+                f"no TARGET answer from the DLL for entity {target_id}"
+            )
+        if text.startswith("TARGET:"):
+            raise ToolError(text)
+        return {"ok": True, "target_id": target_id, "status": text}
 
     def game_rest(self, sit: bool | None = None) -> dict[str, Any]:
         with self.lock:
@@ -1078,7 +1116,8 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "game_attack",
         "description": (
-            "Normal attack: ncif + u_s <slot> 3 <entityId>; waits for the "
+            "Normal attack: the client selects the monster (TARGET, target ring + "
+            "its own ncif), then u_s <slot> 3 <entityId>; waits for the "
             "server's su confirmation and returns the skill vnum it reports."
         ),
         "inputSchema": _schema(
@@ -1126,7 +1165,10 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "game_select",
-        "description": "Select a target: ncif <target_type> <target_id>.",
+        "description": (
+            "Select a monster through the client itself (TARGET: target "
+            "ring + its own ncif); target_type 1/2 use an injected ncif."
+        ),
         "inputSchema": _schema(
             {
                 "target_id": {"type": "integer"},

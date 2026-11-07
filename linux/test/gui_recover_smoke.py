@@ -128,7 +128,7 @@ def main() -> int:
             bad = [
                 line
                 for line in server.received
-                if line.startswith(("SEND|ncif", "SEND|u_s"))
+                if line.startswith(("TARGET|", "SEND|ncif", "SEND|u_s"))
             ]
             stats = app.engine.world.stats
             result["ok"] = (

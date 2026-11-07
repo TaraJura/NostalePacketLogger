@@ -285,8 +285,10 @@ honest source.
    target in spell range and whose condition (Always or HP/MP threshold) is
    true is cast on the monster or on yourself. **Always** plus cooldowns is a
    rotation. If none matches, the **Skill** from Combat is used (`0` = basic
-   attack). Monster casts send `ncif 3 <id>` plus the skill template; self
-   casts use target type 1 and the char id. The rule stores the Skill.dat
+   attack). Monster casts first select the monster in the client
+   (`TARGET|id`, which makes the client send its own `ncif 3 <id>`); the
+   skill itself goes out on a later tick, once the selection is
+   confirmed. Self casts use target type 1 and the char id. The rule stores the Skill.dat
    vnum; the bot resolves it to the zero-based `u_s` slot from the learned
    `ski` list (e.g. 876 → slot 10) before sending. Cast time from Skill.dat
    extends the walk pause.
@@ -303,8 +305,9 @@ honest source.
    consecutive rejections.
 6. Repeat/loop; Stop ends the timer.
 
-The bot sends ordinary packets (`ncif`, `u_s`, `rest`) through the existing
-`PacketClient` and uses the DLL's `MOVE`/`POS` commands for movement. It never
+The bot sends ordinary packets (`u_s`, `rest`, and `ncif` for non-monster
+targets) through the existing `PacketClient` and uses the DLL's
+`TARGET`/`MOVE`/`POS` commands for targeting and movement. It never
 touches GTK from a worker thread. The engine feeds it the live `tp`, `mv`,
 `rest`, `cond`, `su` and `stat` packets. On connect the GUI sends `POS` to
 learn the client's local position, because a host that attaches after login
@@ -377,22 +380,22 @@ never sees the `at` packet.
 ## Tests
 
 ```bash
-make -C linux host-test   # 84 cases incl. synthetic NOS, 8-way A*, checksum, config
+make -C linux host-test   # 119 cases incl. synthetic NOS, 8-way A*, checksum, config
 make -C linux gui-test    # GUI + map surface + tooltips + unknown-position guard
 make -C linux bot-test    # 6 fake-server smokes: combat, rules, spell order, out-of-range, rejection, recovery
 ```
 
 The bot test sends a fake player at (25,117) on map 20, a monster at
 (25,118) and a drop at the player's feet; it asserts the engine sent
-`get 1 14881134 999`, `ncif 3 500`, `u_s 0 3 500` and `MOVE|26 119` (not an
+`get 1 14881134 999`, `TARGET|500`, `u_s 0 3 500` and `MOVE|26 119` (not an
 injected walk), and the fake client answered with its own `walk`. A second
 test makes the server silent and asserts the bot stops after three rejected
 moves. The third test sits the bot at full HP to verify the sit/stand recovery
 loop. The rules smoke presents two monsters (vnum 201 nearer, vnum 200
 farther), allows only vnum 200, sets HP to 40 % and a spell rule (spell 7, my
-HP below 50 %), then asserts `ncif 3 500` + `u_s 7 3 500`, no traffic to 501,
+HP below 50 %), then asserts `TARGET|500` + `u_s 7 3 500`, no traffic to 501,
 no basic attack, and that save/load restores the config. The out-of-range
-smoke sets UI Range 40 with a monster 35 cells away and asserts no `ncif`/`u_s`
+smoke sets UI Range 40 with a monster 35 cells away and asserts no `TARGET`/`u_s`
 is sent and the status says “not attacking”. See
 [bot-config.md](bot-config.md).
 

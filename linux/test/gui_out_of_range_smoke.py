@@ -118,7 +118,7 @@ def main() -> int:
             attacks = [
                 line
                 for line in lines
-                if line.startswith(("SEND|ncif", "SEND|u_s"))
+                if line.startswith(("TARGET|", "SEND|ncif", "SEND|u_s"))
             ]
             status = app.status.get_text()
             result["ok"] = (

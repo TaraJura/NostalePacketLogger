@@ -138,7 +138,7 @@ animate a walk:
 | position | `POS` | `STATUS\|POS x y charId` |
 | raw move | `SEND\|walk x y checksum speed` | probe `walk -1 -1 0 10` → server `tp`; the client may visibly teleport |
 | sit/stand | `rest 1 1 <charId>` (toggles) | `rest <type> <charId> <state>` (0 stand, 1 sit) |
-| target | `ncif <type> <id>` | no direct reply; used before `u_s` |
+| target | `TARGET|entityId` (client selection) or `ncif <type> <id>` (injection) | the client's own `SEND|ncif` for a `TARGET`; `TARGET` replies `STATUS|TARGET ...` and the server's `su` then names the selected id |
 | skill | `u_s <skillSlot> <targetType> <targetId>`; slot 0 = the SP card's basic attack; `ski` or paired `u_s`/`su` lines map slots to Skill.dat vnums | `su <attacker> <target> <skill> …` (the basic attack reports the card's skill: 260 Energy Bolt, 866 Holy Attack) |
 
 The raw `walk` checksum is `walk_checksum(x, y)` = `1 if (x + y) % 3 == 1 else
@@ -263,8 +263,11 @@ The bot loop:
 - evaluate ordered spell rules from the scanned Skill.dat catalog (Always or
   my HP/MP below/above threshold; per-rule cooldown, MP, spell range and cast
   time enforced; monster/self target), then auto-attack the nearest allowed
-  monster (Retaliate first) using `ncif` + a configurable `u_s` template;
-  skill 0 is the normal attack;
+  monster (Retaliate first): `TARGET|id` makes the client select it (target
+  ring + the client's own `ncif`, which the server checks), then a
+  configurable `u_s` template; skill 0 is the normal attack. A DLL without
+  `TARGET` is detected from its `unknown command` reply and the bot falls back
+  to injecting `ncif`;
 - walk three-cell legs via the DLL's `MOVE|x y`, which runs the client's own
   pathfinding and animation; confirmation is the client's own `walk` packet /
   `world.position`.

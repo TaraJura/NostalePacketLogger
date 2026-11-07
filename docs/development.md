@@ -45,7 +45,7 @@ real window under Xvfb and checks rows, status, map switch, tooltips, toggle
 colors and the recovery banner. The bot smokes cover combat + path movement,
 target filters + spell rules + config save/load, the scan-backed spell picker
 dialog, scanned-spell rotation in list order, rejected walks and recovery.
-The combat smoke asserts the `get`/`ncif`/`u_s`/`MOVE` sequence (Retaliate
+The combat smoke asserts the `get`/`TARGET`/`u_s`/`MOVE` sequence (Retaliate
 picks the monster that hit us) and that the fake client's own `walk` confirms
 the move. The rules smoke filters two monsters by vnum, checks that HP 40 %
 triggers a spell rule (`u_s 7 3 500`), and round-trips the JSON configuration.
