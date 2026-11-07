@@ -61,7 +61,7 @@ class BotConfigTests(unittest.TestCase):
             }
         )
         self.assertEqual(config.attack_range, 40)
-        self.assertEqual(config.attack_cooldown, 1.0)
+        self.assertEqual(config.attack_cooldown, 0.0)
         self.assertEqual(config.low_hp_pct, 90.0)
         self.assertEqual(config.monster_mode, "all")
         self.assertEqual(config.monster_vnums, [206])

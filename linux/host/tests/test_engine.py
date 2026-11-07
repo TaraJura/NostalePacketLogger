@@ -192,6 +192,11 @@ class EngineTests(unittest.TestCase):
         world = self.engine.feed(packet(Kind.RECV, "st x 7 14 0 1 100 0 1 2"))
         self.assertIn(7, world.entities)
 
+    def test_cancel_counts(self):
+        self.engine.feed(packet(Kind.RECV, "cancel 0 0 -1"))
+        world = self.engine.feed(packet(Kind.RECV, "cancel 0 0 -1"))
+        self.assertEqual(world.cancel_count, 2)
+
     def test_drop_and_get(self):
         # Live: drop 1046 13961541 29 180 635 0 14881134
         world = self.engine.feed(

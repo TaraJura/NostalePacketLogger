@@ -110,6 +110,7 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `su` | RECV | `combat`, `last_skill` (first five ints); if the target is self, `last_attacker_id`/`last_attacker_at` |
 | `stat` | RECV | own HP/MP |
 | `st` | RECV | monster status; `hp == 0` removes the entity (kill, no `out` is sent) |
+| `cancel` | RECV | increments `cancel_count`; the GUI clears the attack cooldown and retries at once after a cancelled cast |
 | `say` | RECV/SEND | `chat` |
 
 Parsing is deliberately tolerant: a short packet, a non-numeric field, or an

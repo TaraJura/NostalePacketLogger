@@ -193,7 +193,8 @@ grouped by function:
   a second), not the walk packet's destination, so the dot tracks the
   actual movement instead of jumping ahead.
 - **Combat** — Auto-attack, Retaliate, Skill, Search (target
-  radius), Min delay and the skill template. The line under Skill shows the
+  radius), Min delay (0 = use the skill's own cooldown) and the skill
+  template. The line under Skill shows the
   selected skill's Skill.dat range/cast/cooldown/MP; Skill `0` follows the
   equipped SP card (the server reports its vnum for `u_s 0`).
 - **Targets** — monster filter: all monsters, only the selected templates, or

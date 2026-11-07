@@ -120,7 +120,8 @@ Data-driven checks before a cast:
 - **spell cooldown**: the rule's own cooldown is `max(rule.cooldown, catalog
   cooldown)`, so a 90 s spell is not re-cast every few seconds.
 - **cast time**: the next action and the walk pause wait at least `DATA[4]`
-  (plus the Combat **Min delay** floor). The hardcoded 3 s default is gone.
+  The Combat **Min delay** defaults to 0, so it adds nothing on top of the
+  Skill.dat values; raise it only to slow the bot down.
 
 Monster rules require a monster in range; the client selects it first
 (`TARGET|entityId` → the client's own `ncif 3 <entityId>`) and the skill goes
@@ -175,7 +176,7 @@ Example:
   "skill": 0,
   "skill_template": "u_s {skill} {type} {target}",
   "attack_range": 10,
-  "attack_cooldown": 1.0,
+  "attack_cooldown": 0.0,
   "pickup": true,
   "loot_range": 3,
   "recover": true,

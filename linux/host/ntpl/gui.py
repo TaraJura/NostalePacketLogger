@@ -83,7 +83,7 @@ BOT_LOG_PATH = Path(
 )
 BOT_LOG_MAX_BYTES = 4 * 1024 * 1024
 DRAIN_INTERVAL_MS = 50
-BOT_INTERVAL_MS = 200
+BOT_INTERVAL_MS = 50
 #: Click-to-walk tick; the next leg is handed to the client before the
 #: character reaches the end of the current one, so the walk never stops at a
 #: leg boundary. POS is polled faster while travelling to see the real cell.
@@ -98,7 +98,7 @@ DEFAULT_SCALE = 3
 AUTO_MAP_POINTS = 512
 # The server ignores a walk sent during the skill animation. The bot attacks,
 # then waits this long before it sends the next path step.
-ATTACK_WALK_DELAY = 1.5
+ATTACK_WALK_DELAY = 0.4
 # A walk timed out this many times in a row: the server is rejecting the
 # position (wrong self position, sitting, or an unsettled client). Stop instead
 # of walking further away from the real character.
@@ -314,6 +314,9 @@ class Application(Gtk.Application):
         self.pickup_ignored: dict[int, float] = {}
         self.recovering = False
         self.recover_rest_at = 0.0
+        # Attack pacing / cancel retry.
+        self.last_attack_sent_at = 0.0
+        self.last_cancel_count = 0
         self.map_redraw_scheduled = False
         self.stats_redraw_scheduled = False
         self.bot_running = False
@@ -747,11 +750,12 @@ class Application(Gtk.Application):
             "target search radius in cells; the attack itself is limited by "
             "the skill's own range (shown below)"
         )
-        self.attack_cooldown = Gtk.SpinButton.new_with_range(1, 30, 1)
-        self.attack_cooldown.set_value(1)
+        self.attack_cooldown = Gtk.SpinButton.new_with_range(0, 10, 0.1)
+        self.attack_cooldown.set_digits(1)
+        self.attack_cooldown.set_value(0.0)
         self.attack_cooldown.set_tooltip_text(
-            "minimum delay between actions; the skill's own cast time and "
-            "cooldown (shown below) are enforced on top"
+            "extra delay between attacks; 0 = attack as soon as the skill's "
+            "own cooldown and cast time (shown below) allow it"
         )
         combat_box.append(
             self._field_row(
@@ -1956,8 +1960,8 @@ class Application(Gtk.Application):
             if monster is None:
                 return False
             target_type, target_id = 3, monster.entity_id
-            # Select in the client first; the skill goes out on a later tick,
-            # once the client confirms its selection.
+            # Select in the client first (the DLL applies it before the u_s
+            # on the same connection).
             if not self._ensure_target(monster.entity_id, now):
                 return False
         send_skill = self._skill_send_id(rule.spell)
@@ -1967,6 +1971,7 @@ class Application(Gtk.Application):
             target_id, skill=send_skill, target_type=target_type
         )
         self._send(packet)
+        self.last_attack_sent_at = now
         # The per-rule cooldown (max of the rule and Skill.dat) is enforced in
         # _select_spell_rule; here only the cast animation plus the Min delay
         # floor pace the next action.
@@ -3630,6 +3635,9 @@ class Application(Gtk.Application):
         self.pickup_ignored.clear()
         self.recovering = False
         self.recover_rest_at = 0.0
+        # Attack pacing / cancel retry.
+        self.last_attack_sent_at = 0.0
+        self.last_cancel_count = 0
         self.unknown_warn_at = 0.0
         self.out_of_range_warn_at = 0.0
         if self.bot_timer is None:
@@ -3809,6 +3817,14 @@ class Application(Gtk.Application):
         now = time.monotonic()
         world = self.engine.world
         char_id = self._char_id()
+
+        # A cancelled cast (dead/out-of-range target, interrupted) must not
+        # burn the whole cooldown: retry at once with the next live target.
+        if world.cancel_count != self.last_cancel_count:
+            self.last_cancel_count = world.cancel_count
+            if now - self.last_attack_sent_at < 2.0:
+                self.attack_cooldown_until = now + 0.1
+                self._set_status("attack cancelled; retrying")
 
         # -- recovery: sit below the configured HP %, wait for full HP -----
         recover_enabled = (
@@ -4034,6 +4050,7 @@ class Application(Gtk.Application):
                             monster.entity_id, skill=send_skill
                         )
                         self._send(packet)
+                        self.last_attack_sent_at = now
                         # The skill's own cast time and cooldown pace the next
                         # action; the Min delay spin is only a floor on top.
                         cooldown = float(self.attack_cooldown.get_value())

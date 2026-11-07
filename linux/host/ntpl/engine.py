@@ -93,6 +93,9 @@ class WorldState:
     self_id: int | None = None
     target_id: int | None = None
     last_skill: int | None = None
+    # `cancel 0 0 -1`: the server cancelled the current cast (dead/out of
+    # range target, interrupted). Monotonic counter for the bot.
+    cancel_count: int = 0
     # `ski <page> <skillVnum...>`: the client's ordered skill list. `u_s`
     # carries a zero-based slot in this deduplicated list, not the vnum.
     skill_pages: dict[int, list[int]] = field(default_factory=dict)
@@ -323,6 +326,12 @@ def _on_despawn(world: WorldState, packet: Packet) -> None:
     values = packet.ints(2)  # <type> <id>
     if values:
         world.entities.pop(values[1], None)
+
+
+def _on_cancel(world: WorldState, packet: Packet) -> None:
+    # cancel 0 0 -1 -- the server dropped the current cast. The bot can try
+    # again at once with a live target instead of waiting out the cooldown.
+    world.cancel_count += 1
 
 
 def _on_status(world: WorldState, packet: Packet) -> None:
@@ -560,6 +569,7 @@ class Engine:
                 "wp": _on_waypoint,     # RECV: the map's Time-Space list
                 "ski": _on_skill_list,  # RECV: learned skill list
                 "su": _on_skill_used,   # RECV: a skill hit
+                "cancel": _on_cancel,   # RECV: the cast was cancelled
                 "stat": _on_stats,      # RECV: own hp/mp
                 "say": _on_chat,        # RECV and SEND: chat
             }

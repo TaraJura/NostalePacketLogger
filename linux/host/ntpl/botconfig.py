@@ -13,7 +13,7 @@ Schema (version 1)::
       "skill": 0,
       "skill_template": "u_s {skill} {type} {target}",
       "attack_range": 10,
-      "attack_cooldown": 1.0,
+      "attack_cooldown": 0.0,
       "pickup": true,
       "loot_range": 3,
       "recover": true,
@@ -107,7 +107,7 @@ class BotConfig:
     skill: int = 0
     skill_template: str = "u_s {skill} {type} {target}"
     attack_range: int = 10
-    attack_cooldown: float = 1.0
+    attack_cooldown: float = 0.0
     pickup: bool = True
     loot_range: int = 3
     recover: bool = True
@@ -171,7 +171,7 @@ class BotConfig:
             ),
             attack_range=_as_int(data.get("attack_range"), 10, 1, 40),
             attack_cooldown=_as_float(
-                data.get("attack_cooldown"), 1.0, 1.0, 30.0
+                data.get("attack_cooldown"), 0.0, 0.0, 30.0
             ),
             pickup=_as_bool(data.get("pickup"), True),
             loot_range=_as_int(data.get("loot_range"), 3, 1, 10),
