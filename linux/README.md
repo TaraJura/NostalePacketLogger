@@ -64,7 +64,7 @@ uses lowercase includes for that reason.
 
 ```bash
 make -C linux all test-host
-make -C linux host-test          # 84 cases: protocol, client, engine, mapdata, config, names
+make -C linux host-test          # 119 cases: protocol, client, engine, mapdata, config, names
 make -C linux gui-test           # headless GTK4: map switch, tooltips, toggles, banner
 make -C linux bot-test           # 6 smokes: combat, rules/config, spell order, out-of-range, rejection, recovery
 ./linux/scripts/dev-test-wine.sh 25
@@ -83,14 +83,15 @@ make -C linux bot-test           # 6 smokes: combat, rules/config, spell order, 
 
 The prefix is deleted afterwards. `gui-test` and `bot-test` need `xvfb` and
 GTK4, but no game and no real display. `bot-test` drives the real window
-against a fake server and checks the injected `ncif`/`u_s`/`walk` sequence and
-the `tp` confirmations.
+against a fake server and checks the client selection (`TARGET|id`) followed
+by `u_s`, and the `walk`/`tp` confirmations.
 
 ## Run with the game
 
 ```bash
-# 1. a dedicated prefix -- do not reuse ~/.wine or the Gameforge client prefix
-export WINEPREFIX="$HOME/.wine-nostale"
+# 1. the prefix where the game actually runs (currently the Gameforge prefix);
+#    never ~/.wine (WarCraft III/Battle.net)
+export WINEPREFIX="$HOME/games/gameforge/prefix"
 wineboot -u
 # 2. install and start NosTale inside that prefix (out of scope here)
 # 3. inject into every running client in the prefix

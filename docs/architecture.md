@@ -165,10 +165,13 @@ Supporting data modules:
 - `botconfig.py` — the JSON bot configuration (target filters, spell rules,
   combat settings), with validation/clamping and atomic save.
 
-The GTK4 **Map / Bot** tab shows the selected grid, live entities with hover
-tooltips, and the own character, lets the user click waypoints, and draws the
-path. The sidebar groups Character (HP/MP bars + recovery banner), Path,
-Combat (green/red toggles), Targets, Spells, Loot, Recovery and Configuration.
+The GTK4 window has **Packets**, **Map / Bot** and **Bot log** tabs. The map
+tab shows the selected grid, live entities with hover tooltips, and the own
+character, lets the user click waypoints, and draws the path. The sidebar
+groups Character (HP/MP bars + recovery banner), Path, Combat (green/red
+toggles), Targets, Spells, Loot, Recovery and Configuration. The Bot log tab
+keeps a timestamped, selectable history of every action the status bar
+reports (attacks, TARGET replies, walks, pickups, recovery, DLL errors).
 The bot runs on the GLib main loop:
 
 1. recover: below the HP threshold, sit and wait for full HP;

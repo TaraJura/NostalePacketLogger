@@ -22,7 +22,7 @@ shared: the transport differs, the game's packets do not.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 115 Python unit tests
+make -C linux host-test                      # 119 Python unit tests
 make -C linux gui-test                       # headless GTK4 + map smoke (xvfb)
 make -C linux bot-test                       # 6 fake-server bot smokes
 
@@ -103,16 +103,21 @@ NosTale client** under Wine 11:
 is controlled by the `rest` packet. Some targets are still ignored (blocked
 tile/entity); the bot stops after three rejected steps.
 
-The client's own map grids are parsed from `NostaleData/NStcData.NOS`; the live
-map is **20** (230x260) and every observed entity position is on walkable cells.
+The client's own map grids are parsed from `NostaleData/NStcData.NOS`; live
+maps so far include **2, 3, 4, 20, 98, 103** and **104**, and every observed
+entity position is on walkable cells.
 The GTK4 **Map / Bot** tab renders the map (automatic map switch on `c_map`),
 takes click waypoints, computes an **8-direction A\*** path (diagonals, no
 corner cutting, continuous polyline), and can loop it while auto-attacking
 monsters (Retaliate picks the one hitting you), picking up drops, and sitting
 to recover below a configurable HP %. It shows live HP/MP bars plus a red
 recovery banner, green/red active toggles, hover tooltips with monster names
-from the client's language archive, and an explicit unknown-vnum option for
-monsters that spawned before injection. Targets can be filtered by monster
+from the client's language archive, server-sent portals (`gp`) and Time-Space
+entrances (`wp`, with the nosapki stone icon and the client's own "Required
+Level N" wording), and an explicit unknown-vnum option for monsters that
+spawned before injection. A third top-level **Bot log** tab keeps a
+timestamped, selectable record of every action (attacks, TARGET selections and
+refusals, walks, pickups, recovery, DLL errors) for debugging. Targets can be filtered by monster
 vnum; ordered spell rules cast by HP/MP conditions; the whole bot configuration
 is saved/loaded as JSON. `map` commands inspect/render the grids; `make
 bot-test` exercises the loop, rules, spell order, rejection and recovery against a fake

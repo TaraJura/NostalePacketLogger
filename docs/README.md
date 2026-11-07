@@ -27,7 +27,7 @@ the host differ, the game's packets do not.
 - **Windows tree (`windows/`)** — the original working implementation. Injector
   + DLL + WinForms GUI, named pipes.
 - **Linux tree (`linux/`)** — MinGW DLL + TCP loopback + Python CLI + GTK4 GUI
-  + state engine. Builds cleanly, **84 host tests pass**, the GTK4 window
+  + state engine. Builds cleanly, **119 host tests pass**, the GTK4 window
   passes a headless smoke test, and the DLL has been verified against the
   **live NosTale client** under Wine 11: both hooks ACTIVE, drops 0,
   sit/stand via `rest`, and natural movement through the client's own MoveTo
@@ -37,12 +37,17 @@ the host differ, the game's packets do not.
   the skill hook captures the client's own `u_s`, and pickup
   (`get 1 <charId> <dropId>` → server `get`) works. See
   [live-session-2026-11-06.md](live-session-2026-11-06.md).
-- **Map / bot** — `NStcData.NOS` parser (779 grids); the live map is **20**
-  (230x260) and 100 % of the observed entity positions are on walkable cells.
-  The GTK4 Map/Bot tab renders the whole map (auto-switches from `c_map`),
-  draws **8-direction A\*** paths as a continuous polyline, runs a path loop
-  and can auto-attack monsters (Retaliate prioritises the one hitting you),
-  pick up drops, and sit to recover below a configurable HP %. The UI has live
+- **Map / bot** — `NStcData.NOS` parser (779 grids); live maps so far include
+  **2, 3, 4, 20, 98, 103** and **104**, and observed entity positions are on
+  walkable cells. The GTK4 Map/Bot tab renders the whole map (auto-switches
+  from `c_map`), draws **8-direction A\*** paths as a continuous polyline,
+  runs a path loop and can auto-attack monsters (Retaliate prioritises the
+  one hitting you), pick up drops, and sit to recover below a configurable
+  HP %. Attacks first select the monster **in the client** (`TARGET|id`, which
+  sends the client's own `ncif`), because the server validates `u_s` against
+  that selection. Server-sent `gp` portals and `wp` Time-Space entrances are
+  drawn on the map. A third **Bot log** tab records every action with a
+  timestamp for debugging. The UI has live
   HP/MP bars with a recovery banner, green/red toggles, map tooltips with
   monster names, monster target filters and ordered conditional spell rules
   scanned from `NSgtdData.NOS` → `Skill.dat` (Always/HP/MP conditions, MP,

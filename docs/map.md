@@ -296,11 +296,14 @@ honest source.
    cell on the 8-direction path) by calling the client's own MoveTo: the GUI
    sends `MOVE|x y` to the DLL. The client pathfinds,
    animates and sends its own `walk` packet with
-   the leg destination; the server accepts it as a normal player move. Because
-   that packet arrives at the **start** of the animation, the bot waits
-   `0.45 s` per Euclidean cell of travel (minimum 0.35 s) before sending the
-   next leg, so diagonal legs are paced correctly and the character walks
-   continuously instead of stopping after every single cell.
+   the leg destination; the server accepts it as a normal player move. The
+   bot polls `POS` during the leg and hands the next leg to the client one
+   cell before the current one ends (at least 0.35 s after the leg started),
+   the same early-handoff rule as click-to-walk, so the character keeps
+   walking instead of stopping at every three-cell boundary. The client's
+   own `walk` packet arrives at the **start** of the animation, so the old
+   `0.45 s`-per-Euclidean-cell wait remains only as the fallback when `POS`
+   is unavailable.
    On a timeout it skips the leg (blocked path) and stops after three
    consecutive rejections.
 6. Repeat/loop; Stop ends the timer.

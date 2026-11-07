@@ -50,17 +50,20 @@ The handlers are deliberately tolerant. Next:
 ## Phase 3.5 — Map, path, combat and configuration (implemented and run live)
 
 The client's `NStcData.NOS` is parsed into per-map walkability grids (779 maps;
-one byte per cell; `0x00` walkable). The live map is **20** (230x260) and 100 %
-of the observed `mv` positions are on walkable cells.
+one byte per cell; `0x00` walkable). Live maps so far include **2, 3, 4, 20,
+98, 103** and **104**, and observed `mv` positions are on walkable cells.
 
 - `ntpl map info/render/best` inspect the grids from the CLI.
 - The GTK4 **Map / Bot** tab renders the whole map, switches it automatically
   from `c_map`/`at`, overlays live entities with hover tooltips, takes click
   waypoints and draws an **8-direction A\*** path as a continuous polyline.
-- Auto-attack targets the nearest allowed monster (`ncif` + `u_s 0 3 <id>` for
-  the normal attack) on a cooldown; Retaliate prioritises the attacker.
-- The bot stands first (`rest`), walks three-cell legs through the client's
-  own MoveTo and waits for the client `walk`/`world.position` before the next.
+- Auto-attack targets the nearest allowed monster: `TARGET|id` selects it in
+  the client (target ring + the client's own `ncif`, which the server
+  validates), then `u_s 0 3 <id>` on a cooldown; Retaliate prioritises the
+  attacker and a refused target is skipped for a few seconds.
+- The bot stands first (`rest`) and walks three-cell legs through the
+  client's own MoveTo; while a leg runs it polls `POS` and hands the next leg
+  off one cell early (the click-to-walk rule), so walking is continuous.
 - Recovery sits below a configurable HP %, waits for full and resumes.
 - Targets can be filtered by monster vnum (all/only/except, plus unknown-vnum
   handling). Spells come from the client's `NSgtdData.NOS` → `Skill.dat`
@@ -70,9 +73,12 @@ of the observed `mv` positions are on walkable cells.
 - Monster names come from the client's `NSlangData_UK.NOS`; the spawn log
   backfills vnums for entities that predate the host connection.
 
-`make gui-test` and the four `make bot-test` smokes pass. The live run verified
-`MOVE`, auto-attack (`u_s 0 3 <id>` → `su ... 866/868 ...`), pickup and map
-switching. See [map.md](map.md) and [bot-config.md](bot-config.md).
+`make gui-test` and the six `make bot-test` smokes pass. The live run verified
+`MOVE`, client-side selection (`TARGET|id` → client `ncif` → `su` for the
+selected id), pickup and map switching. Server-sent `gp` portals and `wp`
+Time-Space entrances are drawn on the map, and a **Bot log** tab keeps a
+timestamped action history. See [map.md](map.md) and
+[bot-config.md](bot-config.md).
 
 ## Phase 4 — Autonomous agent
 

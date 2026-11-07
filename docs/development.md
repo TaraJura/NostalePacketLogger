@@ -28,7 +28,7 @@ The MinGW compiler is `i686-w64-mingw32-g++`. Override with
 ## Tests
 
 ```bash
-make -C linux host-test        # 84 stdlib unittest cases
+make -C linux host-test        # 119 stdlib unittest cases
 make -C linux gui-test         # headless GTK4, needs xvfb
 make -C linux bot-test         # 6 smokes: combat, rules/config, spell order, out-of-range, rejection, recovery
 make -C linux all test-host

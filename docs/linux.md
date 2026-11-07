@@ -116,7 +116,7 @@ linux/scripts/host.sh status
 ```
 
 ```
-ntpl 0.1.0 | recv=0x004A1B20 send=0x004A3C40 tnt=0x004B00A4 | hooks recv=ACTIVE send=ACTIVE | drops recv=0 send=0
+ntpl 0.2.1 | recv=0x004A1B20 send=0x004A3C40 tnt=0x004B00A4 | hooks recv=ACTIVE send=ACTIVE | drops recv=0 send=0
 ```
 
 If either address is `0x00000000` or a hook says `NOT-FOUND`, the client build
@@ -154,15 +154,20 @@ sitting, the server ignores movement. The sit/stand toggle is
 `send "rest 1 1 <charId>"`; the server's authoritative state comes back as
 `rest <type> <charId> <state>` (0 = standing, 1 = sitting).
 
-The GUI has a second tab, **Map / Bot**. It reads the client's own
-`NostaleData/NStcData.NOS` (path configurable with `--map-data`), draws the
-whole selected grid (auto-switch from `c_map`), overlays live entities with
-hover tooltips, accepts waypoints by clicking, computes an **8-direction A\***
-path, and can loop it while auto-attacking monsters. The sidebar has live
-HP/MP bars, green/red toggles, a red recovery banner, target filters,
-conditional spell rules and JSON save/load. `--log PATH` (or `NTPL_LOG`)
-selects the DLL log used to backfill vnums for entities that spawned before
-the GUI attached. See [map.md](map.md) and [bot-config.md](bot-config.md).
+The GUI has three tabs: **Packets**, **Map / Bot** and **Bot log**. The map
+tab reads the client's own `NostaleData/NStcData.NOS` (path configurable with
+`--map-data`), draws the whole selected grid (auto-switch from `c_map`),
+overlays live entities with hover tooltips, accepts waypoints by clicking,
+computes an **8-direction A\*** path, and can loop it while auto-attacking
+monsters (the client selects the monster via `TARGET|id` before each attack).
+The sidebar has live HP/MP bars, green/red toggles, a red recovery banner,
+target filters, conditional spell rules and JSON save/load. Server-sent `gp`
+portals and `wp` Time-Space entrances are drawn on the map. The **Bot log**
+tab keeps a timestamped, selectable history of every action (attacks, target
+selections/refusals, walks, pickups, recovery, DLL errors) for debugging.
+`--log PATH` (or `NTPL_LOG`) selects the DLL log used to backfill vnums for
+entities that spawned before the GUI attached. See [map.md](map.md) and
+[bot-config.md](bot-config.md).
 
 Inside `monitor`, stdin accepts:
 
@@ -234,7 +239,7 @@ both.
 ## Tests
 
 ```bash
-make host-test          # 84 stdlib unit tests: protocol, engine, map, config, spells
+make host-test          # 119 stdlib unit tests: protocol, engine, map, config, spells
 
 make gui-test           # headless GTK4 window + map surface against a fake stream
 make bot-test           # 6 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, recovery

@@ -32,7 +32,7 @@ more `|` characters.
 | `STATUS|<text>` | both | human-readable state, hook addresses, drop counters, errors |
 | `MOVE|<x> <y>` | host → DLL | run the client's own MoveTo/pathfinding, so it walks visibly |
 | `POS` | host → DLL | reply `STATUS|POS <x> <y> <charId>` from the local player object |
-| `TARGET|<entityId>` | host → DLL | select the entity in the client (target ring + the client's own `ncif`) |
+| `TARGET\|<entityId>` | host → DLL | select the entity in the client (target ring + the client's own `ncif`) |
 | `QUIT|` | host → DLL | unhook and stop the server; the module stays mapped until the game exits |
 
 The `SEND` overloading is inherited from the original two-pipe design and is
@@ -46,7 +46,7 @@ decided by which side you are, not by the message.
    three resolved addresses, hook state, and drop counters. Example:
 
    ```
-   STATUS|ntpl 0.1.0 | recv=0x004A1B20 send=0x004A3C40 tnt=0x004B00A4 | hooks recv=ACTIVE send=ACTIVE | drops recv=0 send=0
+   STATUS|ntpl 0.2.1 | recv=0x004A1B20 send=0x004A3C40 tnt=0x004B00A4 | hooks recv=ACTIVE send=ACTIVE | drops recv=0 send=0
    ```
 
 3. The host may send `STATUS` at any time to ask again.

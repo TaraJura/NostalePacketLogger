@@ -31,6 +31,9 @@
 | `rest` toggles twice | two identical packets were sent | send `rest 1 1 <charId>` once per state change |
 | Client looks stuck after many injected walks | injected walks can desync the client | use `MOVE`; if already desynced, relog/restart the client |
 | Spell vnum unknown | the client's hotbar mapping is not documented | cast once manually and read `su 1 <charId> ...` from the log |
+| `TARGET <id> ERR entity not found` | the server/engine knows the monster, but the client has no live object for it (despawned, left the interest area, or the id was reused) | the bot blocks that id for 5 s and picks the nearest other monster; check the **Bot log** tab. If every monster fails, the client build moved the entity layout |
+| `TARGET <id> ERR client refused the selection` | the object is dead, off-map, or not targetable (type `0xA9 == 4`) | expected for a stale target; the bot skips it for 5 s. See the **Bot log** tab for the exact reply |
+| Attacks land on the previously clicked monster | the injected `ncif` cannot change the client's own selection | re-inject the current DLL (0.2.x) and use `TARGET\|id`; check the Bot log for `monster <id> selected ...` |
 
 ## UI
 
@@ -38,6 +41,7 @@
 |---|---|---|
 | `gui.sh` says GTK4/PyGObject is missing | bindings not installed | `sudo apt install python3-gi gir1.2-gtk-4.0` |
 | Window says "not connected" | DLL not injected, game not running, or wrong port | inject first; check `NTPL_PORT` on both sides |
+| Need to know what the bot did | the status bar only shows the latest action | open the top-level **Bot log** tab: every action, TARGET reply and DLL error is kept with a timestamp (Clear log empties it) |
 | GUI opens but no packets | filter too narrow, or another host is connected | clear the filter; the DLL accepts one host at a time |
 | Bot does not attack in "Only selected" mode | Auto-attack is off; recovery is sitting below the HP threshold; the monster vnum is not selected; or a pre-injection monster has no vnum | check the green/red Auto-attack toggle and the red RECOVERING banner; wait for recovery or turn it off; verify the target list; enable **Also attack monsters with unknown vnum** or let the monster respawn |
 | Map does not switch after a portal | old build read the first `c_map` field (type 0) as the map id | update/restart the GUI; the engine reads the second field and clears stale entities |

@@ -138,7 +138,7 @@ animate a walk:
 | position | `POS` | `STATUS\|POS x y charId` |
 | raw move | `SEND\|walk x y checksum speed` | probe `walk -1 -1 0 10` → server `tp`; the client may visibly teleport |
 | sit/stand | `rest 1 1 <charId>` (toggles) | `rest <type> <charId> <state>` (0 stand, 1 sit) |
-| target | `TARGET|entityId` (client selection) or `ncif <type> <id>` (injection) | the client's own `SEND|ncif` for a `TARGET`; `TARGET` replies `STATUS|TARGET ...` and the server's `su` then names the selected id |
+| target | `TARGET\|entityId` (client selection) or `ncif <type> <id>` (injection) | the client's own `SEND|ncif` for a `TARGET`; `TARGET` replies `STATUS|TARGET ...` and the server's `su` then names the selected id |
 | skill | `u_s <skillSlot> <targetType> <targetId>`; slot 0 = the SP card's basic attack; `ski` or paired `u_s`/`su` lines map slots to Skill.dat vnums | `su <attacker> <target> <skill> …` (the basic attack reports the card's skill: 260 Energy Bolt, 866 Holy Attack) |
 
 The raw `walk` checksum is `walk_checksum(x, y)` = `1 if (x + y) % 3 == 1 else
@@ -156,7 +156,7 @@ The GUI bot and `ntpl walk` use `MOVE`; the bot's status advances when
 |---|---|
 | `monitor [--engine] [--filter] [--log]` | live stream; `/send`, `/filter`, `/status`, `/engine`, `/quit` |
 | `walk X Y [--speed] [--timeout]` | `MOVE` through the client, wait for its own `walk` packet |
-| `cast <slot> [--target-id] [--target-type] [--stand ID] [--packet]` | send `ncif` + `u_s`, wait for `su` |
+| `cast <slot> [--target-id] [--target-type] [--stand ID] [--packet]` | select in the client for monsters (`TARGET\|id`), then `u_s`; wait for `su` |
 | `send <packet…>` | raw packet; exits 1 if the DLL reports a failed send |
 | `status` | hook addresses, hook state, drop counters |
 | `scan X Y` | find a coordinate pair in game memory (debug) |
@@ -269,8 +269,9 @@ The bot loop:
   `TARGET` is detected from its `unknown command` reply and the bot falls back
   to injecting `ncif`;
 - walk three-cell legs via the DLL's `MOVE|x y`, which runs the client's own
-  pathfinding and animation; confirmation is the client's own `walk` packet /
-  `world.position`.
+  pathfinding and animation; POS is polled during a leg and the next leg is
+  handed off one cell early (the same rule as click-to-walk), so the walk is
+  continuous; confirmation is the client's own `walk` packet / `world.position`.
 
 The Targets filter applies to both Retaliate and nearest-target selection. See
 [map.md](map.md) for the data format and limits, and
