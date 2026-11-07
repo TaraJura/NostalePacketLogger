@@ -181,7 +181,12 @@ grouped by function:
   While recovering, a red **RECOVERING** banner states the HP percentage and
   that attacks/movement are paused; all toggle buttons are green when active
   and red when off.
-- **Path** — path summary, Start, Stop, Clear path, Loop.
+- **Path** — path summary, Start, Stop, Clear path, Loop and **Draw path**.
+  With Draw path off (default), a left click makes the character **walk to
+  that cell immediately** through the DLL's `MOVE` (the client's own MoveTo;
+  if sitting, it stands first). With Draw path on, a click instead adds a
+  waypoint and draws the A* route the bot will follow; Start then runs the
+  bot along it. While the bot is running, clicks add waypoints regardless.
 - **Combat** — Auto-attack, Retaliate, Move first, Skill, Search (target
   radius), Min delay and the skill template. The line under Skill shows the
   selected skill's Skill.dat range/cast/cooldown/MP; Skill `0` follows the
@@ -206,8 +211,8 @@ and the export/import schema.
 The layout is responsive: wide windows show map + sidebar side by side; below
 ~1050 px the map moves above the controls. The map redraws are coalesced at
 ~80 ms instead of one redraw per packet. Right-click removes the last waypoint;
-left-click adds one. The packet **Follow** toggle lives in the Packets tab, not
-in the window header.
+left-click walks there, or adds a waypoint when Draw path is on. The packet
+**Follow** toggle lives in the Packets tab, not in the window header.
 
 | Control | Effect |
 |---|---|

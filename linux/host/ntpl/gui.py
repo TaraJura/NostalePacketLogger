@@ -232,6 +232,7 @@ class Application(Gtk.Application):
         self._target_map_vnums: frozenset[int] | None = None
         self.auto_attack_toggle = None
         self.loop_toggle = None
+        self.draw_path_toggle = None
         self.pickup_toggle = None
         self.recover_toggle = None
         self.attack_unknown_toggle = None
@@ -539,6 +540,14 @@ class Application(Gtk.Application):
         self.loop_toggle.set_active(True)
         self._bind_toggle_color(self.loop_toggle)
         path_box.append(self.loop_toggle)
+        self.draw_path_toggle = Gtk.ToggleButton(label="Draw path")
+        self.draw_path_toggle.set_active(False)
+        self.draw_path_toggle.set_tooltip_text(
+            "On: a map click draws the A* path that Start will make the bot "
+            "follow. Off: the character walks to the clicked cell immediately."
+        )
+        self._bind_toggle_color(self.draw_path_toggle)
+        path_box.append(self.draw_path_toggle)
         sidebar.append(self._frame("Path", path_box))
 
         # Combat.
@@ -781,9 +790,11 @@ class Application(Gtk.Application):
 
         hint = Gtk.Label(
             label=(
-                "Click the map to add waypoints; Start walks the A* path. "
-                "Combat picks the monster hitting you first (Retaliate), then "
-                "the nearest one. Low HP sits until full."
+                "Click the map and the character walks there. Turn on Draw "
+                "path to plan waypoints instead: the A* path is drawn and "
+                "Start makes the bot follow it. Combat picks the monster "
+                "hitting you first (Retaliate), then the nearest one. Low HP "
+                "sits until full."
             )
         )
         hint.set_xalign(0)
@@ -2609,8 +2620,35 @@ class Application(Gtk.Application):
         if not self.map_grid.is_walkable(*cell):
             self._set_status(f"cell {cell} is blocked")
             return
+
+        planning = self.bot_running or (
+            self.draw_path_toggle is not None
+            and self.draw_path_toggle.get_active()
+        )
+        if not planning:
+            # Walk there now through the client's own MoveTo (pathfinding and
+            # animation are the game's). Sitting blocks movement, so stand
+            # first and send the move shortly after the rest echo.
+            if self.engine.world.resting is True:
+                char_id = self._char_id()
+                if char_id is not None:
+                    self._send(f"rest 1 1 {char_id}")
+                    self._set_status(f"standing up, then walking to {cell}")
+                    GLib.timeout_add(700, self._walk_click, cell)
+                    return
+            self._walk_click(cell)
+            return
+
         self.waypoints.append(cell)
         self._rebuild_path()
+        self._set_status(f"path drawn to {cell} — press Start to follow")
+
+    def _walk_click(self, cell: tuple[int, int]) -> bool:
+        """Send the client's MoveTo for a map click (click-to-move mode)."""
+        if not self._client_move(cell[0], cell[1]):
+            return False
+        self._set_status(f"walking to {cell}")
+        return False
 
     # -- map tooltips ---------------------------------------------------
 
