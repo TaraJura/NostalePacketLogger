@@ -23,7 +23,7 @@
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `MOVE` sent, but the character does not move | character is sitting, or the target is blocked | `send "rest 1 1 <charId>"` once; try another adjacent tile |
+| `MOVE` sent, but the character does not move | character is sitting, or the target is blocked | `POS` now reports the rest flag (1 sitting) and `MOVE` returns `character is sitting (stand up first)`; the GUI stands up automatically, for the CLI send `rest 1 1 <charId>` once; then try another adjacent tile |
 | Character teleports instead of walking | a raw `walk` packet was injected; the client did not animate it | use `MOVE` / `ntpl walk`, which calls the client's own MoveTo |
 | `MOVE` returns `client build mismatch` | the client build moved the MoveTo function | re-derive the address (see `docs/protocol/movement.md`); raw packets still work |
 | `POS` returns "not readable" | the client build moved the player object | re-derive `0x792468` and the +4/+6/+0x24 layout |

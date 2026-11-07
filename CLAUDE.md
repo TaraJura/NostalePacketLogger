@@ -101,7 +101,7 @@ PYTHONPATH=linux/host python3 -m ntpl status
   (4096 slots of 2048 bytes each), logs to `C:\NosTalePacketLog.txt`, and serves
   `TYPE|PAYLOAD` lines over TCP `127.0.0.1:47821`. `MOVE|x y` calls the
   client's own MoveTo (`0x565E88`, packed x/y), so movement is pathfound and
-  animated by the game; `POS` reads the local player object; `TARGET|entityId`
+  animated by the game; `POS` reads the local player object (x, y, char id and the rest flag at +0xA9, so a host that attaches while sitting stands up before walking); `TARGET|entityId`
   calls the client's own selector (`0x56964C`, controller `[[0x795200]]`), so
   the client highlights the monster and sends its own `ncif`.
 - **Injector** (`linux/src/injector/`): expands `VirtualAllocEx` +
@@ -236,7 +236,7 @@ PYTHONPATH=linux/host python3 -m ntpl status
   mirroring the original. If crashes appear right after a manual send,
   investigate this first (`docs/hooking.md`).
 - **Movement is client-side.** `MOVE` calls the client's MoveTo (`0x565E88`)
-  from the DLL worker and `POS` reads the local player object; both addresses
+  from the DLL worker and `POS` reads the local player object (including the sit flag); both addresses
   are client-build-specific and prologue-validated. Do not "fix" a walk by
   injecting more `walk` packets: the server moves, the client teleports.
 - **Git:** commit from this directory only. The home directory has a stray

@@ -72,7 +72,7 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `stats` | `CharacterStats(hp, hp_max, mp, mp_max)` from `stat`; drives the bars and recovery |
 | `last_attacker_id` / `last_attacker_at` | last entity that hit the local player and the packet timestamp; Retaliate uses it (5 s window) |
 | `chat` | last 200 `(type, id, message)` tuples from `say` |
-| `resting` | `True` sitting, `False` standing, `None` unknown; from `rest` |
+| `resting` | `True` sitting, `False` standing, `None` unknown; from `rest` and from the `POS` reply (the client's own +0xA9 flag, so an attach-after-sitting is known) |
 | `self_id` | own char id from `at`, `cond` (the live client sends it only for the local player), `rest`, or a matched `tp` |
 | `target_id` | last `ncif` target |
 | `last_skill` | skill vnum from the last `su` |

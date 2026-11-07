@@ -87,7 +87,8 @@ NosTale client** under Wine 11:
   `rest 1 14881134 0`;
 - movement calls the client's own MoveTo through the DLL's `MOVE|x y`; the
   client pathfinds, animates and sends its own `walk` packet. `POS` reads its
-  local position. Injecting a raw `walk` (checksum `1 if (x+y)%3 == 1`) moves
+  local position, char id and sit flag (so a host attaching while sitting
+  stands up before walking). Injecting a raw `walk` (checksum `1 if (x+y)%3 == 1`) moves
   only the server, and the correction teleports the client;
 - the live GUI bot walked `(26,133)→(23,130)` as six client `[SEND] walk`
   packets, with no injected walks, probes or teleports;

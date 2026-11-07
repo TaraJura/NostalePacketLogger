@@ -295,7 +295,7 @@ The recommended setup is still a dedicated prefix.
   checksum `1 if (x + y) % 3 == 1 else 0`, but that still does not animate.
 - The DLL now calls the client's own MoveTo (`0x565E88`) for `MOVE|x y`; the
   client pathfinds, animates and sends its own `walk`. `POS` reads the local
-  position/char id. The live GUI bot walked `(26,133)→(23,130)` as six client
+  position, char id and sit flag. The live GUI bot walked `(26,133)→(23,130)` as six client
   `[SEND] walk` packets, with no injected walks, probes or teleports.
 - The character must be standing; sitting (`rest` state 1) blocks movement.
 - The client's `NStcData.NOS` parsed into 779 grids. Ranking them against the

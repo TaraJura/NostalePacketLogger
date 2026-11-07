@@ -13,5 +13,9 @@ bool client_move(int x, int y, std::string& error);
 // Read the client's own local player position and char id. This is the
 // position the client renders and pathfinds from; it is updated by the
 // client's movement controller, not by injected packets.
-bool client_position(int& x, int& y, unsigned long& char_id,
+//
+// `resting` is 1 when the character sits, 0 when standing, -1 when the client
+// does not expose it. Sitting blocks movement and casting, so the host needs
+// this after attaching to a character that sat before the host connected.
+bool client_position(int& x, int& y, unsigned long& char_id, int& resting,
                      std::string& error);

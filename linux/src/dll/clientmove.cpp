@@ -37,7 +37,7 @@ bool readable(std::uintptr_t address)
 
 }  // namespace
 
-bool client_position(int& x, int& y, unsigned long& char_id,
+bool client_position(int& x, int& y, unsigned long& char_id, int& resting,
                      std::string& error)
 {
     if (!readable(kPlayerGlobal)) {
@@ -53,16 +53,19 @@ bool client_position(int& x, int& y, unsigned long& char_id,
     const std::uintptr_t player =
         *reinterpret_cast<const std::uintptr_t*>(holder);
     if (!readable(player) ||
-        IsBadReadPtr(reinterpret_cast<const void*>(player + 4), 0x24)) {
+        IsBadReadPtr(reinterpret_cast<const void*>(player + 4), 0xA6)) {
         error = "POS: player object not readable";
         return false;
     }
 
     // The local player object this build: int16 x at +4, int16 y at +6,
-    // uint32 char id at +0x24.
+    // uint32 char id at +0x24, rest state at +0xA9 (1 sitting, 0 standing).
     x = *reinterpret_cast<const std::int16_t*>(player + 4);
     y = *reinterpret_cast<const std::int16_t*>(player + 6);
     char_id = *reinterpret_cast<const std::uint32_t*>(player + 0x24);
+    const std::uint8_t rest =
+        *reinterpret_cast<const std::uint8_t*>(player + 0xA9);
+    resting = rest <= 1 ? static_cast<int>(rest) : -1;
     return true;
 }
 
@@ -97,6 +100,14 @@ bool client_move(int x, int y, std::string& error)
         *reinterpret_cast<const std::uintptr_t*>(holder);
     if (!readable(player)) {
         error = "MOVE: player object not readable";
+        return false;
+    }
+
+    // Sitting blocks movement; the client's MoveTo would silently do nothing
+    // (no walk packet), which looks like a stuck bot to the host.
+    if (!IsBadReadPtr(reinterpret_cast<const void*>(player + 0xA9), 1) &&
+        *reinterpret_cast<const std::uint8_t*>(player + 0xA9) == 1) {
+        error = "MOVE: character is sitting (stand up first)";
         return false;
     }
 

@@ -2817,15 +2817,8 @@ class Application(Gtk.Application):
         planning = self.bot_running or draw_path
         if not planning:
             # Walk there now through the client's own MoveTo (pathfinding and
-            # animation are the game's). Sitting blocks movement, so stand
-            # first and send the move shortly after the rest echo.
-            if self.engine.world.resting is True:
-                char_id = self._char_id()
-                if char_id is not None:
-                    self._send(f"rest 1 1 {char_id}")
-                    self._set_status(f"standing up, then walking to {cell}")
-                    GLib.timeout_add(700, self._start_travel, cell)
-                    return
+            # animation are the game's). _start_travel stands the character
+            # up first when POS reports it sitting.
             self._start_travel(cell)
             return
 
@@ -2863,6 +2856,17 @@ class Application(Gtk.Application):
             return False
         if position == cell:
             self._set_status(f"already at {cell}")
+            return False
+        if self.engine.world.resting is True:
+            # Sitting blocks movement; the client's MoveTo would do nothing.
+            char_id = self._char_id()
+            if char_id is None:
+                self._set_status("character is sitting; char id unknown")
+                return False
+            if not self._send(f"rest 1 1 {char_id}"):
+                return False
+            self._set_status(f"standing up, then walking to {cell}")
+            GLib.timeout_add(700, self._start_travel, cell, on_arrival)
             return False
         path = astar(self.map_grid, position, cell)
         if path is None:
@@ -2950,6 +2954,15 @@ class Application(Gtk.Application):
                 self.travel_pending = None
                 return True
             if now - sent_at > TRAVEL_LEG_TIMEOUT_S:
+                if last_leg:
+                    final = (
+                        self.travel_targets[-1]
+                        if self.travel_targets
+                        else target
+                    )
+                    self._stop_travel()
+                    self._set_status(f"walk to {final} timed out; stopped")
+                    return False
                 self.travel_index += 1
                 self.travel_pending = None
                 self._set_status("walk leg timed out; continuing")
@@ -3283,6 +3296,13 @@ class Application(Gtk.Application):
                             self.engine.world.x = x
                             self.engine.world.y = y
                             self.engine.world.self_id = char_id
+                            if len(parts) >= 5:
+                                try:
+                                    rest = int(parts[4])
+                                except ValueError:
+                                    rest = -1
+                                if rest >= 0:
+                                    self.engine.world.resting = bool(rest)
                             self.pos_cell = (x, y)
                             self.pos_at = time.monotonic()
                             self._learn_char_id(char_id)
@@ -3581,12 +3601,6 @@ class Application(Gtk.Application):
             start = self.path_start
             self._set_path_info(f"walking to route start {start}…")
             self._start_travel(start, self._start_bot)
-            # _start_travel always returns False (it doubles as a GLib
-            # timeout callback); a running timer means it started.
-            if self.travel_timer is None:
-                self._set_path_info(
-                    f"could not walk to the route start {start}"
-                )
             return
         # The client's MoveTo already does the pathfinding and animation. Give
         # it a multi-cell leg per call instead of one cell: a per-cell MOVE

@@ -105,15 +105,16 @@ void handle_command(const std::string& command) {
     if (command.compare(0, 3, "POS") == 0) {
         int x = 0;
         int y = 0;
+        int resting = -1;
         unsigned long char_id = 0;
         std::string error;
-        if (!client_position(x, y, char_id, error)) {
+        if (!client_position(x, y, char_id, resting, error)) {
             tcpserver::send_line("STATUS|" + error);
             return;
         }
-        char reply[80] = {0};
-        std::snprintf(reply, sizeof(reply), "STATUS|POS %d %d %lu", x, y,
-                      char_id);
+        char reply[96] = {0};
+        std::snprintf(reply, sizeof(reply), "STATUS|POS %d %d %lu %d", x, y,
+                      char_id, resting);
         tcpserver::send_line(reply);
         return;
     }

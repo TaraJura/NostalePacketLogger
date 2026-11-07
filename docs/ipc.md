@@ -31,7 +31,7 @@ more `|` characters.
 | `SEND|<packet>` | both | DLL → host: the game sent this packet. Host → DLL: inject this packet into the game |
 | `STATUS|<text>` | both | human-readable state, hook addresses, drop counters, errors |
 | `MOVE|<x> <y>` | host → DLL | run the client's own MoveTo/pathfinding, so it walks visibly |
-| `POS` | host → DLL | reply `STATUS|POS <x> <y> <charId>` from the local player object |
+| `POS` | host → DLL | reply `STATUS|POS <x> <y> <charId> <resting>` from the local player object |
 | `TARGET\|<entityId>` | host → DLL | select the entity in the client (target ring + the client's own `ncif`) |
 | `QUIT|` | host → DLL | unhook and stop the server; the module stays mapped until the game exits |
 
@@ -79,12 +79,15 @@ packet injection: an injected `walk` moves only the server and the client
 teleports when the correction arrives.
 
 `POS` reads the local player object (`[[0x792468]]`): int16 x at +4, int16 y
-at +6, uint32 char id at +0x24. The reply is
-`STATUS|POS <x> <y> <charId>`.
+at +6, uint32 char id at +0x24, rest state at +0xA9 (1 sitting, 0 standing).
+The reply is `STATUS|POS <x> <y> <charId> <resting>`; `<resting>` is 1 sitting,
+0 standing, -1 when the client cannot be read. A host that attaches after the
+player sat down otherwise cannot know why `MOVE` does nothing.
 
 Both commands validate the expected client-build prologue/pointers and return
 `STATUS|MOVE: client build mismatch` or `STATUS|POS: ... not readable` instead
-of crashing after a client patch.
+of crashing after a client patch. `MOVE` also refuses while the character is
+sitting: `STATUS|MOVE: character is sitting (stand up first)`.
 
 ### Targeting command
 
