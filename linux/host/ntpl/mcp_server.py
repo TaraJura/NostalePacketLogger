@@ -84,7 +84,7 @@ class Broker:
         self,
         host: str = DEFAULT_HOST,
         port: int | None = None,
-        listen_port: int = BROKER_PORT,
+        listen_port: int | None = BROKER_PORT,
         on_packet: Callable[[Packet], None] | None = None,
         on_status: Callable[[str], None] | None = None,
     ) -> None:
@@ -112,7 +112,8 @@ class Broker:
         threading.Thread(
             target=self._upstream_loop, name="ntpl-broker-up", daemon=True
         ).start()
-        if self.listen_port:
+        # None disables the downstream listener; 0 asks the OS for a port.
+        if self.listen_port is not None:
             threading.Thread(
                 target=self._listen_loop, name="ntpl-broker-listen", daemon=True
             ).start()
@@ -1310,8 +1311,14 @@ def run_mcp(
     map_file: str | None = None,
     log_file: str | None = None,
 ) -> int:
-    """Start the broker + MCP stdio server; returns when stdin closes."""
-    broker = Broker(host, port, listen_port)
+    """Start the broker + MCP stdio server; returns when stdin closes.
+
+    ``listen_port=0`` disables the GUI/CLI rebroadcast (the agent then owns
+    the only DLL connection); any other value is the TCP port to listen on.
+    """
+    broker = Broker(
+        host, port, listen_port=None if listen_port == 0 else listen_port
+    )
     service = GameService(broker, map_file=map_file, log_file=log_file)
     broker.start()
     server = McpServer(service)
