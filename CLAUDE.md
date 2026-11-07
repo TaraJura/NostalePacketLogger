@@ -31,11 +31,11 @@ GUI has no packets.
 |---|---|
 | `windows/` | Original MSVC/C# implementation, moved unchanged. Builds with Visual Studio; not exercised on this machine. |
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
-| Linux host tests | 96/96 pass (`make -C linux host-test`). |
+| Linux host tests | 103/103 pass (`make -C linux host-test`). |
 | Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live 2026-11-07: map **2** NosVille Meadows (150x150), then map 1 NosVille (160x180) via `c_map`; 2026-11-06: map **20** Mountain Cave 1 (230x260). Map names come from `NSlangData_UK.NOS` → `_code_uk_MapIDData.txt` (`zts<id>e<TAB><name>`, 374 entries). `astar()` is 8-direction with sqrt(2) diagonals and no corner cutting; the path is drawn as a continuous polyline. |
 | Monster names | `NSlangData_UK.NOS` / `_code_uk_monster.txt` parsed by `monsternames.py` (nibble codec + archive reader): 2,795 `vnum → name` entries. The live `in 3 206 5122 ...` spawn is entity 5122, Angry Queen Bee (vnum 206); map tooltips use the name. `spawnlog.py` backfills entities that spawned before the host attached from the DLL's `C:\NosTalePacketLog.txt` (`[RECV] in ...` lines). |
 | Spell catalog | `NSgtdData.NOS` → `Skill.dat` parsed by `spells.py`: 1,964 records, 791 active (`TYPE[0]==1`), with name from the `NAME` zts key, MP cost, range, cast time, cooldown and target type. Live examples: 866 Holy Attack (0 MP/0.9 s), 869 Mana Shield (self, 300 MP/60 s), 876 Holy Hammer (145 MP/90 s). The GUI **Add spell…** picker uses it; the bot enforces MP/range/cooldown/cast time. |
-| Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), automatic whole-map (contain-fit) view with no manual map/scale/center controls, **immediate map switch** from `c_map`/`at` (the map id is the second `c_map` field), **attach-time auto-detect** when no map id was seen (all live entities, tightest perfect fit — same-layout maps tie on positions alone), structured sidebar (Character HP/MP bars + recovery banner, Path, Combat with green/red toggles, Targets with an unknown-vnum option, Spells, Loot, Recovery, Configuration), drops + 8-direction A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover + **Move first** (attack while progressing; off = clear the area), monster target filters (all/only/except by vnum), ordered spell rules from the scanned Skill.dat catalog (Always/my HP/my MP, cooldown, MP/range/cast-time checks, monster/self), JSON save/load of the whole bot config, bigger own dot + facing arrow, and hover tooltips for players/monsters/NPCs/drops. **Combat reads Skill.dat:** Skill `0` is the equipped SP card's basic attack, detected from `u_s 0` + `su` (Energy Bolt 260 on the live mage, not the old hardcoded 866), and its range/cast/cooldown/MP drive the attack (range 6 beats Search 10); Min delay (default 1 s) is only a floor. The **Targets** list shows only monster vnums spawned on the current map (selected ones not on it stay marked). A **Map id** box + **Set** in the map header (or `gui --map-id ID`) bridges the attach-after-login case: position-only detection is ambiguous (monsters can stand on blocked cells and several maps fit a local cloud), the label marks a guess `· auto` or a typed id `· manual`, and a server `c_map`/`at` always wins. With no server id the map stays blank ("waiting for the game…") instead of pretending to be map 20. The spell picker always lists all active spells and marks `slot N` / `not learned` (only when `ski` is known) / `slot unknown` (no list — use the spell once or relog); slots are learned from `u_s`/`su` pairs because `ski` is sent at login. `make gui-test` and `make bot-test` (6 smokes) pass. |
+| Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), automatic whole-map (contain-fit) view with no manual map/scale/center controls, **immediate map switch** from `c_map`/`at` (the map id is the second `c_map` field), **attach-time auto-detect** when no map id was seen (all live entities, tightest perfect fit — same-layout maps tie on positions alone), structured sidebar (Character HP/MP bars + recovery banner, Path, Combat with green/red toggles, Targets with an unknown-vnum option, Spells, Loot, Recovery, Configuration), drops + 8-direction A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover + **Move first** (attack while progressing; off = clear the area), monster target filters (all/only/except by vnum), ordered spell rules from the scanned Skill.dat catalog (Always/my HP/my MP, cooldown, MP/range/cast-time checks, monster/self), JSON save/load of the whole bot config, bigger own dot + facing arrow, and hover tooltips for players/monsters/NPCs/drops. **Combat reads Skill.dat:** Skill `0` is the equipped SP card's basic attack, detected from `u_s 0` + `su` (Energy Bolt 260 on the live mage, not the old hardcoded 866), and its range/cast/cooldown/MP drive the attack (range 6 beats Search 10); Min delay (default 1 s) is only a floor. The **Targets** list shows only monster vnums spawned on the current map (selected ones not on it stay marked). At startup the GUI **seeds the map id, position and char id from the DLL log's last `at` + own walks**, so an attach-after-login shows the real map (the label marks a position-only guess `· auto`; with no data the canvas stays blank "waiting for the game…"). **Portals are learned from real crossings**: the cell held when the leaving `c_map`/`mapout` arrives plus the `at` destination, drawn as magenta markers with a "Portal → map N" tooltip and persisted in `~/.config/ntpl/portals.json` (`NTPL_PORTALS` overrides); the client has no static portal table. The spell picker always lists all active spells and marks `slot N` / `not learned` (only when `ski` is known) / `slot unknown` (no list — use the spell once or relog); slots are learned from `u_s`/`su` pairs because `ski` is sent at login. `make gui-test` and `make bot-test` (6 smokes) pass. |
 | x86 hook stubs | `HookStubTest.exe` (Wine) calls the real `hooks.S` detours and verifies the EDX packet pointer at `20(%ebp)`, the original-call replay and the send trampoline. Passes. |
 | GUI | Headless GTK4 smoke test passes (`make -C linux gui-test`, Xvfb): fake stream → 2 rows + STATUS in the status bar. |
 | Injector | Verified under Wine end-to-end against both the fake target and the live client (PID 1216): remote `LoadLibraryA` succeeds and the DLL starts. |
@@ -55,7 +55,7 @@ cd ~/games/gameforge/NostalePacketLogger
 # Linux build (MinGW-w64 i686; installed via apt)
 make -C linux all test-host
 make -C linux check                 # file(1) on the three PE32 outputs
-make -C linux host-test             # 96 stdlib unittest cases
+make -C linux host-test             # 103 stdlib unittest cases
 make -C linux gui-test              # headless GTK4 + map surface smoke
 make -C linux bot-test              # 6 smokes: combat, rules/config, spell order, out-of-range, rejection, recovery
 make -C linux clean
@@ -131,8 +131,9 @@ PYTHONPATH=linux/host python3 -m ntpl status
   captured packet when experimenting.
 - **Map/bot:** `mapdata.py` reads `NostaleData/NStcData.NOS` (16-byte header,
   count, id/offset index, zlib blocks; `width:int16`, `height:int16`,
-  `width*height` terrain bytes; `0x00` walkable). The live map id is **20**,
-  230x260. The Map/Bot tab draws the grid, takes click waypoints, computes an
+  `width*height` terrain bytes; `0x00` walkable). Live 2026-11-07 maps: **98**
+  Comet Meadow (50x45), **103** Deep Cave (55x40), **104** (17x15), and the
+  earlier **2**/1/20. The Map/Bot tab draws the grid, takes click waypoints, computes an
   A* path, and the bot recovers below the HP threshold (sit, wait for full,
   stand), stands (`rest`), picks up own/unowned drops (`get 1 <charId>
   <dropId>`), auto-attacks with Retaliate priority (`ncif` + `u_s`; skill 0 =
@@ -155,6 +156,14 @@ PYTHONPATH=linux/host python3 -m ntpl status
   best; a server map id with no grid in the archive is reported instead of
   showing another map (do not "improve" this back to players-only — the
   NosVille Meadows map 2 is inseparable from 300/5613 with two points).
+  A GUI attached after login now **seeds `map_id`/position/char id from the
+  DLL log's last `at` and own walks** (`spawnlog.load_last_position`) before
+  the position ranking runs, so the guess is only a last resort.
+  **Portals are learned, not static:** on a leaving `c_map`/`mapout` the
+  engine remembers the cell the character stood on; the following `at`
+  supplies the destination (`WorldState.portals`, backfilled from the log by
+  `spawnlog.load_portals` and persisted in `~/.config/ntpl/portals.json`).
+  The map draws them as magenta markers with a "Portal → map N" tooltip.
   **Combat values come from the equipped SP card, not constants:** `u_s 0` is
   answered by `su ... <vnum> ...` (260 = Energy Bolt on the live mage), and
   the Skill.dat record for that vnum gives range (6), cast time (0.8 s),

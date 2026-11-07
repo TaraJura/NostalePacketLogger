@@ -16,6 +16,10 @@ if ! command -v xvfb-run >/dev/null 2>&1; then
     exit 1
 fi
 
+PORTALS="$(mktemp)"
+trap 'rm -f "$PORTALS"' EXIT
+
 exec xvfb-run -a env GDK_BACKEND=x11 \
     PYTHONPATH="$ROOT/host" \
+    NTPL_PORTALS="$PORTALS" \
     python3 "$ROOT/test/gui_smoke.py"

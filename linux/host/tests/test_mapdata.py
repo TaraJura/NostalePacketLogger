@@ -12,6 +12,8 @@ from ntpl.mapdata import (
     choose_map_for_positions,
     find_map_for_positions,
     load_nstc,
+    load_portals,
+    save_portals,
     terrain_rgb,
 )
 
@@ -208,6 +210,28 @@ class LocalArchiveTests(unittest.TestCase):
         # Live 2026-11-06: the character stood and walked around (25,117).
         self.assertTrue(grid.is_walkable(25, 117))
         self.assertTrue(grid.is_walkable(25, 118))
+
+
+class PortalStoreTests(unittest.TestCase):
+    def test_round_trip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "portals.json"
+            save_portals({(103, 20, 20): 104, (104, 11, 9): 103}, path)
+            self.assertEqual(
+                load_portals(path),
+                {(103, 20, 20): 104, (104, 11, 9): 103},
+            )
+
+    def test_missing_file_and_bad_records_are_ignored(self):
+        self.assertEqual(load_portals("/nonexistent/portals.json"), {})
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "portals.json"
+            path.write_text(
+                '{"portals": [{"map": 0, "x": 1, "y": 2, "to": 3},'
+                ' {"map": 5, "x": 6, "y": 7, "to": 8}, "junk"]}',
+                encoding="utf-8",
+            )
+            self.assertEqual(load_portals(path), {(5, 6, 7): 8})
 
 
 if __name__ == "__main__":

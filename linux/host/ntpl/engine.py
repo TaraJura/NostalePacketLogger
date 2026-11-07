@@ -61,6 +61,11 @@ class WorldState:
     facing: tuple[int, int] | None = None
     entities: dict[int, Entity] = field(default_factory=dict)
     drops: dict[int, GroundItem] = field(default_factory=dict)
+    # Portals are server-side warp tiles with no client table; learn them
+    # from real crossings: (mapId, x, y) held when the leaving `c_map`/
+    # `mapout` arrived, plus the destination map from the following `at`.
+    portals: dict[tuple[int, int, int], int] = field(default_factory=dict)
+    pending_departure: tuple[int, int, int] | None = None
     stats: CharacterStats = field(default_factory=CharacterStats)
     chat: deque[tuple[int, int, str]] = field(default_factory=lambda: deque(maxlen=200))
     resting: bool | None = None
@@ -139,11 +144,19 @@ def _on_walk(world: WorldState, packet: Packet) -> None:
         world.x, world.y = coords
 
 
+def _remember_departure(world: WorldState) -> None:
+    """Note where the character stood when the server announced a map exit."""
+    if world.map_id is not None and world.position is not None:
+        world.pending_departure = (world.map_id, world.x, world.y)
+
+
 def _on_map(world: WorldState, packet: Packet) -> None:
     # Live: c_map 0 <mapId> <state> (state 1 = entered, 0 = leaving).
     # The first field is a type, not the map id. Reading it made every map
     # change end with map id 0, so the UI never switched maps.
     values = packet.ints(3)
+    if len(values) >= 3 and values[2] == 0:
+        _remember_departure(world)
     if len(values) >= 2:
         world.map_id = values[1]
     elif values:
@@ -155,6 +168,7 @@ def _on_map(world: WorldState, packet: Packet) -> None:
 def _on_mapout(world: WorldState, packet: Packet) -> None:
     # `mapout` follows the leaving `c_map`, before the new map's `at` and
     # spawns. Drop the old map's entities so the ranking sees only the new map.
+    _remember_departure(world)
     world.entities.clear()
     world.drops.clear()
 
@@ -191,6 +205,13 @@ def _on_position(world: WorldState, packet: Packet) -> None:
     values = packet.ints(4)
     if values:
         map_id = values[1]
+        pending = world.pending_departure
+        if pending is not None:
+            # The `at` after a leaving `c_map`/`mapout` names the destination:
+            # the remembered cell is a portal.
+            if map_id != pending[0]:
+                world.portals[(pending[0], pending[1], pending[2])] = map_id
+            world.pending_departure = None
         if world.map_id is not None and map_id != world.map_id:
             # A map change can be seen here even when the host missed the
             # leading c_map/mapout (for example right after attaching).

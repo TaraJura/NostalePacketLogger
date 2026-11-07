@@ -664,7 +664,7 @@ def cmd_gui(args: argparse.Namespace) -> int:
         )
         return 2
 
-    return run_gui(args.host, args.port, args.map_data, args.log, args.map_id)
+    return run_gui(args.host, args.port, args.map_data, args.log)
 
 
 # --------------------------------------------------------------------- main
@@ -787,13 +787,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="DLL packet log for backfilling entity vnums/names "
         "(default: NTPL_LOG or the Wine prefix's C:\\NosTalePacketLog.txt)",
-    )
-    gui.add_argument(
-        "--map-id",
-        type=int,
-        default=None,
-        help="show this map id until the server sends c_map/at "
-        "(the Set box in the map header does the same live)",
     )
     gui.set_defaults(handler=cmd_gui)
 

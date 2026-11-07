@@ -15,9 +15,19 @@ if ! command -v xvfb-run >/dev/null 2>&1; then
     exit 1
 fi
 
+# The smokes must not read or write the developer's live session: the real
+# DLL log can contain a different SP card (slot 0 -> a spell), a map id or
+# portals, and learned portals must not land in ~/.config/ntpl/portals.json.
+# A fresh empty log and portal file keep every run deterministic.
+LOG="$(mktemp)"
+PORTALS="$(mktemp)"
+trap 'rm -f "$LOG" "$PORTALS"' EXIT
+
 run() {
     xvfb-run -a env GDK_BACKEND=x11 \
         PYTHONPATH="$ROOT/host" \
+        NTPL_LOG="$LOG" \
+        NTPL_PORTALS="$PORTALS" \
         python3 "$ROOT/test/$1"
 }
 

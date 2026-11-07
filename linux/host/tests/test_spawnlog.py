@@ -2,7 +2,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ntpl.spawnlog import load_skill_list, load_skill_slots, load_spawns
+from ntpl.spawnlog import (
+    load_last_position,
+    load_portals,
+    load_skill_list,
+    load_skill_slots,
+    load_spawns,
+)
 
 
 class SpawnLogTests(unittest.TestCase):
@@ -58,11 +64,43 @@ class SpawnLogTests(unittest.TestCase):
         self.assertEqual(self_id, 14881134)
         self.assertEqual(slots, {0: 260, 5: 855})
 
+    def test_reads_the_last_map_position(self):
+        log = self._write(
+            "1 [RECV] at 14881134 103 20 20 2 0 24 1\r\n"
+            "2 [SEND] walk 21 21 1 10\r\n"
+            "3 [RECV] mv 1 14881134 22 22 10\r\n"
+            "4 [RECV] c_map 0 104 1\r\n"
+        )
+        self.assertEqual(load_last_position(log), (104, 22, 22, 14881134))
+
+    def test_reads_portals_from_crossings(self):
+        log = self._write(
+            "1 [RECV] at 14881134 103 20 20 2 0 24 1\r\n"
+            "2 [SEND] walk 20 20 1 10\r\n"
+            "3 [RECV] c_map 0 103 0\r\n"
+            "4 [RECV] mapout\r\n"
+            "5 [RECV] at 14881134 104 11 9 2 0 25 1\r\n"
+            "6 [SEND] walk 11 9 0 10\r\n"
+            "7 [RECV] c_map 0 104 0\r\n"
+            "8 [RECV] at 14881134 103 20 20 2 0 24 1\r\n"
+        )
+        self.assertEqual(
+            load_portals(log),
+            {(103, 20, 20): 104, (104, 11, 9): 103},
+        )
+
     def test_missing_log_is_not_fatal(self):
         self.assertEqual(load_spawns("/nonexistent/NosTalePacketLog.txt"), ({}, {}))
         self.assertEqual(load_skill_list("/nonexistent/NosTalePacketLog.txt"), [])
         self.assertEqual(
             load_skill_slots("/nonexistent/NosTalePacketLog.txt"), ({}, None)
+        )
+        self.assertEqual(
+            load_last_position("/nonexistent/NosTalePacketLog.txt"),
+            (None, None, None, None),
+        )
+        self.assertEqual(
+            load_portals("/nonexistent/NosTalePacketLog.txt"), {}
         )
 
 

@@ -25,7 +25,9 @@ This module is read-only and never touches the game process.
 from __future__ import annotations
 
 import heapq
+import json
 import math
+import os
 import struct
 import zlib
 from dataclasses import dataclass
@@ -296,3 +298,69 @@ def terrain_rgb(value: int | None) -> tuple[int, int, int]:
     if value is None:
         return (0, 0, 0)
     return TERRAIN_COLORS.get(value, TERRAIN_COLORS[0xFF])
+
+
+# -- learned portals ----------------------------------------------------
+#
+# The client has no static portal table: a portal is a server-side warp tile,
+# so the only way to learn one is to stand on it and be teleported. The engine
+# records the cell the character occupied when the server sent the leaving
+# `c_map`/`mapout`, and the destination arrives in the following `at`. These
+# helpers persist that map across GUI runs.
+
+PortalMap = dict[tuple[int, int, int], int]
+
+
+def default_portals_path() -> Path:
+    """``NTPL_PORTALS``, or ``$XDG_CONFIG_HOME/ntpl/portals.json``."""
+    override = os.environ.get("NTPL_PORTALS")
+    if override:
+        return Path(override)
+    base = os.environ.get("XDG_CONFIG_HOME")
+    root = Path(base) if base else Path.home() / ".config"
+    return root / "ntpl" / "portals.json"
+
+
+def load_portals(path: str | Path | None = None) -> PortalMap:
+    """Read ``(mapId, x, y) -> destination mapId``; bad files yield {}."""
+    source = Path(path) if path is not None else default_portals_path()
+    try:
+        data = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    records = data.get("portals", []) if isinstance(data, dict) else []
+    portals: PortalMap = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        try:
+            map_id = int(record["map"])
+            x = int(record["x"])
+            y = int(record["y"])
+            destination = int(record["to"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if map_id > 0 and x >= 0 and y >= 0 and destination > 0:
+            portals[(map_id, x, y)] = destination
+    return portals
+
+
+def save_portals(portals: PortalMap, path: str | Path | None = None) -> None:
+    """Write the portal map atomically; failures are not fatal."""
+    source = Path(path) if path is not None else default_portals_path()
+    try:
+        source.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": 1,
+            "portals": [
+                {"map": map_id, "x": x, "y": y, "to": destination}
+                for (map_id, x, y), destination in sorted(portals.items())
+            ],
+        }
+        temporary = source.with_suffix(source.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
+        os.replace(temporary, source)
+    except OSError:
+        return

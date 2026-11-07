@@ -25,6 +25,11 @@ _SKI_MARKER = "[RECV] ski "
 _AT_MARKER = "[RECV] at "
 _US_MARKER = "[SEND] u_s "
 _SU_MARKER = "[RECV] su "
+_WALK_MARKER = "[SEND] walk "
+_CMAP_MARKER = "[RECV] c_map "
+_MAPOUT_MARKER = "[RECV] mapout"
+_MV_MARKER = "[RECV] mv "
+_TP_MARKER = "[RECV] tp "
 _ENTITY = re.compile(r"^([23]) (\d+) (\d+) ")
 _PLAYER = re.compile(r"^1 (.+) - (\d+) ")
 
@@ -149,6 +154,116 @@ def load_skill_list(
             if vnum not in ordered:
                 ordered.append(vnum)
     return ordered
+
+
+def load_last_position(
+    path: str | Path | None = None,
+) -> tuple[int | None, int | None, int | None, int | None]:
+    """Return ``(map_id, x, y, self_id)`` from the log's last position event.
+
+    A GUI that attaches after login has no `at` yet, so the map auto-detect
+    has to guess. The DLL log already holds the login/map-change `at` and the
+    client's own `walk` packets; seeding the engine with them makes the map
+    authoritative without waiting for another crossing.
+    """
+    source = Path(path) if path is not None else default_log_path()
+    if source is None:
+        return None, None, None, None
+    try:
+        log = open(source, "r", encoding="latin1", errors="replace")
+    except OSError:
+        return None, None, None, None
+
+    map_id: int | None = None
+    x: int | None = None
+    y: int | None = None
+    self_id: int | None = None
+    with log:
+        for line in log:
+            at = _ints_after(line, _AT_MARKER, 4)
+            if at:
+                self_id, map_id, x, y = at
+                continue
+            walk = _ints_after(line, _WALK_MARKER, 2)
+            if walk and walk[0] >= 0 and walk[1] >= 0:
+                x, y = walk
+                continue
+            move = _ints_after(line, _MV_MARKER, 4)
+            if move and move[0] == 1:
+                x, y = move[2], move[3]
+                continue
+            tele = _ints_after(line, _TP_MARKER, 4)
+            if tele and tele[0] == 1:
+                x, y = tele[2], tele[3]
+                continue
+            change = _ints_after(line, _CMAP_MARKER, 3)
+            if change and change[2] == 1:
+                map_id = change[1]
+
+    return map_id, x, y, self_id
+
+
+def load_portals(
+    path: str | Path | None = None,
+) -> dict[tuple[int, int, int], int]:
+    """Return ``(mapId, x, y) -> destination`` learned from the log.
+
+    A portal is a server-side warp tile, so the client has no table for it.
+    The last own position before a leaving `c_map`/`mapout` is the portal
+    cell; the following `at` names the destination map. Parsing the log lets
+    a fresh GUI show the portals crossed earlier in the same session.
+    """
+    source = Path(path) if path is not None else default_log_path()
+    portals: dict[tuple[int, int, int], int] = {}
+    if source is None:
+        return portals
+    try:
+        log = open(source, "r", encoding="latin1", errors="replace")
+    except OSError:
+        return portals
+
+    last: tuple[int, int] | None = None
+    pending: tuple[int, int, int] | None = None  # from map, x, y
+    with log:
+        for line in log:
+            walk = _ints_after(line, _WALK_MARKER, 2)
+            if walk and walk[0] >= 0 and walk[1] >= 0:
+                last = (walk[0], walk[1])
+                continue
+            move = _ints_after(line, _MV_MARKER, 4)
+            if move and move[0] == 1:
+                last = (move[2], move[3])
+                continue
+            tele = _ints_after(line, _TP_MARKER, 4)
+            if tele and tele[0] == 1:
+                last = (tele[2], tele[3])
+                continue
+
+            change = _ints_after(line, _CMAP_MARKER, 3)
+            if change:
+                _kind, changed_map, state = change
+                if state == 0 and last is not None:
+                    pending = (changed_map, last[0], last[1])
+                elif (
+                    state == 1
+                    and pending is not None
+                    and changed_map != pending[0]
+                ):
+                    portals[(pending[0], pending[1], pending[2])] = changed_map
+                    pending = None
+                continue
+            if _MAPOUT_MARKER in line:
+                continue
+
+            at = _ints_after(line, _AT_MARKER, 4)
+            if at:
+                _char_id, at_map, at_x, at_y = at
+                if pending is not None and at_map != pending[0]:
+                    portals[(pending[0], pending[1], pending[2])] = at_map
+                    pending = None
+                last = (at_x, at_y)
+
+    return portals
 
 
 def load_skill_slots(

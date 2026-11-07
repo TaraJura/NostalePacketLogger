@@ -80,7 +80,10 @@ Names come from `NSlangData_UK.NOS` → `_code_uk_MapIDData.txt`
 5. Server sends the new map's entities as `in`/`mv` packets.
 
 The GUI/engine switch on the `at`/`c_map` pair; stale entities from the old
-map are dropped on `c_map` and `mapout`.
+map are dropped on `c_map` and `mapout`. The cell the character held when the
+leaving `c_map`/`mapout` arrived is where the portal is; the following `at`
+supplies the destination map, so the engine records it as a portal (the
+client has no static portal table).
 
 Captured live on 2026-11-07 (NosVille Meadows → NosVille and back):
 

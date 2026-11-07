@@ -354,5 +354,37 @@ class SkillSlotLearningTests(unittest.TestCase):
         self.assertIsNone(world.resting)
 
 
+class PortalLearningTests(unittest.TestCase):
+    """A portal is a server-side warp tile, learned from an actual crossing."""
+
+    def setUp(self):
+        self.engine = Engine()
+        self.engine.feed(
+            packet(Kind.RECV, "at 14881134 103 20 20 2 0 24 1 -1 0 0")
+        )
+
+    def test_crossing_records_the_departure_cell(self):
+        self.engine.feed(packet(Kind.SEND, "walk 20 20 1 10"))
+        self.engine.feed(packet(Kind.RECV, "c_map 0 103 0"))
+        self.engine.feed(packet(Kind.RECV, "mapout"))
+        world = self.engine.feed(
+            packet(Kind.RECV, "at 14881134 104 11 9 2 0 25 1 -1 0 0")
+        )
+        self.assertEqual(world.portals, {(103, 20, 20): 104})
+
+    def test_plain_teleport_without_leaving_map_is_not_a_portal(self):
+        world = self.engine.feed(
+            packet(Kind.RECV, "at 14881134 104 11 9 2 0 25 1 -1 0 0")
+        )
+        self.assertEqual(world.portals, {})
+
+    def test_same_map_at_clears_the_pending_departure(self):
+        self.engine.feed(packet(Kind.RECV, "c_map 0 103 0"))
+        self.engine.feed(
+            packet(Kind.RECV, "at 14881134 103 21 21 2 0 24 1 -1 0 0")
+        )
+        self.assertEqual(self.engine.world.portals, {})
+
+
 if __name__ == "__main__":
     unittest.main()

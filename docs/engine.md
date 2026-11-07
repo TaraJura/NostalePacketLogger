@@ -65,6 +65,7 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `facing` | last movement direction `(dx, dy)`, each -1/0/1; drives the GUI arrow; `None` until the first walk |
 | `entities` | `dict[int, Entity]` keyed by **entityId** (never vnum) |
 | `drops` | `dict[int, GroundItem]` keyed by drop id: item vnum, x, y, amount, owner char id |
+| `portals` | `(mapId, x, y) → destination mapId` learned from real crossings (the cell held when the leaving `c_map`/`mapout` arrived, plus the following `at`) |
 | `stats` | `CharacterStats(hp, hp_max, mp, mp_max)` from `stat`; drives the bars and recovery |
 | `last_attacker_id` / `last_attacker_at` | last entity that hit the local player and the packet timestamp; Retaliate uses it (5 s window) |
 | `chat` | last 200 `(type, id, message)` tuples from `say` |
@@ -220,12 +221,18 @@ follows the equipped SP card, whose vnum is learned from `u_s 0` + `su`.
 the skill's own range. The **Targets** list shows the monster vnums currently
 spawned on the loaded map (plus selected entries marked "not on this map"),
 not the 2,795-entry catalog, so the list matches what is around the character.
-The map header has a **Map id** box + **Set** (also `gui --map-id ID`): when
-no `c_map`/`at` has been seen, position-only detection is a guess (monsters
-may stand on blocked cells and several maps can fit the same local cloud), so
-a typed id is honoured until the server sends one; the label shows `· auto`
-for a guess and `· manual` for a typed id. With no id the canvas stays blank
-and the info says "waiting for the game…" rather than showing a default map.
+On startup the GUI **seeds `map_id`, position and char id from the DLL log's
+last `at` plus the client's own `walk` lines** (`spawnlog.load_last_position`),
+so a window attached after login shows the real map instead of guessing; the
+position ranking is only the fallback when the log has no `at`. With no data
+the canvas stays blank and the info says "waiting for the game…".
+**Portals are learned from crossings**, because the client has no static
+portal table: when the leaving `c_map`/`mapout` arrives, the engine remembers
+`(map, x, y)`; the following `at` names the destination and the pair is stored
+in `WorldState.portals`. `spawnlog.load_portals` backfills the session's
+crossings, and the GUI persists them to `~/.config/ntpl/portals.json`
+(`NTPL_PORTALS` overrides), drawing them as magenta markers with a
+"Portal → map N" tooltip.
 The sidebar also owns the bot configuration:
 
 - `monsternames.py` — `vnum → monster name` and skill descriptions from

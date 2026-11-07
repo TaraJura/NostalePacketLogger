@@ -71,6 +71,7 @@ map 2 wins outright.
 | `find_map_for_positions(grids, points)` | rank maps for live coordinates |
 | `choose_map_for_positions(grids, points, current_id)` | pick one map: tightest perfect fit, keep a tied current |
 | `terrain_rgb(value)` | palette colour |
+| `load_portals(path)` / `save_portals(portals, path)` | persisted learned portals (`(mapId, x, y) → destination`), `NTPL_PORTALS` overrides the default `~/.config/ntpl/portals.json` |
 
 Override the archive path with `NTPL_NSTC` or `--file`.
 
@@ -159,15 +160,20 @@ grouped by function:
   `mapout` → `at <charId> <newMap> …` → `c_map 0 <newMap> 1`; the GUI switches
   on the `c_map`/`at` pair as soon as the packet arrives (the 2 s auto-map
   tick remains only as a fallback). Note that the map id is the **second**
-  `c_map` field — the first is a type.
+  `c_map` field — the first is a type. A GUI started mid-session seeds the map
+  from the DLL log's last `at`, and the cell held when leaving a map is
+  remembered as a **portal** (magenta marker, "Portal → map N" tooltip,
+  persisted in `~/.config/ntpl/portals.json`).
 - **Character** — live HP and MP bars with current/max/missing values, plus
   map/position/char id. HP and MP are fed by the server's `stat` packets.
   While recovering, a red **RECOVERING** banner states the HP percentage and
   that attacks/movement are paused; all toggle buttons are green when active
   and red when off.
 - **Path** — path summary, Start, Stop, Clear path, Loop.
-- **Combat** — Auto-attack, Retaliate, Skill, Range, Cooldown and the skill
-  template.
+- **Combat** — Auto-attack, Retaliate, Move first, Skill, Search (target
+  radius), Min delay and the skill template. The line under Skill shows the
+  selected skill's Skill.dat range/cast/cooldown/MP; Skill `0` follows the
+  equipped SP card (the server reports its vnum for `u_s 0`).
 - **Targets** — monster filter: all monsters, only the selected templates, or
   all except the selected ones. Search the client's monster table by name or
   vnum, or add a vnum manually. **Also attack monsters with unknown vnum**
@@ -198,7 +204,7 @@ in the window header.
 | Auto-recover | below the HP threshold, sit and wait for full HP, then stand |
 | Below HP % | recovery threshold (default 30) |
 | Pickup / Loot | pick up your own/unowned drops within the radius |
-| Skill | skill vnum (default **0** = normal/basic attack; the client sends `u_s 0 3 <monster>` and the server reports the basic skill, e.g. 866, in `su`) |
+| Skill | skill vnum (default **0** = the equipped SP card's basic attack; the client sends `u_s 0 3 <monster>` and the server reports the card's skill in `su`, e.g. 260 Energy Bolt or 855 Fire Bolt) |
 | Range / Cooldown | attack radius and seconds between attacks |
 | Loop | repeat the path when it finishes |
 | Targets | all / only selected / all except selected monster templates (`vnum`); Retaliate respects the same filter |
@@ -369,7 +375,17 @@ is sent and the status says “not attacking”. See
 
 ## Live status
 
-- Map **20** is current; 100 % of 173,503 `mv` samples are on walkable cells.
+- Live maps on 2026-11-07: **98** Comet Meadow (50x45), **103** Deep Cave
+  (55x40) and **104** (17x15); earlier that day map 2/1, and map 20 on
+  2026-11-06 (100 % of 173,503 `mv` samples on walkable cells there).
+- Portals are learned live: at 15:49 the character crossed 103 → 104 from
+  (20,20) and returned from (11,9); the GUI learned `(103,20,20)→104` and
+  `(104,11,9)→103`, drew both and persisted them. The client has no static
+  portal table — the departure cell plus the following `at` is the source.
+- The basic skill follows the equipped SP card: `u_s 0` was answered with
+  `su ... 260 ...` (Energy Bolt, range 6/cast 0.8 s/CD 0.5 s/0 MP) and later
+  with `su ... 855 ...` (Fire Bolt, 40 MP) after a card change; the Combat box
+  follows the new Skill.dat record automatically.
 - Client-side walking was verified live on 2026-11-06. The GUI bot walked a
   six-cell A* path `(21,141)→(18,138)` via the checksum/probe method, then a
   second six-cell path `(26,133)→(23,130)` through the client's own MoveTo:

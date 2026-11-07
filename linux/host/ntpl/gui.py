@@ -42,10 +42,18 @@ from .mapdata import (
     astar,
     choose_map_for_positions,
     load_nstc,
+    load_portals as load_saved_portals,
+    save_portals,
     terrain_rgb,
 )
 from .monsternames import load_monster_names, load_skill_descriptions
-from .spawnlog import load_skill_list, load_skill_slots, load_spawns
+from .spawnlog import (
+    load_last_position,
+    load_portals as load_log_portals,
+    load_skill_list,
+    load_skill_slots,
+    load_spawns,
+)
 from .spells import SpellInfo, load_spells
 from .protocol import Kind, Packet, ProtocolError
 
@@ -125,7 +133,6 @@ class Application(Gtk.Application):
         map_data: str | None = None,
         unique: bool = True,
         log_file: str | None = None,
-        initial_map_id: int | None = None,
     ) -> None:
         super().__init__(
             application_id="cz.tarajura.ntpl",
@@ -166,8 +173,7 @@ class Application(Gtk.Application):
         self.map_grids: dict[int, MapGrid] = {}
         self.map_grid: MapGrid | None = None
         self.map_source: str | None = None
-        self.map_override: int | None = None
-        self.initial_map_id = initial_map_id
+        self.portals = load_saved_portals()
         self.monster_names: dict[int, str] = {}
         self.spell_descriptions: dict[int, str] = {}
         self.spells: dict[int, SpellInfo] = {}
@@ -296,9 +302,11 @@ class Application(Gtk.Application):
         window.set_child(root)
         window.present()
 
+        # Spawns first: the log also seeds the map id and position, so the
+        # map page can select the right grid immediately.
+        self._ensure_spawns_loaded()
         self._ensure_map_loaded()
         self._ensure_monster_names()
-        self._ensure_spawns_loaded()
         # Skill.dat decodes 1.2 MB of nibble-coded text (~1.5 s). Do it off
         # the main loop so the window and the packet drain stay responsive.
         self._ensure_spells_loaded()
@@ -435,25 +443,6 @@ class Application(Gtk.Application):
         self.map_info.set_xalign(0)
         self.map_info.set_hexpand(True)
         top.append(self.map_info)
-        # Position-only auto-detection is ambiguous while the server has not
-        # sent `c_map`/`at` (a late attach sees only monsters, some of them on
-        # blocked cells). A manual id is the escape hatch; a server id always
-        # wins once it arrives.
-        self.map_id_entry = Gtk.Entry()
-        self.map_id_entry.set_width_chars(6)
-        self.map_id_entry.set_placeholder_text("map id")
-        self.map_id_entry.set_tooltip_text(
-            "force the map id until the server sends c_map/at"
-        )
-        self.map_id_entry.connect(
-            "activate", lambda *_: self._apply_map_override()
-        )
-        map_set = Gtk.Button(label="Set")
-        map_set.set_tooltip_text("show this map id")
-        map_set.connect("clicked", lambda *_: self._apply_map_override())
-        top.append(Gtk.Label(label="Map"))
-        top.append(self.map_id_entry)
-        top.append(map_set)
         map_box.append(top)
 
         self.map_area = Gtk.DrawingArea()
@@ -474,6 +463,7 @@ class Application(Gtk.Application):
             '<span foreground="#ff7322">●</span> monster   '
             '<span foreground="#33e633">●</span> player   '
             '<span foreground="#4d80ff">●</span> NPC/pet   '
+            '<span foreground="#d933f2">◉</span> portal   '
             '<span foreground="#ffd91a">●</span> drop   '
             '<span foreground="#00e5e5">·</span> path'
         )
@@ -873,6 +863,25 @@ class Application(Gtk.Application):
         self.log_vnums, self.log_names = load_spawns(self.log_file)
         self.log_skill_list = load_skill_list(self.log_file)
         self.log_skill_slots, _ = load_skill_slots(self.log_file)
+        # A GUI attached after login has no map id yet. The log's last `at`
+        # and the client's own walks already say where the character is, so
+        # seed the world instead of guessing from monster positions.
+        map_id, x, y, char_id = load_last_position(self.log_file)
+        world = self.engine.world
+        if world.map_id is None and map_id is not None:
+            world.map_id = map_id
+            if x is not None and y is not None:
+                world.x, world.y = x, y
+            if char_id is not None:
+                world.self_id = char_id
+                self._learn_char_id(char_id)
+        merged = False
+        for key, destination in load_log_portals(self.log_file).items():
+            if self.portals.get(key) != destination:
+                self.portals[key] = destination
+                merged = True
+        if merged:
+            save_portals(self.portals)
 
     # -- target filter --------------------------------------------------
 
@@ -1109,6 +1118,15 @@ class Application(Gtk.Application):
         """Refresh the combat line and the on-map target list once a second."""
         if self._closing:
             return False
+        merged = False
+        for key, destination in self.engine.world.portals.items():
+            if self.portals.get(key) != destination:
+                self.portals[key] = destination
+                merged = True
+        if merged:
+            save_portals(self.portals)
+            if self.map_area is not None:
+                self.map_area.queue_draw()
         self._update_combat_info()
         vnums = self._on_map_monster_vnums()
         if vnums != self._target_map_vnums:
@@ -1919,33 +1937,13 @@ class Application(Gtk.Application):
                 self.map_info.set_text(str(exc))
             return
 
-        if self.initial_map_id in self.map_grids:
-            self.map_override = self.initial_map_id
-            self._select_map(self.initial_map_id, source="manual")
-        elif self.engine.world.map_id in self.map_grids:
+        if self.engine.world.map_id in self.map_grids:
             self._select_map(self.engine.world.map_id)
         elif self.map_info is not None:
             # No server map id yet (the window opened before the DLL/injection
             # or before login). Do not invent map 20: the auto-map tick picks
             # a map as soon as `c_map`/`at` or live positions arrive.
             self.map_info.set_text("waiting for the game…")
-
-    def _apply_map_override(self) -> None:
-        """Show a map id the user typed; the server id still wins later."""
-        if self.map_id_entry is None:
-            return
-        text = self.map_id_entry.get_text().strip()
-        try:
-            map_id = int(text)
-        except ValueError:
-            self._set_status("map id must be a number")
-            return
-        if map_id not in self.map_grids:
-            self._set_status(f"map {map_id} has no grid in {self.map_file}")
-            return
-        self.map_override = map_id
-        self._select_map(map_id, source="manual")
-        self._set_status(f"map set to {map_id}")
 
     def _select_map(self, map_id: int, source: str = "server") -> None:
         grid = self.map_grids.get(map_id)
@@ -1968,7 +1966,7 @@ class Application(Gtk.Application):
         self._update_map_size()
         total = grid.width * grid.height
         walkable = grid.walkable_count()
-        suffix = {"auto": " · auto", "manual": " · manual"}.get(source, "")
+        suffix = " · auto" if source == "auto" else ""
         self.map_info.set_text(
             f"map {grid.map_id}: {grid.width}x{grid.height}, "
             f"walkable {100 * walkable / total:.1f}%{suffix}"
@@ -2188,9 +2186,6 @@ class Application(Gtk.Application):
             return True
         world = self.engine.world
         if world.map_id is not None:
-            # The server is authoritative: a manual id only bridges the gap
-            # until the first c_map/at.
-            self.map_override = None
             if world.map_id in self.map_grids:
                 if (
                     self.map_grid is None
@@ -2206,8 +2201,6 @@ class Application(Gtk.Application):
                 self._set_status(
                     f"map {world.map_id} has no grid in {self.map_file}"
                 )
-            return True
-        if self.map_override is not None:
             return True
         points = self._live_points()
         if self.map_grid is None:
@@ -2388,6 +2381,22 @@ class Application(Gtk.Application):
             context.set_line_width(1.0)
             context.stroke()
 
+        # learned portals: the cell that teleported us, as a magenta target
+        for (portal_map, px, py), _destination in self.portals.items():
+            if portal_map != grid.map_id:
+                continue
+            if not (0 <= px < grid.width and 0 <= py < grid.height):
+                continue
+            cx = px * scale + scale / 2
+            cy = py * scale + scale / 2
+            radius = max(4.5, scale * 0.9)
+            context.set_source_rgba(0.85, 0.2, 0.95, 1.0)
+            context.arc(cx, cy, radius, 0, 2 * math.pi)
+            context.fill()
+            context.set_source_rgba(1.0, 1.0, 1.0, 1.0)
+            context.arc(cx, cy, radius * 0.45, 0, 2 * math.pi)
+            context.fill()
+
         # own character: a bigger dot plus a facing arrow. The arrow is drawn
         # first so the dot covers its base.
         own = self._player_cell()
@@ -2564,6 +2573,17 @@ class Application(Gtk.Application):
             distance = math.hypot(x - cx, y - cy)
             if distance <= radius and (best is None or distance < best[0]):
                 best = (distance, self._drop_tooltip_text(drop))
+
+        for (portal_map, px, py), destination in self.portals.items():
+            if portal_map != self.map_grid.map_id:
+                continue
+            cx, cy = self._map_cell_screen(px, py)
+            distance = math.hypot(x - cx, y - cy)
+            if distance <= radius and (best is None or distance < best[0]):
+                best = (
+                    distance,
+                    f"Portal\nposition {px}, {py}\nto map {destination}",
+                )
 
         return best[1] if best is not None else None
 
@@ -3345,9 +3365,6 @@ def run_gui(
     port: int | None = None,
     map_data: str | None = None,
     log_file: str | None = None,
-    map_id: int | None = None,
 ) -> int:
-    app = Application(
-        host, port, map_data, log_file=log_file, initial_map_id=map_id
-    )
+    app = Application(host, port, map_data, log_file=log_file)
     return int(app.run([]))
