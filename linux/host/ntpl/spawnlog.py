@@ -31,6 +31,7 @@ _MAPOUT_MARKER = "[RECV] mapout"
 _MV_MARKER = "[RECV] mv "
 _TP_MARKER = "[RECV] tp "
 _GP_MARKER = "[RECV] gp "
+_WP_MARKER = "[RECV] wp "
 _ENTITY = re.compile(r"^([23]) (\d+) (\d+) ")
 _PLAYER = re.compile(r"^1 (.+) - (\d+) ")
 
@@ -244,6 +245,52 @@ def load_gates(
                 if x >= 0 and y >= 0 and destination > 0:
                     gates[(current_map, x, y)] = destination
     return gates
+
+
+def load_timespaces(
+    path: str | Path | None = None,
+) -> dict[tuple[int, int, int], tuple[int, int, int, int]]:
+    """Return ``(mapId, x, y) -> (tsId, flag, minLevel, maxLevel)`` from `wp`.
+
+    The server sends a map's Time-Space entrances right after entering it::
+
+        wp <x> <y> <tsId> <flag> <minLevel> <maxLevel>
+
+    It carries no map id, so the last `at` or entering `c_map` gives it.
+    Live map 4: ``wp 35 142 16 4 26 99`` … ``wp 229 33 704 0 90 99``.
+    """
+    source = Path(path) if path is not None else default_log_path()
+    timespaces: dict[tuple[int, int, int], tuple[int, int, int, int]] = {}
+    if source is None:
+        return timespaces
+    try:
+        log = open(source, "r", encoding="latin1", errors="replace")
+    except OSError:
+        return timespaces
+
+    current_map: int | None = None
+    with log:
+        for line in log:
+            change = _ints_after(line, _CMAP_MARKER, 3)
+            if change:
+                if change[2] == 1:
+                    current_map = change[1]
+                continue
+            at = _ints_after(line, _AT_MARKER, 4)
+            if at:
+                current_map = at[1]
+                continue
+            entry = _ints_after(line, _WP_MARKER, 6)
+            if entry and current_map is not None:
+                x, y, ts_id, flag, min_level, max_level = entry
+                if x >= 0 and y >= 0 and ts_id > 0:
+                    timespaces[(current_map, x, y)] = (
+                        ts_id,
+                        flag,
+                        min_level,
+                        max_level,
+                    )
+    return timespaces
 
 
 def load_portals(

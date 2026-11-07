@@ -390,6 +390,22 @@ class PortalLearningTests(unittest.TestCase):
         )
         self.assertEqual(self.engine.world.portals, {})
 
+    def test_waypoint_list_adds_every_timespace(self):
+        # `wp` also carries no map id: it follows `at` on map entry.
+        self.engine.feed(
+            packet(Kind.RECV, "at 14881134 4 28 178 2 0 2 1 -1 0 0")
+        )
+        for line in ("wp 35 142 16 4 26 99", "wp 229 33 704 0 90 99"):
+            world = self.engine.feed(packet(Kind.RECV, line))
+        entry = world.timespaces[(4, 35, 142)]
+        self.assertEqual(
+            (entry.ts_id, entry.min_level, entry.max_level), (16, 26, 99)
+        )
+        entry = world.timespaces[(4, 229, 33)]
+        self.assertEqual(
+            (entry.ts_id, entry.min_level, entry.max_level), (704, 90, 99)
+        )
+
     def test_gate_list_adds_every_portal_on_the_map(self):
         # `gp` carries no map id: it arrives after `at` on map entry.
         self.engine.feed(

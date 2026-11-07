@@ -59,6 +59,7 @@ from .spawnlog import (
     load_skill_list,
     load_skill_slots,
     load_spawns,
+    load_timespaces,
 )
 from .spells import SpellInfo, load_spells
 from .protocol import Kind, Packet, ProtocolError
@@ -185,6 +186,8 @@ class Application(Gtk.Application):
         self.map_grid: MapGrid | None = None
         self.map_source: str | None = None
         self.portals = normalize_portals(load_saved_portals())
+        # `wp` Time-Space entrances: (map, x, y) -> (ts_id, minLv, maxLv).
+        self.timespaces: dict[tuple[int, int, int], tuple[int, int, int]] = {}
         self._timespace_icon: cairo.ImageSurface | None = None
         self._timespace_icon_loaded = False
         self.monster_names: dict[int, str] = {}
@@ -906,6 +909,15 @@ class Application(Gtk.Application):
             merged = True
         if merged:
             save_portals(self.portals)
+        for (map_id, x, y), entry in load_timespaces(
+            self.log_file
+        ).items():
+            ts_id, _flag, min_level, max_level = entry
+            self.timespaces[(map_id, x, y)] = (
+                ts_id,
+                min_level,
+                max_level,
+            )
 
     # -- target filter --------------------------------------------------
 
@@ -1153,6 +1165,11 @@ class Application(Gtk.Application):
         if normalized != self.portals:
             self.portals = normalized
             merged = True
+        for (map_id, x, y), entry in self.engine.world.timespaces.items():
+            value = (entry.ts_id, entry.min_level, entry.max_level)
+            if self.timespaces.get((map_id, x, y)) != value:
+                self.timespaces[(map_id, x, y)] = value
+                merged = True
         if merged:
             save_portals(self.portals)
             if self.map_area is not None:
@@ -2450,6 +2467,13 @@ class Application(Gtk.Application):
             context.arc(cx, cy, radius + max(1.5, scale * 0.3), 0, 2 * math.pi)
             context.stroke()
 
+        # Time-Space entrances from `wp`; used below to avoid drawing a
+        # duplicate generic instance marker at the same gate.
+        timespace_cells = {
+            (x, y)
+            for (map_id, x, y) in self.timespaces
+            if map_id == grid.map_id
+        }
         # Portals: a ring with a diamond centre, drawn after the own marker so
         # a portal under or next to the character stays visible (a filled dot
         # would be hidden by the own dot). Magenta is a normal map portal;
@@ -2463,6 +2487,11 @@ class Application(Gtk.Application):
             cx = px * scale + scale / 2
             cy = py * scale + scale / 2
             if is_time_space_map(destination):
+                if any(
+                    abs(px - tx) <= 2 and abs(py - ty) <= 2
+                    for tx, ty in timespace_cells
+                ):
+                    continue
                 self._draw_timespace_icon(
                     context, cx, cy, scale, own == (px, py)
                 )
@@ -2481,6 +2510,21 @@ class Application(Gtk.Application):
             context.line_to(cx - size, cy)
             context.close_path()
             context.fill()
+
+        # Time-Space entrances from the server's `wp` list, drawn last so they
+        # stay on top. The tooltip carries the TS id and level range.
+        for (map_id, tx, ty), _entry in self.timespaces.items():
+            if map_id != grid.map_id:
+                continue
+            if not (0 <= tx < grid.width and 0 <= ty < grid.height):
+                continue
+            self._draw_timespace_icon(
+                context,
+                tx * scale + scale / 2,
+                ty * scale + scale / 2,
+                scale,
+                own == (tx, ty),
+            )
 
         context.restore()
 
@@ -2678,6 +2722,20 @@ class Application(Gtk.Application):
             distance = math.hypot(x - cx, y - cy)
             if distance <= radius and (best is None or distance < best[0]):
                 best = (distance, self._drop_tooltip_text(drop))
+
+        for (map_id, tx, ty), entry in self.timespaces.items():
+            if map_id != self.map_grid.map_id:
+                continue
+            ts_id, min_level, max_level = entry
+            cx, cy = self._map_cell_screen(tx, ty)
+            distance = math.hypot(x - cx, y - cy)
+            if distance <= radius and (best is None or distance < best[0]):
+                best = (
+                    distance,
+                    f"Time-Space {ts_id}\n"
+                    f"Level {min_level}-{max_level}\n"
+                    f"position {tx}, {ty}",
+                )
 
         for (portal_map, px, py), destination in self.portals.items():
             if portal_map != self.map_grid.map_id:

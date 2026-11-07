@@ -43,6 +43,18 @@ class GroundItem:
     owner_id: int = 0
 
 
+@dataclass(frozen=True)
+class TimeSpace:
+    """One Time-Space entrance from the server's `wp` list."""
+
+    map_id: int
+    x: int
+    y: int
+    ts_id: int
+    min_level: int
+    max_level: int
+
+
 @dataclass
 class CharacterStats:
     hp: int = 0
@@ -69,6 +81,12 @@ class WorldState:
     gates: dict[tuple[int, int, int], int] = field(default_factory=dict)
     portals: dict[tuple[int, int, int], int] = field(default_factory=dict)
     pending_departure: tuple[int, int, int] | None = None
+    # `wp <x> <y> <tsId> <flag> <minLevel> <maxLevel>`: the map's Time-Space
+    # entrances, sent on entry with the gp list. Live map 4 has TS 16, 17,
+    # 19, 20, 21, 22 and 704; the ids and levels match the in-game list.
+    timespaces: dict[tuple[int, int, int], TimeSpace] = field(
+        default_factory=dict
+    )
     stats: CharacterStats = field(default_factory=CharacterStats)
     chat: deque[tuple[int, int, str]] = field(default_factory=lambda: deque(maxlen=200))
     resting: bool | None = None
@@ -379,6 +397,23 @@ def _on_gate(world: WorldState, packet: Packet) -> None:
         world.gates[(world.map_id, x, y)] = destination
 
 
+def _on_waypoint(world: WorldState, packet: Packet) -> None:
+    # wp <x> <y> <tsId> <flag> <minLevel> <maxLevel> -- the map's Time-Space
+    # entrances. Like `gp` it carries no map id; it follows the entering
+    # c_map/at. Live 2026-11-07 on map 4:
+    #   wp 35 142 16 4 26 99
+    #   wp 229 33 704 0 90 99
+    values = packet.ints(6)
+    if not values or world.map_id is None:
+        return
+    x, y, ts_id, _flag, min_level, max_level = values
+    if x < 0 or y < 0 or ts_id <= 0:
+        return
+    world.timespaces[(world.map_id, x, y)] = TimeSpace(
+        world.map_id, x, y, ts_id, min_level, max_level
+    )
+
+
 def _on_skill_list(world: WorldState, packet: Packet) -> None:
     # ski <page> <vnum> <vnum> ... ; duplicates are skill ranks/variants.
     # The client's u_s slot is the index in the deduplicated, page-ordered
@@ -500,6 +535,7 @@ class Engine:
                 "ncif": _on_select,     # SEND: target selection
                 "u_s": _on_skill_send,  # SEND: skill used (slot, not vnum)
                 "gp": _on_gate,         # RECV: the map's portal list
+                "wp": _on_waypoint,     # RECV: the map's Time-Space list
                 "ski": _on_skill_list,  # RECV: learned skill list
                 "su": _on_skill_used,   # RECV: a skill hit
                 "stat": _on_stats,      # RECV: own hp/mp

@@ -467,6 +467,7 @@ class GameService:
                 "entities": len(world.entities),
                 "drops": len(world.drops),
                 "portals": self._portal_rows(world.map_id),
+                "timespaces": self._timespace_rows(world.map_id),
             }
 
     def game_entities(
@@ -542,6 +543,15 @@ class GameService:
                 )
             rows.sort(key=lambda row: (row["distance"] or 0, row["drop_id"]))
             return {"count": len(rows), "drops": rows}
+
+    def game_timespaces(self, map_id: int | None = None) -> dict[str, Any]:
+        with self.lock:
+            current = self._world().map_id
+        target = current if map_id is None else map_id
+        return {
+            "map_id": target,
+            "timespaces": self._timespace_rows(target),
+        }
 
     def game_map(self, map_id: int | None = None) -> dict[str, Any]:
         with self.lock:
@@ -905,6 +915,25 @@ class GameService:
         rows.sort(key=lambda row: (row["y"], row["x"]))
         return rows
 
+    def _timespace_rows(self, map_id: int | None) -> list[dict[str, int]]:
+        if map_id is None:
+            return []
+        rows = []
+        with self.lock:
+            for (ts_map, x, y), entry in self.engine.world.timespaces.items():
+                if ts_map == map_id:
+                    rows.append(
+                        {
+                            "ts_id": entry.ts_id,
+                            "x": x,
+                            "y": y,
+                            "min_level": entry.min_level,
+                            "max_level": entry.max_level,
+                        }
+                    )
+        rows.sort(key=lambda row: (row["y"], row["x"]))
+        return rows
+
 
 # -- MCP protocol ---------------------------------------------------------
 
@@ -914,6 +943,7 @@ TOOL_METHODS = {
     "game_drops": "game_drops",
     "game_map": "game_map",
     "game_portals": "game_portals",
+    "game_timespaces": "game_timespaces",
     "game_path": "game_path",
     "game_spells": "game_spells",
     "game_move": "game_move",
@@ -979,6 +1009,14 @@ TOOLS: list[dict[str, Any]] = [
         "description": (
             "Portals on the current (or given) map. The server sends the full "
             "list in gp packets; learned crossings fill gaps."
+        ),
+        "inputSchema": _schema({"map_id": {"type": "integer", "minimum": 1}}),
+    },
+    {
+        "name": "game_timespaces",
+        "description": (
+            "Time-Space entrances on the current (or given) map from the "
+            "server's wp list: TS id, position and level range."
         ),
         "inputSchema": _schema({"map_id": {"type": "integer", "minimum": 1}}),
     },

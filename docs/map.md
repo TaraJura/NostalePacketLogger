@@ -164,10 +164,13 @@ grouped by function:
   from the DLL log's last `at`. On entry the server sends the map's whole
   portal list as `gp <x> <y> <toMap> …`; those are drawn as rings with a
   "Portal → map N" tooltip and persisted in `~/.config/ntpl/portals.json`.
-  A destination in the 2xxx range is a **Time-Space** entrance: it is drawn
-  as the nosapki Time-Space stone in a gold frame instead of the magenta
-  ring, with a "Time-Space → map N" tooltip; live map 4 has `(224,103)→2110`
-  and `(228,53)→2510`. The icon is
+  Right after `gp` the server sends the map's **Time-Space entrances** as
+  `wp <x> <y> <tsId> <flag> <minLv> <maxLv>`; each is drawn as the nosapki
+  Time-Space stone in a gold frame, tooltip "Time-Space 16 · Lv 26-99".
+  Live map 4 has all eight: TS 16, 17, 18, 19, 20, 21, 22 and 704; map 3 has
+  TS 5, 6, 10, 11, 12, 13. A `gp` destination in the 2xxx range is a
+  Time-Space **instance map** gate (e.g. map 4's `(224,103)→2110`,
+  `(228,53)→2510`) and stays an amber ring. The icon is
   `linux/host/ntpl/assets/ts-1.png` (source:
   `nosapki.com/images/nt-images/ts-1.png`); if the asset is missing the
   marker falls back to an amber ring. A crossing is the fallback when a
@@ -392,6 +395,12 @@ is sent and the status says “not attacking”. See
   `(45,12)→103`, `(156,2)→4` and `(178,189)→2`; map 104 has `(11,9)→103`.
   The GUI stores, draws and persists the whole list (`WorldState.gates`);
   crossing learning remains the fallback when a `gp` list was missed.
+- Time-Spaces are server-sent too: `wp <x> <y> <tsId> <flag> <minLv>
+  <maxLv>` follows the `gp` list. Map 4 has the complete set (TS 16, 17, 18,
+  19, 20, 21, 22, 704) at the golden-circle positions, matching nosapki's
+  list and level ranges; map 3 has TS 5, 6, 10, 11, 12, 13. They are drawn
+  with the nosapki stone icon and a tooltip with the TS id and level range,
+  so no guessing or manual entry is involved.
 - The basic skill follows the equipped SP card: `u_s 0` was answered with
   `su ... 260 ...` (Energy Bolt, range 6/cast 0.8 s/CD 0.5 s/0 MP) and later
   with `su ... 855 ...` (Fire Bolt, 40 MP) after a card change; the Combat box

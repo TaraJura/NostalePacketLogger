@@ -85,6 +85,42 @@ learning (`portals`) is only the fallback when a `gp` was missed.
 
 ---
 
+## `wp` (RECV)
+
+The map's **Time-Space entrances**, sent on entry right after the `gp` list.
+
+**Format**: `wp <x> <y> <tsId> <flag> <minLevel> <maxLevel>`
+
+`<tsId>` is the Time-Space number shown in the in-game list; `<minLevel>` and
+`<maxLevel>` are its level range. `<flag>` was `4` for normal Time-Spaces and
+`0` for TS 704 (the level-90 one) in every capture. Like `gp`, the packet
+carries **no source map id**.
+
+Captured live on 2026-11-07 on map 4 (Sunny Meadows):
+
+```
+wp 35 142 16 4 26 99      # TS 16, Lv 26-99
+wp 44 48 22 4 32 99       # TS 22
+wp 121 26 21 4 31 99      # TS 21
+wp 136 77 20 4 30 99      # TS 20
+wp 145 146 17 4 27 99     # TS 17
+wp 189 65 19 4 29 99      # TS 19
+wp 203 134 18 4 28 99     # TS 18
+wp 229 33 704 0 90 99     # TS 704
+```
+
+That is the complete set nosapki lists for Sunny Meadows, and the positions
+match the golden circles on the ground. Map 3 (Mine Plains) has TS 5, 6, 10,
+11, 12, 13 at `(128,182)`, `(45,173)`, `(97,127)`, `(68,80)`, `(83,46)`,
+`(159,43)`.
+
+The engine stores them in `WorldState.timespaces`; the GUI draws the stone
+icon at each and the tooltip shows the id and level range. A `gp` destination
+in the 2xxx range is a Time-Space **instance map** (e.g. `(224,103)→2110`);
+those remain amber rings.
+
+---
+
 ## Map IDs (Known)
 
 Only ids observed in packets are listed; more are added by visiting maps.

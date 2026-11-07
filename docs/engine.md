@@ -67,6 +67,7 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `entities` | `dict[int, Entity]` keyed by **entityId** (never vnum) |
 | `drops` | `dict[int, GroundItem]` keyed by drop id: item vnum, x, y, amount, owner char id |
 | `gates` | `(mapId, x, y) → destination mapId` from the server's `gp` portal list, sent on map entry; authoritative and complete per visited map |
+| `timespaces` | `(mapId, x, y) → TimeSpace(ts_id, min_level, max_level)` from the server's `wp` list, sent with `gp` on entry |
 | `portals` | `(mapId, x, y) → destination mapId` learned from real crossings (departure cell + the following `at` arrival); fallback when `gp` was missed |
 | `stats` | `CharacterStats(hp, hp_max, mp, mp_max)` from `stat`; drives the bars and recovery |
 | `last_attacker_id` / `last_attacker_at` | last entity that hit the local player and the packet timestamp; Retaliate uses it (5 s window) |
@@ -104,6 +105,7 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `ncif` | SEND | `target_id` |
 | `u_s` | SEND | the last sent `u_s` slot; paired with the next `su` from self to fill `skill_learned` (slot 0 → `basic_skill`) |
 | `gp` | RECV | the entered map's portal list → `gates` (`gp <x> <y> <toMap> …`) |
+| `wp` | RECV | the entered map's Time-Space entrances → `timespaces` (`wp <x> <y> <tsId> <flag> <minLv> <maxLv>`) |
 | `ski` | RECV | learned skill pages and the ordered `skill_list` used by `u_s` slots; slot 0 is the basic attack |
 | `su` | RECV | `combat`, `last_skill` (first five ints); if the target is self, `last_attacker_id`/`last_attacker_at` |
 | `stat` | RECV | own HP/MP |

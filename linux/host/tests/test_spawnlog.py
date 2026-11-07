@@ -9,6 +9,7 @@ from ntpl.spawnlog import (
     load_skill_list,
     load_skill_slots,
     load_spawns,
+    load_timespaces,
 )
 
 
@@ -82,6 +83,17 @@ class SpawnLogTests(unittest.TestCase):
         )
         self.assertEqual(
             load_gates(log), {(3, 10, 208): 6, (3, 45, 12): 103}
+        )
+
+    def test_reads_the_timespace_list_from_wp(self):
+        log = self._write(
+            "1 [RECV] at 14881134 4 28 178 2 0 2 1\r\n"
+            "2 [RECV] wp 35 142 16 4 26 99\r\n"
+            "3 [RECV] wp 229 33 704 0 90 99\r\n"
+        )
+        self.assertEqual(
+            load_timespaces(log),
+            {(4, 35, 142): (16, 4, 26, 99), (4, 229, 33): (704, 0, 90, 99)},
         )
 
     def test_reads_portals_from_crossings(self):
