@@ -40,7 +40,7 @@ from .mapdata import (
     MapDataError,
     MapGrid,
     astar,
-    find_map_for_positions,
+    choose_map_for_positions,
     load_nstc,
     terrain_rgb,
 )
@@ -55,6 +55,9 @@ DRAIN_INTERVAL_MS = 50
 BOT_INTERVAL_MS = 200
 DEFAULT_MAP_ID = 20
 DEFAULT_SCALE = 3
+# Live positions fed to the attach-time map ranking. More points separate
+# same-layout maps; ranking 779 grids costs ~16 ms at this cap.
+AUTO_MAP_POINTS = 512
 # The server ignores a walk sent during the skill animation. The bot attacks,
 # then waits this long before it sends the next path step.
 ATTACK_WALK_DELAY = 1.5
@@ -1916,23 +1919,28 @@ class Application(Gtk.Application):
 
     def _live_points(self) -> list[tuple[int, int]]:
         world = self.engine.world
-        points = [
-            (entity.x, entity.y)
-            for entity in world.entities.values()
-            if entity.kind == 1
-        ]
+        # Every tracked entity is on the current map, so monsters and NPCs are
+        # as valid as players. Using them all matters: with only the own
+        # character and a couple of players, several large or same-layout maps
+        # tie at 100 % walkable and the ranking is arbitrary. The own position
+        # comes first so a solo character still contributes a point.
+        points: list[tuple[int, int]] = []
         if world.position is not None:
             points.append(world.position)
+        points.extend(
+            (entity.x, entity.y) for entity in world.entities.values()
+        )
         # Stable order, bounded work for the ranking.
-        return list(dict.fromkeys(points))[:48]
+        return list(dict.fromkeys(points))[:AUTO_MAP_POINTS]
 
     def _auto_map_tick(self) -> bool:
-        """Pick the map from ``c_map``/``at`` or from live player positions.
+        """Pick the map from ``c_map``/``at`` or from live entity positions.
 
         There is no Map ID / Load / Auto-detect control any more: the map
         follows the character. A map id from the server is authoritative; when
         the host attached after login and never saw one, rank the grids by the
-        walkable positions of players and the own character.
+        walkable positions of every live entity and pick the tightest fit
+        (``choose_map_for_positions``).
         """
         if self._closing:
             return False
@@ -1940,10 +1948,22 @@ class Application(Gtk.Application):
             self._ensure_map_loaded()
             return True
         world = self.engine.world
-        if world.map_id is not None and world.map_id in self.map_grids:
+        if world.map_id is not None:
+            if world.map_id in self.map_grids:
+                if (
+                    self.map_grid is None
+                    or self.map_grid.map_id != world.map_id
+                ):
+                    self._select_map(world.map_id)
+                    self._set_status(f"auto-selected map {world.map_id}")
+                return True
+            # The server named a map this archive does not hold (an instance
+            # map such as 20651). Guessing a different grid from positions
+            # would show a wrong map under the right name; say so instead.
             if self.map_grid is None or self.map_grid.map_id != world.map_id:
-                self._select_map(world.map_id)
-                self._set_status(f"auto-selected map {world.map_id}")
+                self._set_status(
+                    f"map {world.map_id} has no grid in {self.map_file}"
+                )
             return True
         if self.map_grid is None:
             fallback = (
@@ -1957,20 +1977,18 @@ class Application(Gtk.Application):
         points = self._live_points()
         if len(points) < 2:
             return True
-        walkable = sum(
-            1 for x, y in points if self.map_grid.is_walkable(x, y)
+        choice = choose_map_for_positions(
+            self.map_grids, points, current_id=self.map_grid.map_id
         )
-        if walkable / len(points) >= 0.6:
+        if choice is None:
             return True
-        ranked = find_map_for_positions(self.map_grids, points)
-        if ranked and ranked[0][0] >= 0.6:
-            fraction, map_id = ranked[0]
-            if map_id != self.map_grid.map_id:
-                self._select_map(map_id)
-                self._set_status(
-                    f"auto-detected map {map_id} "
-                    f"({fraction * 100:.1f}% live positions)"
-                )
+        fraction, map_id = choice
+        if map_id != self.map_grid.map_id:
+            self._select_map(map_id)
+            self._set_status(
+                f"auto-detected map {map_id} "
+                f"({fraction * 100:.1f}% live positions)"
+            )
         return True
 
     # -- map drawing ----------------------------------------------------

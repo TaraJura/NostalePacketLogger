@@ -143,7 +143,11 @@ The client's `NostaleData/NStcData.NOS` contains one walkability grid per map
 archive, renders the terrain palette, ranks maps against live entity positions
 and runs **8-direction A\*** over walkable cells (diagonal cost √2, no corner
 cutting). The path is drawn as a continuous cyan polyline. The map switches
-automatically from `c_map`/`at` (the map id is the second `c_map` field).
+automatically from `c_map`/`at` (the map id is the second `c_map` field). If a
+host attaches after login and never sees one, `choose_map_for_positions()`
+ranks all grids against every live entity and picks the tightest perfect fit —
+same-layout maps tie on a couple of positions, so the full entity cloud and the
+size tie-break are what make the guess deterministic.
 
 Supporting data modules:
 

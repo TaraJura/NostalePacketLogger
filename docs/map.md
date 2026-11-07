@@ -47,8 +47,15 @@ The archive has 779 grids from 9x12 to 488x240. Map **20 (230x260, 37.3 %
 walkable)** is the current live map. The map id comes from the server's
 `c_map`/`at` packets (`WorldState.map_id`; the id is the second `c_map`
 field). If the host attached after login and has not seen one yet, the UI
-automatically scores every grid by the live entity positions
-(`find_map_for_positions`) and selects the best.
+scores every grid against the live entity positions
+(`choose_map_for_positions`). Several maps — often a pair sharing one layout —
+can fit the same handful of positions perfectly, so the ranking prefers the
+**tightest** perfect fit (the smallest grid that holds every point) and keeps
+the current map while it is tied for best. All live entities count, not only
+players: monsters and NPCs are on the current map too, and their wider point
+cloud is what separates same-layout maps. Only the local player and one nearby
+player fit maps 300 and 5613 equally well; with the monsters included the real
+map 2 wins outright.
 
 ## Parser API
 
@@ -62,6 +69,7 @@ automatically scores every grid by the live entity positions
 | `MapGrid.neighbours(x, y)` | walkable 8-direction neighbours; diagonals require both orthogonal cells to be walkable |
 | `astar(grid, start, goal)` | shortest 8-direction path (diagonal cost sqrt 2), goal included |
 | `find_map_for_positions(grids, points)` | rank maps for live coordinates |
+| `choose_map_for_positions(grids, points, current_id)` | pick one map: tightest perfect fit, keep a tied current |
 | `terrain_rgb(value)` | palette colour |
 
 Override the archive path with `NTPL_NSTC` or `--file`.
@@ -329,8 +337,11 @@ never sees the `at` packet.
   skills (`TYPE[0] == 1`) and hides empty/NotUse names; a manual vnum can still
   reference any id.
 - The map id comes from `c_map`/`at`. If the host attached after login and has
-  not seen either yet, the GUI ranks the map grids against live player
-  positions every 2 s and keeps the current map while it still fits.
+  not seen either yet, the GUI ranks the map grids against **all** live entity
+  positions every 2 s (`choose_map_for_positions`): the tightest perfect fit
+  wins, and a current map tied for best is kept to avoid flipping. A map id the
+  archive has no grid for (instance maps such as 20651) is reported as
+  "map N has no grid" instead of showing a different map's grid.
 - The server may rate-limit or reject moves after many attempts; the bot stops
   after three consecutive unconfirmed moves.
 

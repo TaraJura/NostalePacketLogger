@@ -57,11 +57,17 @@ changes, and the GUI selects the new map immediately.
 ## Map IDs (Known)
 
 Only ids observed in packets are listed; more are added by visiting maps.
+Names come from `NSlangData_UK.NOS` → `_code_uk_MapIDData.txt`
+(`zts<id>e<TAB><name>`, 374 entries) and match the in-game minimap label.
 
 | Map ID | Name | Notes |
 |--------|------|-------|
-| 20 | Western Krem | live starting map; 230x260, 37.3 % walkable |
-| 85 | — | visited through a portal on 2026-11-06; 70x104 |
+| 1 | NosVille | town; 160x180 |
+| 2 | NosVille Meadows | live 2026-11-07; 150x150; the attach-time auto-detect case |
+| 20 | Mountain Cave 1 | live starting map 2026-11-06; 230x260, 37.3 % walkable |
+| 85 | Path to Altar | visited through a portal on 2026-11-06; 70x104 |
+| 300 | Spirit Forest Edge | 240x190; shares its walkable layout with 5613 |
+| 5613 | — | no name entry; a same-layout twin of 300 (an old auto-detect wrong pick) |
 
 ---
 
@@ -75,3 +81,14 @@ Only ids observed in packets are listed; more are added by visiting maps.
 
 The GUI/engine switch on the `at`/`c_map` pair; stale entities from the old
 map are dropped on `c_map` and `mapout`.
+
+Captured live on 2026-11-07 (NosVille Meadows → NosVille and back):
+
+```
+13:43:02.880 [RECV] c_map 0 2 0
+13:43:02.881 [RECV] at 14881134 1 79 2 2 0 111 1 -1 0 0
+13:43:02.888 [RECV] c_map 0 1 1
+13:43:07.863 [RECV] c_map 0 1 0
+13:43:07.863 [RECV] at 14881134 2 140 148 2 0 1 1 -1 0 0
+13:43:07.876 [RECV] c_map 0 2 1
+```

@@ -203,6 +203,9 @@ an 8-direction path over walkable cells (diagonal cost sqrt 2, no corner
 cutting); `find_map_for_positions()` ranks maps
 against live entity coordinates (the 2026-11-06 session identified map **20**,
 230x260, with 100 % of 173,503 `mv` samples on walkable cells).
+`choose_map_for_positions()` turns that ranking into one answer for the
+attach-after-login case: every live entity counts, the tightest perfect fit
+wins, and the current map is kept while it is tied for best.
 
 The GUI's **Map / Bot** tab renders the whole current map (automatically
 switched from `c_map`/`at`), overlays entities with hover tooltips, accepts

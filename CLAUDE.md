@@ -20,21 +20,22 @@ client setup in the parent directory; use a separate Wine prefix.
 
 ## Status
 
-Last checked 2026-11-06. **After a reboot, start with
-[`docs/handoff-2026-11-06.md`](docs/handoff-2026-11-06.md)**: it has the
-current state and the exact reinjection/auto-attack test procedure. The game
-process is not running (it exited at 15:32:29 after the first skill-hook
-build); the fixed build is in the repo, and the client must be restarted.
+Last checked 2026-11-07. **After a reboot, start with
+[`docs/handoff-2026-11-06.md`](docs/handoff-2026-11-06.md)** for the exact
+reinjection/auto-attack procedure. A game session is normally driven through
+the Gameforge prefix (`WINEPREFIX=~/games/gameforge/prefix`), not
+`~/.wine-nostale`; after any game restart the DLL must be injected again or the
+GUI has no packets.
 
 | What | State |
 |---|---|
 | `windows/` | Original MSVC/C# implementation, moved unchanged. Builds with Visual Studio; not exercised on this machine. |
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
-| Linux host tests | 84/84 pass (`make -C linux host-test`). |
-| Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live map is **20** (230x260); 100 % of 173,503 `mv` samples land on walkable `0x00` cells. `astar()` is 8-direction with sqrt(2) diagonals and no corner cutting; the path is drawn as a continuous polyline. |
+| Linux host tests | 89/89 pass (`make -C linux host-test`). |
+| Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live 2026-11-07: map **2** NosVille Meadows (150x150), then map 1 NosVille (160x180) via `c_map`; 2026-11-06: map **20** Mountain Cave 1 (230x260). Map names come from `NSlangData_UK.NOS` → `_code_uk_MapIDData.txt` (`zts<id>e<TAB><name>`, 374 entries). `astar()` is 8-direction with sqrt(2) diagonals and no corner cutting; the path is drawn as a continuous polyline. |
 | Monster names | `NSlangData_UK.NOS` / `_code_uk_monster.txt` parsed by `monsternames.py` (nibble codec + archive reader): 2,795 `vnum → name` entries. The live `in 3 206 5122 ...` spawn is entity 5122, Angry Queen Bee (vnum 206); map tooltips use the name. `spawnlog.py` backfills entities that spawned before the host attached from the DLL's `C:\NosTalePacketLog.txt` (`[RECV] in ...` lines). |
 | Spell catalog | `NSgtdData.NOS` → `Skill.dat` parsed by `spells.py`: 1,964 records, 791 active (`TYPE[0]==1`), with name from the `NAME` zts key, MP cost, range, cast time, cooldown and target type. Live examples: 866 Holy Attack (0 MP/0.9 s), 869 Mana Shield (self, 300 MP/60 s), 876 Holy Hammer (145 MP/90 s). The GUI **Add spell…** picker uses it; the bot enforces MP/range/cooldown/cast time. |
-| Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), automatic whole-map (contain-fit) view with no manual map/scale/center controls, **immediate map switch** from `c_map`/`at` (the map id is the second `c_map` field), structured sidebar (Character HP/MP bars + recovery banner, Path, Combat with green/red toggles, Targets with an unknown-vnum option, Spells, Loot, Recovery, Configuration), drops + 8-direction A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover + **Move first** (attack while progressing; off = clear the area), monster target filters (all/only/except by vnum), ordered spell rules from the scanned Skill.dat catalog (Always/my HP/my MP, cooldown, MP/range/cast-time checks, monster/self), JSON save/load of the whole bot config, bigger own dot + facing arrow, and hover tooltips for players/monsters/NPCs/drops. `make gui-test` and `make bot-test` (6 smokes) pass. |
+| Map UI / bot | GTK4 Map/Bot tab: responsive layout (map + sidebar, reflows under ~1050 px), automatic whole-map (contain-fit) view with no manual map/scale/center controls, **immediate map switch** from `c_map`/`at` (the map id is the second `c_map` field), **attach-time auto-detect** when no map id was seen (all live entities, tightest perfect fit — same-layout maps tie on positions alone), structured sidebar (Character HP/MP bars + recovery banner, Path, Combat with green/red toggles, Targets with an unknown-vnum option, Spells, Loot, Recovery, Configuration), drops + 8-direction A* path + loop + auto-attack/Retaliate + pickup + low-HP sit/recover + **Move first** (attack while progressing; off = clear the area), monster target filters (all/only/except by vnum), ordered spell rules from the scanned Skill.dat catalog (Always/my HP/my MP, cooldown, MP/range/cast-time checks, monster/self), JSON save/load of the whole bot config, bigger own dot + facing arrow, and hover tooltips for players/monsters/NPCs/drops. `make gui-test` and `make bot-test` (6 smokes) pass. |
 | x86 hook stubs | `HookStubTest.exe` (Wine) calls the real `hooks.S` detours and verifies the EDX packet pointer at `20(%ebp)`, the original-call replay and the send trampoline. Passes. |
 | GUI | Headless GTK4 smoke test passes (`make -C linux gui-test`, Xvfb): fake stream → 2 rows + STATUS in the status bar. |
 | Injector | Verified under Wine end-to-end against both the fake target and the live client (PID 1216): remote `LoadLibraryA` succeeds and the DLL starts. |
@@ -147,7 +148,13 @@ PYTHONPATH=linux/host python3 -m ntpl status
   save/load (see [docs/bot-config.md](docs/bot-config.md)).
   With no path the bot runs stationary combat/pickup/recovery. Map changes come from
   `c_map <type> <mapId> <state>` (`mapId` is the **second** int) plus `at`;
-  the GUI switches immediately and clears stale entities/drops. The own marker
+  the GUI switches immediately and clears stale entities/drops. When the host
+  attaches after login and saw no map id, `choose_map_for_positions` ranks all
+  779 grids against **every** live entity (players, monsters, NPCs), picks the
+  tightest perfect fit, and keeps the current map only while it is tied for
+  best; a server map id with no grid in the archive is reported instead of
+  showing another map (do not "improve" this back to players-only — the
+  NosVille Meadows map 2 is inseparable from 300/5613 with two points). The own marker
   is a bigger dot + a facing arrow from the last `walk` delta (the protocol has
   no own-facing packet).
 - **Docs**: `docs/architecture.md`, `docs/engine.md`, `docs/map.md`,

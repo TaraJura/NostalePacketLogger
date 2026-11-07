@@ -177,6 +177,47 @@ def find_map_for_positions(
     return ranked[:limit]
 
 
+def choose_map_for_positions(
+    grids: dict[int, MapGrid],
+    points: list[tuple[int, int]],
+    current_id: int | None = None,
+    minimum: float = 0.6,
+) -> tuple[float, int] | None:
+    """Pick the most likely live map for ``points``.
+
+    :func:`find_map_for_positions` alone is ambiguous when the host attaches
+    after login: the server never announced a map id, and many maps — often
+    several sharing one layout — contain the same handful of entity positions
+    on walkable cells and tie at 100 %. The real map is the *tightest* grid
+    that holds every point, so among equally good candidates prefer the
+    smallest one. A current map that is tied for best is kept, so the view does
+    not flip between equal candidates as points arrive.
+
+    Returns ``(fraction, map_id)``, or ``None`` when no grid fits well enough.
+    """
+    ranked = find_map_for_positions(grids, points, limit=len(grids))
+    if not ranked:
+        return None
+    best_fraction = ranked[0][0]
+    if best_fraction < minimum:
+        return None
+    tied = [
+        map_id
+        for fraction, map_id in ranked
+        if best_fraction - fraction <= 1e-9
+    ]
+    if current_id in tied:
+        return best_fraction, current_id
+    map_id = min(
+        tied,
+        key=lambda candidate: (
+            grids[candidate].width * grids[candidate].height,
+            candidate,
+        ),
+    )
+    return best_fraction, map_id
+
+
 _SQRT2 = math.sqrt(2.0)
 
 

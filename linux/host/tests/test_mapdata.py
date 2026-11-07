@@ -9,6 +9,7 @@ from ntpl.mapdata import (
     MapDataError,
     MapGrid,
     astar,
+    choose_map_for_positions,
     find_map_for_positions,
     load_nstc,
     terrain_rgb,
@@ -129,6 +130,65 @@ class RankingTests(unittest.TestCase):
 
     def test_empty_points(self):
         self.assertEqual(find_map_for_positions({}, []), [])
+
+
+class ChooseMapTests(unittest.TestCase):
+    """Attach-time auto-detection: the server map id is unknown."""
+
+    POINTS = [(10, 10), (20, 20), (30, 30)]
+
+    def grids(self) -> dict[int, MapGrid]:
+        # The live bug: maps 300 and 5613 share a 240x190 layout and a handful
+        # of entity positions fit both perfectly, while the real map 2
+        # (150x150, NosVille Meadows) also holds the same points. The tightest
+        # perfect fit is the right answer.
+        return {
+            2: MapGrid(2, 150, 150, bytes(150 * 150)),
+            300: MapGrid(300, 240, 190, bytes(240 * 190)),
+            5613: MapGrid(5613, 240, 190, bytes(240 * 190)),
+        }
+
+    def test_tie_prefers_smallest_perfect_fit(self):
+        self.assertEqual(
+            choose_map_for_positions(self.grids(), self.POINTS),
+            (1.0, 2),
+        )
+
+    def test_current_map_is_kept_while_tied(self):
+        # Once the view shows one of the tied maps, do not flip it every tick.
+        self.assertEqual(
+            choose_map_for_positions(
+                self.grids(), self.POINTS, current_id=5613
+            ),
+            (1.0, 5613),
+        )
+
+    def test_better_fit_replaces_the_current_map(self):
+        # A selected map that fits only part of the cloud must not stick
+        # merely because most points are walkable on it (the old 0.6 rule).
+        blocked = bytearray(150 * 150)
+        blocked[10 * 150 + 10] = 1  # one live point lands on a wall
+        grids = {
+            2: MapGrid(2, 150, 150, bytes(blocked)),
+            300: MapGrid(300, 240, 190, bytes(240 * 190)),
+        }
+        self.assertEqual(
+            choose_map_for_positions(grids, self.POINTS, current_id=2),
+            (1.0, 300),
+        )
+
+    def test_no_fit_below_minimum(self):
+        # 1 walkable cell of 4 queried cells = 0.25 < the 0.6 floor.
+        grid = MapGrid(9, 2, 2, bytes([0, 1, 1, 1]))
+        self.assertIsNone(
+            choose_map_for_positions({9: grid}, [(0, 0), (1, 1)])
+        )
+
+    def test_points_outside_every_grid(self):
+        grid = MapGrid(9, 2, 2, bytes(4))
+        self.assertIsNone(
+            choose_map_for_positions({9: grid}, [(5, 5), (6, 6)])
+        )
 
 
 class PaletteTests(unittest.TestCase):
