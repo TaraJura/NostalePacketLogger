@@ -2,12 +2,15 @@
 
 The bot locks onto monster 500. After two hits a second monster, 501, starts
 hitting the character. Retaliate is the one allowed reason to leave a live
-target, so the bot must switch to 501 and finish it. Once 501 is dead the
-bot must return to 500 — the original target was never killed.
+target, so the bot must switch to 501 and finish it.
 
-The Bot log must say why the target changed: ``retaliate: 501 is attacking
-you; switching from 500``. Without that line a retaliate switch looks like
-the focus bug this smoke exists to prevent.
+While 501 is being killed, a third monster, 502, hits the character too. It
+must NOT steal the fight: taking the newest hit every time made Retaliate
+ping-pong between attackers. When 501 dies, 502 (still a recent attacker)
+takes over; once it dies the bot returns to the original target 500.
+
+The Bot log must name the first switch (``retaliate: 501 is attacking you;
+switching from 500``) and must not name a switch to 502 while 501 is alive.
 
 Run through scripts/dev-test-bot.sh (Xvfb).
 """
@@ -36,9 +39,13 @@ class FakeServer:
         self.received: list[str] = []
         self.attacks_500 = 0
         self.attacks_501 = 0
-        self.hit_sent = False
-        self.killed = False
-        self.kill_index: int | None = None
+        self.attacks_502 = 0
+        self.hit_501_sent = False
+        self.hit_502_sent = False
+        self.killed_501 = False
+        self.killed_502 = False
+        self.kill_501_index: int | None = None
+        self.kill_502_index: int | None = None
         self.connection = None
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -94,21 +101,40 @@ class FakeServer:
                     entity_id = parts[3]
                     if entity_id == "500":
                         self.attacks_500 += 1
-                        if self.attacks_500 == 2 and not self.hit_sent:
-                            # 501 hits the character: Retaliate takes over.
-                            self.hit_sent = True
+                        if self.attacks_500 == 2 and not self.hit_501_sent:
+                            # The first attacker takes over.
+                            self.hit_501_sent = True
                             self.send(
                                 "RECV|su 3 501 1 14881134 10 9 11 4401\n"
                             )
                     elif entity_id == "501":
                         self.attacks_501 += 1
-                        if self.attacks_501 == 2 and not self.killed:
-                            # The retaliation target dies; focus must return
-                            # to 500, which was never killed.
-                            self.killed = True
-                            self.kill_index = len(self.received)
+                        if self.attacks_501 == 2 and not self.hit_502_sent:
+                            # A second, closer attacker appears while 501 is
+                            # still the locked target. Retaliate must stay on
+                            # 501 instead of ping-ponging.
+                            self.hit_502_sent = True
+                            self.send(
+                                "RECV|in 3 200 502 25 118 2 100 100 0 0 0 "
+                                "-1 0 0 -1 - 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+                                "RECV|su 3 502 1 14881134 10 9 11 4401\n"
+                            )
+                        elif self.attacks_501 >= 4 and not self.killed_501:
+                            # The retaliation target dies; focus moves to the
+                            # other attacker (502 is still recent).
+                            self.killed_501 = True
+                            self.kill_501_index = len(self.received)
                             self.send(
                                 "RECV|st 3 501 15 0 1 100 0 762 2556 "
+                                "762 0\n"
+                            )
+                    elif entity_id == "502":
+                        self.attacks_502 += 1
+                        if self.attacks_502 == 2 and not self.killed_502:
+                            self.killed_502 = True
+                            self.kill_502_index = len(self.received)
+                            self.send(
+                                "RECV|st 3 502 15 0 1 100 0 762 2556 "
                                 "762 0\n"
                             )
 
@@ -153,7 +179,7 @@ def main() -> int:
             app.revive_toggle.set_active(True)
             app.loop_toggle.set_active(False)
             app._start_bot()
-            GLib.timeout_add(10000, check)
+            GLib.timeout_add(13000, check)
         except Exception as exc:  # noqa: BLE001 - report, do not crash GTK
             result["detail"] = f"start exception: {exc!r}"
             app.quit()
@@ -161,20 +187,34 @@ def main() -> int:
 
     def check() -> bool:
         try:
-            ids = attacked_ids(list(server.received))
-            first_501 = ids.index("501") if "501" in ids else None
-            last_501 = (
-                len(ids) - 1 - ids[::-1].index("501")
-                if "501" in ids
-                else None
+            lines = list(server.received)
+            first_501 = next(
+                (
+                    index
+                    for index, line in enumerate(lines)
+                    if line.startswith("SEND|u_s ")
+                    and line.split()[3] == "501"
+                ),
+                None,
             )
-            before = ids[:first_501] if first_501 is not None else []
-            during = (
-                ids[first_501: last_501 + 1]
+            kill_501 = server.kill_501_index
+            kill_502 = server.kill_502_index
+            before = (
+                attacked_ids(lines[:first_501])
                 if first_501 is not None
                 else []
             )
-            after = ids[last_501 + 1:] if last_501 is not None else []
+            stick = (
+                attacked_ids(lines[first_501:kill_501])
+                if first_501 is not None and kill_501 is not None
+                else []
+            )
+            after_501 = (
+                attacked_ids(lines[kill_501:kill_502])
+                if kill_501 is not None and kill_502 is not None
+                else []
+            )
+            after_502 = attacked_ids(lines[kill_502:]) if kill_502 else []
             log_text = ""
             if app.bot_log_buffer is not None:
                 buffer = app.bot_log_buffer
@@ -185,21 +225,30 @@ def main() -> int:
                 "retaliate: 501 is attacking you; switching from 500"
                 in log_text
             )
+            no_ping_pong = "retaliate: 502" not in log_text
             result["ok"] = bool(
-                server.hit_sent
-                and server.killed
+                server.hit_501_sent
+                and server.hit_502_sent
+                and server.killed_501
+                and server.killed_502
                 and before
                 and set(before) == {"500"}
-                and during
-                and set(during) == {"501"}
-                and after
-                and set(after) == {"500"}
+                and stick
+                and set(stick) == {"501"}
+                and after_501
+                and set(after_501) == {"502"}
+                and after_502
+                and set(after_502) == {"500"}
                 and explained
+                and no_ping_pong
             )
             result["detail"] = (
-                f"before={before} during={during} after={after} "
-                f"hit_sent={server.hit_sent} killed={server.killed} "
-                f"explained={explained}"
+                f"before={before} stick={stick} after_501={after_501} "
+                f"after_502={after_502} hit501={server.hit_501_sent} "
+                f"hit502={server.hit_502_sent} "
+                f"killed501={server.killed_501} "
+                f"killed502={server.killed_502} "
+                f"explained={explained} no_ping_pong={no_ping_pong}"
             )
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"check exception: {exc!r}"

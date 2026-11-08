@@ -156,6 +156,8 @@ POS_COMMAND = "POS"
 TARGET_PREFIX = "TARGET|"
 # A monster the client refuses to select is skipped this long.
 TARGET_BLOCK_S = 5.0
+#: A monster that hit the character this recently is the Retaliate priority.
+RETALIATE_WINDOW_S = 5.0
 
 
 class PacketRow(GObject.Object):
@@ -2541,7 +2543,7 @@ class Application(Gtk.Application):
         if world.last_attacker_id is None:
             return None
         # Only recent hits count; a stale attacker should not lock targeting.
-        if time.time() - world.last_attacker_at > 5.0:
+        if time.time() - world.last_attacker_at > RETALIATE_WINDOW_S:
             return None
         entity = world.entities.get(world.last_attacker_id)
         if entity is None or entity.kind != 3:
@@ -2558,6 +2560,14 @@ class Application(Gtk.Application):
         if distance > radius or not self._has_line_of_sight(entity):
             return None
         return entity
+
+    def _recent_attacker(self, entity_id: int) -> bool:
+        """True while the entity has hit the character recently."""
+        when = self.engine.world.self_attackers.get(entity_id)
+        return (
+            when is not None
+            and time.time() - when <= RETALIATE_WINDOW_S
+        )
 
     def _live_points(self) -> list[tuple[int, int]]:
         world = self.engine.world
@@ -4994,39 +5004,51 @@ class Application(Gtk.Application):
                 radius = max(radius, int(base_info.range))
             monster = None
             if retaliate:
-                # The monster hitting us always wins the target lock. That is
-                # the one allowed reason to leave a target that is still
-                # alive; say so in the bot log so it is never mistaken for a
-                # focus failure.
-                monster = self._retaliation_target(radius)
-                if monster is not None:
-                    previous = self.fight_target_id
-                    previous_entity = (
-                        world.entities.get(previous)
-                        if previous is not None
-                        else None
-                    )
-                    if (
-                        previous_entity is not None
-                        and previous_entity.kind == 3
-                        and previous != monster.entity_id
-                    ):
-                        if self.retaliate_logged != (
-                            previous,
-                            monster.entity_id,
+                # Stay on an attacker the bot is already fighting. Taking the
+                # newest hit every time made Retaliate ping-pong between two
+                # monsters that both hit the character. A different attacker
+                # only takes over when the current target is not one.
+                locked = self._locked_target(radius)
+                if locked is not None and self._recent_attacker(
+                    locked.entity_id
+                ):
+                    monster = locked
+                else:
+                    # The monster hitting us wins the target lock. That is
+                    # the one allowed reason to leave a target that is still
+                    # alive; say so in the bot log so it is never mistaken
+                    # for a focus failure.
+                    attacker = self._retaliation_target(radius)
+                    if attacker is not None:
+                        monster = attacker
+                        previous = self.fight_target_id
+                        previous_entity = (
+                            world.entities.get(previous)
+                            if previous is not None
+                            else None
+                        )
+                        if (
+                            previous_entity is not None
+                            and previous_entity.kind == 3
+                            and previous != attacker.entity_id
                         ):
-                            self.retaliate_logged = (
+                            if self.retaliate_logged != (
                                 previous,
-                                monster.entity_id,
-                            )
-                            self._set_status(
-                                f"retaliate: {monster.entity_id} is "
-                                f"attacking you; switching from {previous}"
-                            )
+                                attacker.entity_id,
+                            ):
+                                self.retaliate_logged = (
+                                    previous,
+                                    attacker.entity_id,
+                                )
+                                self._set_status(
+                                    f"retaliate: {attacker.entity_id} is "
+                                    f"attacking you; switching from "
+                                    f"{previous}"
+                                )
+                        else:
+                            self.retaliate_logged = None
                     else:
                         self.retaliate_logged = None
-                else:
-                    self.retaliate_logged = None
             if monster is None and auto_attack:
                 # Stay on the current target until it dies or becomes
                 # invalid; only then pick the nearest monster.

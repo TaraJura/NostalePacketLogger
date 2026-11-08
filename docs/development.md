@@ -56,8 +56,9 @@ and a target whose every hit is cancelled is dropped after 2 refusals, the
 next refusal pausing combat), and target focus (a monster moved next to the
 character does not steal the fight from the current target; after its death
 the nearest one is chosen). The focus+retaliate smoke covers the one allowed
-switch: an attacker takes the lock, is killed, and the bot returns to the
-original target; the Bot log names the retaliate switch. The cancel-pair
+switch: an attacker takes the lock, a second, closer attacker does not steal
+it, the first is killed, the second takes over, and the bot returns to the
+original target after that; the Bot log names the first retaliate switch. The cancel-pair
 smoke keeps a fast attack (0.3 s) flowing while the server ends each landed
 cast with a delayed `cancel`, so a normal cast end is not counted as a
 refusal or used to drop the target.

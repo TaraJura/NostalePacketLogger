@@ -247,7 +247,7 @@ The packet **Follow** toggle lives in the Packets tab, not in the window header.
 | Control | Effect |
 |---|---|
 | Auto-attack | attack the nearest allowed monster (Retaliate priority) with the equipped SP card's basic skill (slot 0); no skill/range/delay knobs — Skill.dat drives the pace |
-| Retaliate | attack the monster that most recently hit you first, if in range |
+| Retaliate | attack the monster that hit you; once engaged, keep that attacker until it dies — a second attacker does not steal the fight |
 | Auto-recover HP | below the HP threshold, sit and wait for full HP, then stand (after finishing the current kill) |
 | Below HP % | HP recovery threshold (default 70) |
 | Auto-recover MP | below the MP threshold, sit and wait for full MP, then stand (after finishing the current kill) |

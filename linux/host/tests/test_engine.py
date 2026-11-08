@@ -282,12 +282,14 @@ class EngineTests(unittest.TestCase):
             packet(Kind.RECV, "su 3 500 1 14881134 10 9 11 4401")
         )
         self.assertEqual(world.last_attacker_id, 500)
+        self.assertIn(500, world.self_attackers)
         self.assertEqual(world.self_hit_count, 0)
         # Our own attack on a monster must not be treated as retaliation.
         world = self.engine.feed(
             packet(Kind.RECV, "su 1 14881134 3 501 0 9 11 4401")
         )
         self.assertEqual(world.last_attacker_id, 500)
+        self.assertNotIn(501, world.self_attackers)
         # ... but it counts as a landed hit, so the server's trailing
         # `cancel 0 0 -1` is not mistaken for a refused attack.
         self.assertEqual(world.self_hit_count, 1)

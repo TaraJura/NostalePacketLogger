@@ -116,6 +116,11 @@ class WorldState:
     # Last entity that hit the local player, with the packet timestamp.
     last_attacker_id: int | None = None
     last_attacker_at: float = 0.0
+    # Every entity that hit the local player, with its last hit timestamp.
+    # The single last-attacker pair makes Retaliate switch again on each hit
+    # when two monsters attack; this map lets the GUI stay on the attacker it
+    # is already fighting while that one is still attacking.
+    self_attackers: dict[int, float] = field(default_factory=dict)
     # The local character died (`stat` with 0 HP) and has not been revived
     # yet. The server sends `revive 1 <charId> 0` when it brings it back.
     dead: bool = False
@@ -520,6 +525,14 @@ def _on_skill_used(world: WorldState, packet: Packet) -> None:
         # Something is hitting us; remember it so the bot can retaliate.
         world.last_attacker_id = attacker_id
         world.last_attacker_at = packet.timestamp
+        world.self_attackers[attacker_id] = packet.timestamp
+        if len(world.self_attackers) > 32:
+            cutoff = packet.timestamp - 60.0
+            world.self_attackers = {
+                entity_id: when
+                for entity_id, when in world.self_attackers.items()
+                if when >= cutoff
+            }
     if attacker_type == 1 and attacker_id == world.self_id:
         world.self_hit_count += 1
     world.combat.append(

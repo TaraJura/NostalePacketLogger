@@ -29,11 +29,14 @@ attached because `spawnlog.py` backfills the vnum from the DLL log; see
 **Target focus**: once the bot attacks a monster it keeps that target
 until it dies. A closer monster only becomes the target after the current one
 is gone (dead, blocked, out of the acquisition radius or without line of
-sight). The one exception is **Retaliate**: the monster that is hitting the
-character always takes priority. A retaliate switch is named in the Bot log
+sight). The one exception is **Retaliate**: a monster that hits the
+character takes priority over the current target. Once the bot is fighting
+such an attacker it stays on it until it dies — a second monster that also
+hits the character does not steal the fight, so two attackers cannot make
+the bot ping-pong between them. A retaliate switch is named in the Bot log
 (`retaliate: <id> is attacking you; switching from <old>`), so it is never
-mistaken for a focus failure; when the attacker dies the bot returns to the
-original target if it is still there.
+mistaken for a focus failure; when the attacker dies the other recent
+attacker (or the original target) is next.
 
 Attacking also requires **line of sight**: the straight line from the
 character to the monster must not cross a blocked terrain cell, so the bot
