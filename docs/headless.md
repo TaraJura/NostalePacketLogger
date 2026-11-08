@@ -68,13 +68,14 @@ for the number. A `gf-pow-captcha` challenge needs a real browser; use a
 launcher token for that.
 
 ```bash
-linux/scripts/headless.sh --print-packets
+linux/scripts/headless.sh
 # Gameforge email: ...
-# Password: ...
+# Password (visible): ...
 ```
 
-If you need to see the password while pasting it, add `--show-password`
-(the prompt echoes it). It still uses the same login.
+The wrapper always passes `--print-packets --show-password`, so every packet
+is printed and the password is echoed while you enter it (easy to verify a
+paste). Extra arguments are passed through to `ntpl headless`.
 
 Options: `--login-host/--login-port` (default `79.110.84.75:4000`),
 `--region`, `--character <slot>`, `--world-id/--channel`, `--account-id`,
