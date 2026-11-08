@@ -376,6 +376,8 @@ class Application(Gtk.Application):
         # The monster the bot is currently hitting; recovery waits until it
         # dies so a low bar never abandons a half-killed target.
         self.fight_target_id = None
+        # The last retaliate-driven switch already written to the log.
+        self.retaliate_logged: tuple[int, int] | None = None
         # Attack pacing / cancel retry. `attack_hit_mark` is the self-hit
         # counter at the last attack; a later `cancel` after a hit is the
         # normal end of the cast, not a refusal.
@@ -4275,6 +4277,7 @@ class Application(Gtk.Application):
         # The monster the bot is currently hitting; recovery waits until it
         # dies so a low bar never abandons a half-killed target.
         self.fight_target_id = None
+        self.retaliate_logged = None
         # Attack pacing / cancel retry.
         self.last_attack_sent_at = 0.0
         self.last_cancel_count = 0
@@ -4309,6 +4312,7 @@ class Application(Gtk.Application):
         self.recover_need_hp = False
         self.recover_need_mp = False
         self.fight_target_id = None
+        self.retaliate_logged = None
         self._set_status("bot stopped")
         self._set_path_info("stopped")
 
@@ -4947,8 +4951,39 @@ class Application(Gtk.Application):
                 radius = max(radius, int(base_info.range))
             monster = None
             if retaliate:
-                # The monster hitting us always wins the target lock.
+                # The monster hitting us always wins the target lock. That is
+                # the one allowed reason to leave a target that is still
+                # alive; say so in the bot log so it is never mistaken for a
+                # focus failure.
                 monster = self._retaliation_target(radius)
+                if monster is not None:
+                    previous = self.fight_target_id
+                    previous_entity = (
+                        world.entities.get(previous)
+                        if previous is not None
+                        else None
+                    )
+                    if (
+                        previous_entity is not None
+                        and previous_entity.kind == 3
+                        and previous != monster.entity_id
+                    ):
+                        if self.retaliate_logged != (
+                            previous,
+                            monster.entity_id,
+                        ):
+                            self.retaliate_logged = (
+                                previous,
+                                monster.entity_id,
+                            )
+                            self._set_status(
+                                f"retaliate: {monster.entity_id} is "
+                                f"attacking you; switching from {previous}"
+                            )
+                    else:
+                        self.retaliate_logged = None
+                else:
+                    self.retaliate_logged = None
             if monster is None and auto_attack:
                 # Stay on the current target until it dies or becomes
                 # invalid; only then pick the nearest monster.
