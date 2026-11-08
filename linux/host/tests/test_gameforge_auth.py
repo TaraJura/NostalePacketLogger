@@ -235,17 +235,53 @@ class GameforgeAuthTests(unittest.TestCase):
         self.assertEqual(context.exception.challenge_id, "challenge-1")
 
     def test_iovation_failure_reports_the_status(self):
-        class Source:
-            def plain(self):
-                return "tra:abc"
-
         response = FakeResponse(403, {"status": "failed"})
         with mock.patch.object(gf.time, "sleep"), mock.patch.object(
             gf.requests, "post", return_value=response
         ):
             with self.assertRaises(gf.AuthError) as context:
-                gf.mint_code("bearer", "account", Source(), "install", b"cert")
+                gf.mint_code(
+                    "bearer",
+                    "account",
+                    "tra:plain",
+                    "encrypted",
+                    "test-agent",
+                    "install",
+                    b"cert",
+                    "gsid-1234",
+                )
         self.assertIn("403", str(context.exception))
+
+    def test_mint_token_uses_the_website_login(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cert_path = Path(directory) / "cert.pem"
+            cert_path.write_bytes(b"cert")
+            browser = SimpleNamespace(
+                token="bearer", blackbox="tra:plain", extra="tra:extra"
+            )
+            with mock.patch.object(
+                gf, "default_identity_path", return_value=None
+            ), mock.patch(
+                "ntpl.gameforge_browser.browser_token",
+                return_value=browser,
+            ) as browser_token, mock.patch.object(
+                gf, "game_accounts", return_value=["account"]
+            ), mock.patch.object(
+                gf, "default_cert_path", return_value=cert_path
+            ), mock.patch.object(
+                gf, "mint_code", return_value="CODE"
+            ) as mint_code:
+                token = gf.mint_token("email", "password")
+        self.assertEqual(token, "CODE".encode("latin-1").hex())
+        browser_token.assert_called_once()
+        args = mint_code.call_args.args
+        self.assertEqual(args[0], "bearer")
+        self.assertEqual(args[1], "account")
+        self.assertEqual(args[2], "tra:plain")
+        self.assertNotEqual(args[3], "tra:extra")
+        self.assertEqual(args[4], gf.blackbox_user_agent("tra:plain"))
+        self.assertEqual(args[6], b"cert")
+        self.assertIn("-", args[7])
 
     def test_ua_magic_shape(self):
         magic = gf._ua_magic(

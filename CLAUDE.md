@@ -31,8 +31,8 @@ the new window (or run `inject.sh` yourself).
 |---|---|
 | `windows/` | Original MSVC/C# implementation, moved unchanged. Builds with Visual Studio; not exercised on this machine. |
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
-| Linux host tests | 184/184 pass (`make -C linux host-test`). |
-| Headless client | `ntpl headless` ports NosBazar's login cipher, `NoS0577`/`NsTeST` and world handshake to Python. Live 2026-11-08: the login server at `79.110.84.75:4000` answers `failc 1` to an invalid token, proving the packet layout, client version/hash and login cipher. The v2 email/password login is **live-validated (201)** on `spark-web.gameforge.com`: the request must send the same UA the game1.js blackbox was generated with (the launcher's Chrome/72 UA gives `CREDENTIALS_INVALID`); a solved captcha retries with `gf-challenge-id`. The follow-up **iovation** call rejects browser-generated blackboxes here (`{"status":"failed"}`); a 30-value identity captured from a real client (`--identity`) or a launcher token (`--token-file`) is needed for the game token. The **image-drop captcha** is handled in one GTK window; the proof-of-work captcha and OTP are not solved. Docs: `docs/headless.md`. |
+| Linux host tests | 185/185 pass (`make -C linux host-test`). |
+| Headless client | `ntpl headless` ports NosBazar's login cipher, `NoS0577`/`NsTeST` and world handshake to Python. Live 2026-11-08: the login server at `79.110.84.75:4000` answers `failc 1` to an invalid token, proving the packet layout, client version/hash and login cipher. The v2 email/password login is **live-validated (201)**; without an identity file the client signs in through gameforge.com's own form in headless Chrome (Node/CDP; the site solves its PoW challenge) and **iovation returns 200**. The final `thin/codes` call returns `403 Not allowed to create code` for browser-generated devices (the official client adds a `codeId` authorization ticket; Gfless uses a captured identity). A 30-value identity (`--identity`) or a launcher token (`--token-file`) is needed for the game token. The **image-drop captcha** is handled in one GTK window; the website PoW is handled by the site. Docs: `docs/headless.md`. |
 | MCP (agent access) | `python3 -m ntpl mcp` speaks MCP JSON-RPC over stdio and exposes 21 tools (state, entities, drops, map, portals, time-spaces, A* path, spells, move/travel, attack/cast, raw send, rest, pickup, wait, memory). It owns the DLL's single host connection and rebroadcasts it on `127.0.0.1:47900`; run the GUI with `--port 47900`. The DLL port is discovered from its `C:\ntpl-<pid>.port` file (the DLL may have fallen back from 47821 to 47822+). `.mcp.json` is committed; docs in `docs/mcp.md`. |
 | Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live 2026-11-07: map **2** NosVille Meadows (150x150), then map 1 NosVille (160x180) via `c_map`; 2026-11-06: map **20** Mountain Cave 1 (230x260). Map names come from `NSlangData_UK.NOS` → `_code_uk_MapIDData.txt` (`zts<id>e<TAB><name>`, 374 entries). `astar()` is 8-direction with sqrt(2) diagonals and no corner cutting; the path is drawn as a continuous polyline. |
 | Monster names | Two-step join in `monsternames.py`: `NSgtdData.NOS` → `monster.dat` maps the template vnum to a language text key (`VNUM 419` → `NAME zts489e`), and `NSlangData_UK.NOS` → `_code_uk_monster.txt` maps that key to the localized name (2,679 entries; live map 103: vnum 419 = Violent Seedle, 420 = Crazy Dander, 421 = Violent Chicken). The text key is **not** the vnum (record `zts419e` is "Wheat"). Only `monster.dat` is decrypted from the 18 MB archive, so loading takes ~0.4 s. `spawnlog.py` backfills entities that spawned before the host attached from the DLL's `C:\NosTalePacketLog.txt` (`[RECV] in ...` lines). |
@@ -57,7 +57,7 @@ cd ~/games/gameforge/NostalePacketLogger
 # Linux build (MinGW-w64 i686; installed via apt)
 make -C linux all test-host
 make -C linux check                 # file(1) on the three PE32 outputs
-make -C linux host-test             # 184 stdlib unittest cases
+make -C linux host-test             # 185 stdlib unittest cases
 PYTHONPATH=linux/host python3 -m ntpl mcp   # MCP stdio server + broker on 47900 (DLL port auto-discovered)
 PYTHONPATH=linux/host python3 -m ntpl headless --token-file ~/.config/ntpl/token --game-dir <Nostale dir>  # clientless login
 make -C linux gui-test              # headless GTK4 + map surface smoke
@@ -132,9 +132,12 @@ PYTHONPATH=linux/host python3 -m ntpl status
   `noscrypto.py` (login/world cipher ported from NosBazar: packing tables,
   session XOR, first-packet case), `headless.py` (clientless login: NoS0577,
   NsTeST, world handshake, clist/select, keepalive; feeds the same `Engine`),
-  `gameforge_auth.py` (current v2 credentials login; game1.js device
-  blackbox generated in headless Chrome/Chromium, iovation, thin/codes;
-  terminal prompt, no stored credentials),
+  `gameforge_auth.py` (current v2 credentials login; identity or
+  website-login path, game1.js blackboxes, iovation, thin/codes; terminal
+  prompt, no stored credentials),
+  `gameforge_browser.py` + `browser_login.mjs` (the gameforge.com sign-in
+  form in headless Chrome via Node/CDP: solves the site's PoW challenge,
+  returns the bearer and the site-generated blackboxes),
   `captcha_ui.py` (single GTK4 window for Gameforge's image-drop captcha:
   instruction, icon strip, target scene and an icon-number box),
   `botconfig.py`
@@ -322,7 +325,9 @@ Next:
    a clientless login.
 10. **Headless client:** `ntpl headless` does the clientless login (cipher,
     NoS0577/NsTeST/world handshake) and is live-validated through `failc 1`
-    for a bad token. The Gameforge thin-token acquisition now runs the real
-    `game1.js` device check in headless Chrome; a real-token
-    world/character run, and a headless broker so the GUI/MCP bots can drive
-    a clientless session remain. See [docs/headless.md](docs/headless.md).
+    for a bad token. The v2 login and the website-login iovation step are
+    live (201/200); `thin/codes` still refuses browser-generated devices
+    (`Not allowed to create code`). A captured identity or launcher token,
+    the real-token world/character run, and a headless broker so the
+    GUI/MCP bots can drive a clientless session remain. See
+    [docs/headless.md](docs/headless.md).

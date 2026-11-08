@@ -50,41 +50,41 @@ PYTHONPATH=linux/host python3 -m ntpl headless \
 ```
 
 `--email`/`--password` (or `NTPL_EMAIL`/`NTPL_PASSWORD`) use the current
-Gameforge v2 login: the device blackbox, iovation enrollment and the
-thin/codes call that yields the NoS0577 token. Run the client with no token
-and it prompts for the email and password (nothing is stored or logged).
+Gameforge v2 login. Run the client with no token and it prompts for the
+email and password (nothing is stored or logged).
 
-The device blackbox is Gameforge's own `game1.js` fingerprint, run the same
-way the Gfless launcher runs it: in headless Chrome/Chromium (found
-automatically; set `NTPL_CHROME` to choose a binary). The resulting `tra:`
-value is used for the credentials login, the iovation call and the
-encrypted thin/codes blackbox. The login sends the **same User-Agent the
-blackbox was generated with** (read from the blackbox's `userAgent` field)
-and posts to `spark-web.gameforge.com`; sending the launcher's Chrome/72 UA
-with a Chrome 156 blackbox makes Gameforge answer `CREDENTIALS_INVALID`.
+Without a captured identity the client logs in through **gameforge.com's
+own sign-in form in headless Chrome**: the site loads `game1.js`, solves
+its PoW challenge, and returns the bearer; the same page generates the
+plain and request blackboxes. This needs Node.js and Chrome/Chromium
+(`NTPL_NODE`, `NTPL_CHROME`). The credentials login is verified live
+(HTTP 201) and **iovation passes** with this website session (HTTP 200).
+The login request must use the same User-Agent the blackbox was generated
+with (read from the blackbox's `userAgent` field); sending the launcher's
+Chrome/72 UA with a Chrome 156 blackbox makes Gameforge answer
+`CREDENTIALS_INVALID`.
+
 A captured 30-value identity at `~/.config/ntpl/identity.json` (or
-`--identity`) is also supported; that file is sensitive, mode 0600 and
-never committed. If Gameforge answers with its **image-drop captcha**, the
-client downloads the instruction text, the icon strip and the target
-scene, then shows **one captcha window** with the three images and an
-icon-number box. Read the instruction, find the matching icon in the strip
-(1 = leftmost), enter its number and press Submit. The answer is posted
-and the login retries with the `gf-challenge-id` header, as Gameforge's
-own `withFetchPatch.js` does; a wrong answer refreshes the images in the
-same window. This is Gameforge's human check — you solve it. If GTK or a
-display is unavailable, the images open separately and the terminal asks
-for the number. A `gf-pow-captcha` challenge is auto-solved by the
-website's fetch patch (a proof of work, no human input); this client does
-not solve it yet, so use a launcher token for that.
+`--identity`) uses the direct API login; that file is sensitive, mode 0600
+and never committed. With that path, Gameforge's **image-drop captcha** is
+handled in **one captcha window**: the client downloads the instruction
+text, the icon strip and the target scene, and shows the three images with
+an icon-number box. Read the instruction, find the matching icon in the
+strip (1 = leftmost), enter its number and press Submit. The answer is
+posted and the login retries with the `gf-challenge-id` header, as
+Gameforge's own `withFetchPatch.js` does; a wrong answer refreshes the
+images in the same window. This is Gameforge's human check — you solve it.
+If GTK or a display is unavailable, the images open separately and the
+terminal asks for the number. The website login path handles the
+proof-of-work challenge itself; an image-drop captcha on the website is
+reported by the helper instead of solved.
 
-After the login, the game-token chain calls **iovation**
-(`/api/v1/auth/iovation`) before thin/codes. iovation rejected the
-browser-generated blackboxes from this machine with `{"status":"failed"}`
-(both headless and a real GPU Chrome). The Gfless launcher's own
-instructions use a **30-value identity captured from a real Gameforge
-client** for this step; put it at `~/.config/ntpl/identity.json` (mode
-0600) or pass `--identity`. A launcher token (`--token-file`) skips the
-whole Gameforge login and always works.
+The last game-token step, `thin/codes`, currently answers `403 Not allowed
+to create code` with the browser-generated device. The official client
+adds an authorization-ticket (`codeId`) step; the Gfless ecosystem's
+supported solution is a 30-value identity captured from a real Gameforge
+client, which the `--identity` path uses. A launcher token
+(`--token-file`) skips the whole Gameforge login and always works.
 
 ```bash
 linux/scripts/headless.sh
@@ -102,16 +102,15 @@ Options: `--login-host/--login-port` (default `79.110.84.75:4000`),
 
 ## Limits and next steps
 
-- **Token acquisition**: the v2 email/password login is implemented and
-  verified live (HTTP 201 on `spark-web.gameforge.com`, with the browser
-  UA taken from the blackbox). The follow-up **iovation** call rejected
-  the browser-generated blackboxes here (`{"status":"failed"}`), so
-  getting the actual game token needs a 30-value identity captured from a
-  real Gameforge client (`--identity`) or a launcher token
-  (`--token-file`). The image-drop captcha is solved by the user in one
-  GTK window (or in the terminal when GTK is unavailable); the
-  proof-of-work captcha and OTP are not solved. A token from a current
-  launcher always works.
+- **Token acquisition**: the v2 email/password login (HTTP 201) and the
+  website-login iovation step (HTTP 200) are verified live. The final
+  `thin/codes` call returns `403 Not allowed to create code` for
+  browser-generated devices; the official client adds an authorization
+  ticket (`codeId`) and the Gfless ecosystem uses a captured identity. Use
+  a 30-value identity (`--identity`) or a launcher token (`--token-file`)
+  to get an actual game token. The image-drop captcha is solved in one GTK
+  window (or the terminal); the proof-of-work captcha and OTP are not
+  solved.
 - **World phase** with a real token must be verified on a test account.
 - **One session per account**: a second login for the same account can
   disconnect the game client or the other session.
@@ -129,4 +128,5 @@ Options: `--login-host/--login-port` (default `79.110.84.75:4000`),
 packing round trips), `tests/test_headless.py` (`NsTeST` parsing, packet
 layout, session framing, version/hash extraction) and
 `tests/test_gameforge_auth.py` (identity files, the game1.js browser
-runner, blackbox encryption, error classification, UA magic).
+runner, the website-login mint path, blackbox encryption, error
+classification, UA magic).

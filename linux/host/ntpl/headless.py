@@ -544,10 +544,9 @@ def run_headless(
         except AuthError as exc:
             print(f"ntpl headless: {exc}")
             print(
-                "ntpl headless: the device check needs Chrome/Chromium "
-                "(set NTPL_CHROME); if it rejects this machine, use a "
-                "captured identity (--identity) or a launcher token "
-                "(--token-file)."
+                "ntpl headless: the website login needs Node.js and "
+                "Chrome/Chromium (NTPL_NODE/NTPL_CHROME); or use a captured "
+                "identity (--identity) or a launcher token (--token-file)."
             )
             return 2
         print("ntpl headless: login OK")
