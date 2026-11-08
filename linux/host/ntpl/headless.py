@@ -438,17 +438,43 @@ def run_headless(
     world_id: int | None = None,
     channel: int | None = None,
     print_packets: bool = False,
+    email: str | None = None,
+    password: str | None = None,
+    account_id: str | None = None,
+    locale: str = "en_EN",
+    nosauth_path: str | None = None,
 ) -> int:
     directory = Path(game_dir).expanduser()
     if not (directory / "NostaleClientX.exe").exists():
         raise LoginError(
             f"{directory} does not contain NostaleClientX.exe; pass --game-dir"
         )
+    email = email or os.environ.get("NTPL_EMAIL")
+    password = password or os.environ.get("NTPL_PASSWORD")
+    token_error: LoginError | None = None
     try:
         session_token = read_token(token, token_file)
     except LoginError as exc:
-        print(f"ntpl headless: {exc}")
-        return 2
+        token_error = exc
+        session_token = ""
+    if not session_token:
+        if not (email and password):
+            print(f"ntpl headless: {token_error}")
+            return 2
+        from .launcher_auth import LauncherAuthError, obtain_token
+
+        try:
+            session_token, account_id, _ = obtain_token(
+                email,
+                password,
+                locale=locale,
+                account_id=account_id,
+                root=Path(nosauth_path).expanduser() if nosauth_path else None,
+            )
+        except LauncherAuthError as exc:
+            print(f"ntpl headless: {exc}")
+            return 2
+        print("ntpl headless: launcher auth OK")
     client = Clientless(
         session_token,
         directory,

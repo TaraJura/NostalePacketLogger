@@ -49,14 +49,23 @@ PYTHONPATH=linux/host python3 -m ntpl headless \
     --print-packets
 ```
 
+`--email`/`--password` (or `NTPL_EMAIL`/`NTPL_PASSWORD`, which keeps the
+password out of `ps`) use a best-effort bridge to the 2021 MIT
+`NosTale-Auth` clone (`--nosauth-path`, default
+`~/games/gameforge/NosTale-Auth`). That API predates the current Gameforge
+blackbox/captcha flow and may be rejected; the dependable path is a token
+from a current launcher. Credentials are used in memory only.
+
 Options: `--login-host/--login-port` (default `79.110.84.75:4000`),
-`--region`, `--character <slot>`, `--world-id/--channel`, `--print-packets`.
+`--region`, `--character <slot>`, `--world-id/--channel`, `--account-id`,
+`--locale`, `--print-packets`.
 
 ## Limits and next steps
 
-- **Token acquisition** is not implemented in this repository yet; use the
-  upstream launcher auth to obtain the hex token. The full Gameforge HTTP
-  auth (identity/blackbox) is the next piece.
+- **Token acquisition**: a best-effort bridge to the 2021 `NosTale-Auth`
+  launcher API is built in; the current Gameforge auth (iovation blackbox,
+  captcha/PoW, OTP) is not ported. Use a token from a current launcher for
+  reliable logins.
 - **World phase** with a real token must be verified on a test account.
 - **One session per account**: a second login for the same account can
   disconnect the game client or the other session.

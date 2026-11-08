@@ -715,6 +715,11 @@ def cmd_headless(args: argparse.Namespace) -> int:
         world_id=args.world_id,
         channel=args.channel,
         print_packets=args.print_packets,
+        email=args.email,
+        password=args.password,
+        account_id=args.account_id,
+        locale=args.locale,
+        nosauth_path=args.nosauth_path,
     )
 
 
@@ -898,6 +903,25 @@ def build_parser() -> argparse.ArgumentParser:
     headless.add_argument("--world-id", type=int, default=None)
     headless.add_argument("--channel", type=int, default=None)
     headless.add_argument("--print-packets", action="store_true")
+    headless.add_argument(
+        "--email",
+        default=None,
+        help="Gameforge email for the legacy launcher auth "
+        "(or NTPL_EMAIL); prefer --token-file",
+    )
+    headless.add_argument(
+        "--password",
+        default=None,
+        help="Gameforge password (or NTPL_PASSWORD); visible in ps, prefer "
+        "the environment variable",
+    )
+    headless.add_argument("--account-id", default=None)
+    headless.add_argument("--locale", default="en_EN")
+    headless.add_argument(
+        "--nosauth-path",
+        default=None,
+        help="NosTale-Auth clone (default: ~/games/gameforge/NosTale-Auth)",
+    )
     headless.set_defaults(handler=cmd_headless)
 
     return parser
