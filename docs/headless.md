@@ -81,10 +81,14 @@ reported by the helper instead of solved.
 
 The last game-token step, `thin/codes`, currently answers `403 Not allowed
 to create code` with the browser-generated device. The official client
-adds an authorization-ticket (`codeId`) step; the Gfless ecosystem's
-supported solution is a 30-value identity captured from a real Gameforge
-client, which the `--identity` path uses. A launcher token
-(`--token-file`) skips the whole Gameforge login and always works.
+adds an authorization-ticket step: `POST /api/v1/auth/codes` with
+`clientId` and `redirectUri=com.gameforge.client://auth` returns a generic
+authorization code, but account-scoped requests (`accountId`) are refused
+(403) for this session, and `thin/codes` rejects the generic code. The
+official client's trusted, game-account-bound session is still missing;
+the Gfless ecosystem's supported solution is a 30-value identity captured
+from a real Gameforge client, which the `--identity` path uses. A launcher
+token (`--token-file`) skips the whole Gameforge login and always works.
 
 ```bash
 linux/scripts/headless.sh
