@@ -249,9 +249,9 @@ The packet **Follow** toggle lives in the Packets tab, not in the window header.
 | Auto-attack | attack the nearest allowed monster (Retaliate priority) with the equipped SP card's basic skill (slot 0); no skill/range/delay knobs — Skill.dat drives the pace |
 | Retaliate | attack the monster that most recently hit you first, if in range |
 | Auto-recover HP | below the HP threshold, sit and wait for full HP, then stand (after finishing the current kill) |
-| Below HP % | HP recovery threshold (default 30) |
+| Below HP % | HP recovery threshold (default 70) |
 | Auto-recover MP | below the MP threshold, sit and wait for full MP, then stand (after finishing the current kill) |
-| Below MP % | MP recovery threshold (default 30) |
+| Below MP % | MP recovery threshold (default 70) |
 | Pickup | walk to your own/unowned drops up to 20 cells away, pick them up when adjacent, then resume the path |
 | Loop | repeat the path when it finishes |
 | Targets | all / only selected / all except selected monster templates (`vnum`); Retaliate respects the same filter |

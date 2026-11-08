@@ -17,9 +17,9 @@ Schema (version 1)::
       "pickup": true,
       "loot_range": 20,
       "recover": true,
-      "low_hp_pct": 30,
+      "low_hp_pct": 70,
       "recover_mp": true,
-      "low_mp_pct": 30,
+      "low_mp_pct": 70,
       "revive_on_death": false,     # accept dlgi #revival (10 Seeds of Power)
       "loop": true,
       "block_portals": true,
@@ -120,9 +120,9 @@ class BotConfig:
     pickup: bool = True
     loot_range: int = 20
     recover: bool = True
-    low_hp_pct: float = 30.0
+    low_hp_pct: float = 70.0
     recover_mp: bool = True
-    low_mp_pct: float = 30.0
+    low_mp_pct: float = 70.0
     revive_on_death: bool = False
     loop: bool = True
     block_portals: bool = True
@@ -218,9 +218,9 @@ class BotConfig:
             pickup=_as_bool(data.get("pickup"), True),
             loot_range=_as_int(data.get("loot_range"), 20, 1, 40),
             recover=_as_bool(data.get("recover"), True),
-            low_hp_pct=_as_float(data.get("low_hp_pct"), 30.0, 5.0, 90.0),
+            low_hp_pct=_as_float(data.get("low_hp_pct"), 70.0, 5.0, 90.0),
             recover_mp=_as_bool(data.get("recover_mp"), True),
-            low_mp_pct=_as_float(data.get("low_mp_pct"), 30.0, 5.0, 90.0),
+            low_mp_pct=_as_float(data.get("low_mp_pct"), 70.0, 5.0, 90.0),
             revive_on_death=_as_bool(data.get("revive_on_death"), False),
             loop=_as_bool(data.get("loop"), True),
             block_portals=_as_bool(data.get("block_portals"), True),

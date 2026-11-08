@@ -126,6 +126,10 @@ def main() -> int:
             app.path_cells = []
             app.auto_attack_toggle.set_active(True)
             app.retaliate_toggle.set_active(False)
+            # This smoke runs at 40 % HP to exercise the spell rule; the
+            # 70 % recovery default would sit and pre-empt combat.
+            app.recover_toggle.set_active(False)
+            app.recover_mp_toggle.set_active(False)
             app.target_mode.set_selected(1)  # only selected
             app.target_vnums = {200}
             app._update_target_info()
@@ -251,7 +255,7 @@ def main() -> int:
             config_ok = (
                 saved
                 and loaded
-                and app.low_hp_pct.get_value() == 30
+                and app.low_hp_pct.get_value() == 70
                 and app.target_mode.get_selected() == 1
                 and app.target_vnums == {200}
                 and len(app.spell_rows) == 1

@@ -960,7 +960,7 @@ class Application(Gtk.Application):
         )
         self._bind_toggle_color(self.recover_toggle)
         self.low_hp_pct = Gtk.SpinButton.new_with_range(5, 90, 5)
-        self.low_hp_pct.set_value(30)
+        self.low_hp_pct.set_value(70)
         recover_box.append(
             self._field_row(
                 self.recover_toggle,
@@ -975,7 +975,7 @@ class Application(Gtk.Application):
         )
         self._bind_toggle_color(self.recover_mp_toggle)
         self.low_mp_pct = Gtk.SpinButton.new_with_range(5, 90, 5)
-        self.low_mp_pct.set_value(30)
+        self.low_mp_pct.set_value(70)
         recover_box.append(
             self._field_row(
                 self.recover_mp_toggle,
