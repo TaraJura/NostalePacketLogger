@@ -265,18 +265,36 @@ def client_identity(game_dir: Path) -> tuple[str, str]:
     return version, login_hash
 
 
+def normalize_token(value: str) -> str:
+    """Accept the hex token or a raw launcher code (hexlify the latter).
+
+    The Gameforge thin ``code`` is a UUID-like string; NoS0577 carries its
+    hexlified ASCII bytes. A value that is already even-length hex is kept.
+    """
+    value = value.strip()
+    if value and len(value) % 2 == 0 and all(
+        character in "0123456789abcdefABCDEF" for character in value
+    ):
+        return value.lower()
+    import binascii
+
+    return binascii.hexlify(value.encode("latin-1")).decode("ascii")
+
+
 def read_token(token: str | None, token_file: str | None) -> str:
     """Resolve the hex session token without ever logging it."""
     if token:
-        return token.strip()
+        return normalize_token(token)
     env = os.environ.get("NTPL_HEADLESS_TOKEN")
     if env:
-        return env.strip()
+        return normalize_token(env)
     if token_file:
-        return Path(token_file).read_text(encoding="ascii").strip()
+        return normalize_token(
+            Path(token_file).read_text(encoding="ascii")
+        )
     raise LoginError(
         "no session token: pass --token, --token-file or "
-        "NTPL_HEADLESS_TOKEN (hex Gameforge thin token)"
+        "NTPL_HEADLESS_TOKEN (hex Gameforge thin token or raw launcher code)"
     )
 
 
@@ -441,8 +459,8 @@ def run_headless(
     email: str | None = None,
     password: str | None = None,
     account_id: str | None = None,
-    locale: str = "en_EN",
-    nosauth_path: str | None = None,
+    locale: str = "en-US",
+    identity: str | None = None,
 ) -> int:
     directory = Path(game_dir).expanduser()
     if not (directory / "NostaleClientX.exe").exists():
@@ -457,24 +475,37 @@ def run_headless(
     except LoginError as exc:
         token_error = exc
         session_token = ""
+    if not session_token and not (email and password):
+        if os.isatty(0):
+            print("NosTale headless login (credentials are not stored)")
+            email = input("Gameforge email: ").strip()
+            if email:
+                import getpass
+
+                password = getpass.getpass("Password: ")
     if not session_token:
         if not (email and password):
             print(f"ntpl headless: {token_error}")
             return 2
-        from .launcher_auth import LauncherAuthError, obtain_token
+        from .gameforge_auth import AuthError, mint_token
 
         try:
-            session_token, account_id, _ = obtain_token(
+            session_token = mint_token(
                 email,
                 password,
-                locale=locale,
+                Path(identity).expanduser() if identity else None,
                 account_id=account_id,
-                root=Path(nosauth_path).expanduser() if nosauth_path else None,
+                locale=locale,
             )
-        except LauncherAuthError as exc:
+        except AuthError as exc:
             print(f"ntpl headless: {exc}")
+            print(
+                "ntpl headless: Gameforge's current login needs a captured "
+                "device identity (~/.config/ntpl/identity.json, 30-value "
+                "list) or a token from a launcher (--token-file)."
+            )
             return 2
-        print("ntpl headless: launcher auth OK")
+        print("ntpl headless: login OK")
     client = Clientless(
         session_token,
         directory,

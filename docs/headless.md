@@ -49,23 +49,32 @@ PYTHONPATH=linux/host python3 -m ntpl headless \
     --print-packets
 ```
 
-`--email`/`--password` (or `NTPL_EMAIL`/`NTPL_PASSWORD`, which keeps the
-password out of `ps`) use a best-effort bridge to the 2021 MIT
-`NosTale-Auth` clone (`--nosauth-path`, default
-`~/games/gameforge/NosTale-Auth`). That API predates the current Gameforge
-blackbox/captcha flow and may be rejected; the dependable path is a token
-from a current launcher. Credentials are used in memory only.
+`--email`/`--password` (or `NTPL_EMAIL`/`NTPL_PASSWORD`) use the current
+Gameforge v2 login: the device blackbox, iovation enrollment and the
+thin/codes call that yields the NoS0577 token. Run the client with no token
+and it prompts for the email and password (nothing is stored or logged).
+Gameforge rejects a generated device identity with `CREDENTIALS_INVALID`, so
+the login needs a captured 30-value identity at
+`~/.config/ntpl/identity.json` (or `--identity`); that file is sensitive,
+mode 0600 and never committed. If Gameforge answers with a
+captcha/challenge, the login stops and a token from a launcher is required.
+
+```bash
+linux/scripts/headless.sh --print-packets
+# Gameforge email: ...
+# Password: ...
+```
 
 Options: `--login-host/--login-port` (default `79.110.84.75:4000`),
 `--region`, `--character <slot>`, `--world-id/--channel`, `--account-id`,
-`--locale`, `--print-packets`.
+`--locale`, `--identity`, `--print-packets`.
 
 ## Limits and next steps
 
-- **Token acquisition**: a best-effort bridge to the 2021 `NosTale-Auth`
-  launcher API is built in; the current Gameforge auth (iovation blackbox,
-  captcha/PoW, OTP) is not ported. Use a token from a current launcher for
-  reliable logins.
+- **Token acquisition**: the current v2 email/password login is implemented
+  (terminal prompt or env) and needs a **captured device identity**; a
+  generated identity is rejected as `CREDENTIALS_INVALID`. Captcha/PoW/OTP
+  are not solved. A token from a current launcher always works.
 - **World phase** with a real token must be verified on a test account.
 - **One session per account**: a second login for the same account can
   disconnect the game client or the other session.
@@ -80,5 +89,7 @@ Options: `--login-host/--login-port` (default `79.110.84.75:4000`),
 ## Tests
 
 `make -C linux host-test` includes `tests/test_noscrypto.py` (cipher and
-packing round trips) and `tests/test_headless.py` (`NsTeST` parsing, packet
-layout, session framing, version/hash extraction).
+packing round trips), `tests/test_headless.py` (`NsTeST` parsing, packet
+layout, session framing, version/hash extraction) and
+`tests/test_gameforge_auth.py` (blackbox encoding, error classification,
+UA magic).

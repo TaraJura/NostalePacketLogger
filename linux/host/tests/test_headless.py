@@ -13,6 +13,7 @@ from ntpl.headless import (
     build_no_s0577,
     client_identity,
     file_version,
+    normalize_token,
     parse_nstest,
 )
 
@@ -74,6 +75,15 @@ class PacketFormatTests(unittest.TestCase):
         self.assertIn("\x0b1.2.3.4 0 HASH", packet)
         random_part = packet.split()[3]
         self.assertEqual(len(random_part), 8)
+
+    def test_normalize_token_keeps_hex_and_hexlifies_raw(self):
+        self.assertEqual(normalize_token("00" * 32), "00" * 32)
+        self.assertEqual(normalize_token("AB" * 32), "ab" * 32)
+        raw = "12345678-1234-1234-1234-123456789012"
+        self.assertEqual(
+            normalize_token(raw),
+            raw.encode().hex(),
+        )
 
 
 class SessionTests(unittest.TestCase):

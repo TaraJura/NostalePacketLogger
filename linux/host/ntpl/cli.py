@@ -719,7 +719,7 @@ def cmd_headless(args: argparse.Namespace) -> int:
         password=args.password,
         account_id=args.account_id,
         locale=args.locale,
-        nosauth_path=args.nosauth_path,
+        identity=args.identity,
     )
 
 
@@ -906,21 +906,20 @@ def build_parser() -> argparse.ArgumentParser:
     headless.add_argument(
         "--email",
         default=None,
-        help="Gameforge email for the legacy launcher auth "
-        "(or NTPL_EMAIL); prefer --token-file",
+        help="Gameforge email (or NTPL_EMAIL); prompted when omitted",
     )
     headless.add_argument(
         "--password",
         default=None,
-        help="Gameforge password (or NTPL_PASSWORD); visible in ps, prefer "
-        "the environment variable",
+        help="Gameforge password (or NTPL_PASSWORD); prompted when omitted",
     )
     headless.add_argument("--account-id", default=None)
-    headless.add_argument("--locale", default="en_EN")
+    headless.add_argument("--locale", default="en-US")
     headless.add_argument(
-        "--nosauth-path",
+        "--identity",
         default=None,
-        help="NosTale-Auth clone (default: ~/games/gameforge/NosTale-Auth)",
+        help="captured 30-value blackbox identity JSON "
+        "(default: ~/.config/ntpl/identity.json)",
     )
     headless.set_defaults(handler=cmd_headless)
 
