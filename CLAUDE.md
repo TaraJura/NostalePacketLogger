@@ -327,7 +327,10 @@ Next:
     NoS0577/NsTeST/world handshake) and is live-validated through `failc 1`
     for a bad token. The v2 login and the website-login iovation step are
     live (201/200); `thin/codes` still refuses browser-generated devices
-    (`Not allowed to create code`). A captured identity or launcher token,
-    the real-token world/character run, and a headless broker so the
+    (`Not allowed to create code`). The official authorization-ticket
+    endpoint is `POST /api/v1/auth/codes` (`clientId` + `redirectUri`); it
+    issues a generic code, but account-scoped codes are 403 and thin/codes
+    rejects the generic one. A captured identity or launcher token, the
+    real-token world/character run, and a headless broker so the
     GUI/MCP bots can drive a clientless session remain. See
     [docs/headless.md](docs/headless.md).
