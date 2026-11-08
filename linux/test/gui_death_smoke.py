@@ -66,6 +66,8 @@ class FakeServer:
             "RECV|rest 1 14881134 0\n"
             "RECV|in 3 200 500 26 119 2 100 100 0 0 0 -1 0 0 -1 - 0 -1 "
             "0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+            "RECV|in 3 200 501 25 119 2 100 100 0 0 0 -1 0 0 -1 - 0 -1 "
+            "0 0 0 0 0 0 0 0 0 0 0 0 0\n"
             # Dead: 0 HP.
             "RECV|stat 0 2791 100 3827 0 0\n"
         )
@@ -160,13 +162,18 @@ def main() -> int:
                 result.get("while_dead") == []
                 # Alive again: attacks resumed, but the ghost was dropped
                 # after the streak instead of being retried forever.
-                and len(alive_attacks) == MAX_CANCEL_STREAK
+                # One target drops after MAX_CANCEL_STREAK refusals; the
+                # next refusal reaches CANCEL_PAUSE_TRIGGER and combat pauses
+                # instead of hopping to more targets.
+                and len(alive_attacks) == MAX_CANCEL_STREAK + 1
                 and "dropping it" in log_text
+                and "pausing combat" in log_text
             )
             result["detail"] = (
                 f"while_dead={len(result.get('while_dead', []))} "
                 f"alive_attacks={len(alive_attacks)} "
                 f"dropped={'dropping it' in log_text} "
+                f"paused={'pausing combat' in log_text} "
                 f"tail={tail} status={status!r}"
             )
         except Exception as exc:  # noqa: BLE001

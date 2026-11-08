@@ -26,6 +26,14 @@ the per-session entity id. This works for monsters that spawned before the GUI
 attached because `spawnlog.py` backfills the vnum from the DLL log; see
 [map.md](map.md#entities-that-spawned-before-the-host-attached).
 
+Attacking also requires **line of sight**: the straight line from the
+character to the monster must not cross a blocked terrain cell, so the bot
+does not fire through town walls or rock ledges (the server refuses those
+anyway). If attacks are still refused repeatedly (safe zone, invisible
+obstacle), the bot **pauses combat** after a few refusals instead of hopping
+to the next target; the pause ends after 30 s or once the character has
+moved five cells away.
+
 **Retaliate ignores the target filter**: a monster that hits the character is
 fought even when its vnum is excluded (or unknown), because self-defence must
 not depend on a farming whitelist — e.g. an Angry Bee (212) spawned by a

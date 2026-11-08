@@ -117,7 +117,13 @@ MAX_MOVE_LEG_CELLS = 3
 #: Consecutive `cancel` replies to attacks on the same target. The server
 #: refuses a client-only ghost entity (a monster that died while the bot was
 #: dead/out of range) forever, so after this many the bot drops the target.
-MAX_CANCEL_STREAK = 3
+MAX_CANCEL_STREAK = 2
+#: Refused attacks within this window (across targets) pause combat. The
+#: server refuses everything in a town/safe zone or through walls; hopping to
+#: the next target just looks like a robot spamming `u_s`.
+CANCEL_WINDOW_S = 10.0
+CANCEL_PAUSE_S = 30.0
+CANCEL_PAUSE_TRIGGER = 3
 #: The server only accepts `get` when the character is on or next to the
 #: drop, so the bot walks to everything farther than this.
 PICKUP_RANGE_CELLS = 1
@@ -376,6 +382,9 @@ class Application(Gtk.Application):
         self.attack_hit_mark = 0
         self.cancel_streak = 0
         self.cancel_streak_target: int | None = None
+        self.cancel_events: list[float] = []
+        self.combat_paused_until = 0.0
+        self.combat_pause_pos: tuple[int, int] | None = None
         self.dead_warned = False
         self.map_redraw_scheduled = False
         self.stats_redraw_scheduled = False
@@ -2395,6 +2404,52 @@ class Application(Gtk.Application):
             context.stroke()
             y += 44.0
 
+    def _has_line_of_sight(self, entity: Entity) -> bool:
+        """True when the straight line to the entity crosses no wall.
+
+        The server refuses attacks through blocked terrain (a town wall, a
+        rock ledge) and in safe zones. Walkable cells are the best terrain
+        proxy the map archive provides; the endpoints are not checked, so a
+        monster standing on a ledge can still be hit from next to it.
+        """
+        grid = self.map_grid
+        if grid is None:
+            return True
+        position = self._player_cell()
+        if position is None:
+            return True
+        for cell in self._segment_cells(
+            position, (entity.x, entity.y)
+        )[1:-1]:
+            if not grid.is_walkable(*cell):
+                return False
+        return True
+
+    def _combat_paused(self, now: float) -> bool:
+        """True while combat is paused after repeated refused attacks.
+
+        The pause also ends early once the character has walked away from the
+        place where the refusals started, so leaving the town/safe zone
+        resumes farming without waiting for the timer.
+        """
+        if now >= self.combat_paused_until:
+            return False
+        position = self._player_cell()
+        if (
+            self.combat_pause_pos is not None
+            and position is not None
+            and max(
+                abs(position[0] - self.combat_pause_pos[0]),
+                abs(position[1] - self.combat_pause_pos[1]),
+            )
+            >= 5
+        ):
+            self.combat_paused_until = 0.0
+            self.combat_pause_pos = None
+            self._set_status("moved away; combat resumed")
+            return False
+        return True
+
     def _attack_reach(self) -> float:
         """The equipped card's basic attack range (15 cells if unknown)."""
         info = self.spells.get(self._basic_skill_vnum() or 0)
@@ -2421,7 +2476,9 @@ class Application(Gtk.Application):
         if position is None:
             return None
         distance = max(abs(entity.x - position[0]), abs(entity.y - position[1]))
-        return entity if distance <= radius else None
+        if distance > radius or not self._has_line_of_sight(entity):
+            return None
+        return entity
 
     def _live_points(self) -> list[tuple[int, int]]:
         world = self.engine.world
@@ -4146,6 +4203,9 @@ class Application(Gtk.Application):
         self.attack_hit_mark = 0
         self.cancel_streak = 0
         self.cancel_streak_target = None
+        self.cancel_events.clear()
+        self.combat_paused_until = 0.0
+        self.combat_pause_pos = None
         self.dead_warned = False
         self.unknown_warn_at = 0.0
         self.out_of_range_warn_at = 0.0
@@ -4378,7 +4438,11 @@ class Application(Gtk.Application):
             if self._target_blocked(entity.entity_id):
                 continue
             distance = max(abs(entity.x - px), abs(entity.y - py))
-            if distance <= radius and distance < best_distance:
+            if (
+                distance <= radius
+                and distance < best_distance
+                and self._has_line_of_sight(entity)
+            ):
                 best = entity
                 best_distance = distance
         return best
@@ -4488,6 +4552,26 @@ class Application(Gtk.Application):
                     else:
                         self.attack_cooldown_until = now + 0.1
                         self._set_status("attack cancelled; retrying")
+                    if world.self_hit_count <= self.attack_hit_mark:
+                        self.cancel_events.append(now)
+                        self.cancel_events = [
+                            when
+                            for when in self.cancel_events
+                            if now - when <= CANCEL_WINDOW_S
+                        ]
+                        if (
+                            len(self.cancel_events) >= CANCEL_PAUSE_TRIGGER
+                            and now >= self.combat_paused_until
+                        ):
+                            self.cancel_events.clear()
+                            self.combat_pause_pos = self._player_cell()
+                            self.combat_paused_until = (
+                                now + CANCEL_PAUSE_S
+                            )
+                            self._set_status(
+                                "attacks keep being refused (safe zone / "
+                                "no line of sight); pausing combat"
+                            )
 
         # -- recovery: sit below the configured HP/MP %, wait until full --
         recover_hp = (
@@ -4517,7 +4601,11 @@ class Application(Gtk.Application):
             # Sitting under fire gets the character killed. When a monster
             # that is hitting us is within attack reach, fight it first and
             # recover afterwards. Retaliation ignores the target filter.
-            if self._retaliation_target(int(self._attack_reach())) is not None:
+            if (
+                not self._combat_paused(now)
+                and self._retaliation_target(int(self._attack_reach()))
+                is not None
+            ):
                 if self.recovering:
                     self.recovering = False
                     self.recover_need_hp = False
@@ -4710,7 +4798,7 @@ class Application(Gtk.Application):
             self.retaliate_toggle is not None
             and self.retaliate_toggle.get_active()
         )
-        if auto_attack or retaliate:
+        if (auto_attack or retaliate) and not self._combat_paused(now):
             radius = ATTACK_SEARCH_CELLS
             base_info = self.spells.get(self._basic_skill_vnum() or 0)
             if base_info is not None and base_info.range > 0:
