@@ -544,9 +544,9 @@ def run_headless(
         except AuthError as exc:
             print(f"ntpl headless: {exc}")
             print(
-                "ntpl headless: Gameforge's current login needs a captured "
-                "device identity (~/.config/ntpl/identity.json, 30-value "
-                "list) or a token from a launcher (--token-file)."
+                "ntpl headless: if the browser check failed, install "
+                "Chrome/Chromium or set NTPL_CHROME; a launcher token "
+                "always works (--token-file)."
             )
             return 2
         print("ntpl headless: login OK")

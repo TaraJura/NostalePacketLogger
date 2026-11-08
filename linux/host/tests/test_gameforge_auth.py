@@ -1,7 +1,22 @@
+import base64
+import hashlib
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from ntpl import gameforge_auth as gf
+
+
+def xor_decrypt(value: str, gsid: str, account_id: str) -> bytes:
+    key = hashlib.sha512((gsid + "-" + account_id).encode()).hexdigest()
+    data = base64.b64decode(value)
+    out = bytearray()
+    for index, byte in enumerate(data):
+        k = index % len(key)
+        out.append(byte ^ ord(key[k]) ^ ord(key[len(key) - 1 - k]))
+    return bytes(out)
 
 
 class FakeResponse:
@@ -16,19 +31,14 @@ class FakeResponse:
 class FakeSession:
     def __init__(self, response):
         self.response = response
+        self.calls = []
 
     def post(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
         return self.response
 
 
 class GameforgeAuthTests(unittest.TestCase):
-    def test_generated_identity_shape(self):
-        identity = gf.generated_identity()
-        self.assertEqual(len(identity), 30)
-        self.assertIsInstance(identity[0], int)
-        self.assertEqual(identity[2], "Windows")
-        self.assertEqual(identity[26], gf.BROWSER_USER_AGENT)
-
     def test_blackbox_is_deterministic_and_prefixed(self):
         identity = [0] * 30
         identity[2] = "Windows"
@@ -36,6 +46,82 @@ class GameforgeAuthTests(unittest.TestCase):
         second = gf.blackbox(identity)
         self.assertTrue(first.startswith("tra:"))
         self.assertEqual(first, second)
+
+    def test_load_identity_reads_a_30_value_list(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "identity.json"
+            path.write_text("[0, 1, 2]", encoding="utf-8")
+            self.assertIsNone(gf.load_identity(path))
+            values = list(range(30))
+            path.write_text(
+                "[" + ", ".join(str(value) for value in values) + "]",
+                encoding="utf-8",
+            )
+            self.assertEqual(gf.load_identity(path), values)
+            self.assertIsNone(gf.load_identity(Path(directory) / "missing"))
+
+    def test_game1_blackbox_prefixes_the_browser_value(self):
+        stdout = "<body>BBRESULT:" + "A" * 120 + "</body>"
+        with mock.patch.object(
+            gf, "find_browser", return_value="/usr/bin/google-chrome"
+        ), mock.patch.object(
+            gf.subprocess,
+            "run",
+            return_value=SimpleNamespace(stdout=stdout),
+        ) as run:
+            value = gf.game1_blackbox()
+            self.assertEqual(value, "tra:" + "A" * 120)
+            command = run.call_args.args[0]
+            self.assertIn("--dump-dom", command)
+            self.assertIn("--headless=new", command)
+
+    def test_game1_blackbox_reports_a_failed_page(self):
+        with mock.patch.object(
+            gf, "find_browser", return_value="/usr/bin/google-chrome"
+        ), mock.patch.object(
+            gf.subprocess,
+            "run",
+            return_value=SimpleNamespace(stdout="<body>BBERROR:x</body>"),
+        ):
+            with self.assertRaises(gf.AuthError):
+                gf.game1_blackbox()
+
+    def test_game1_blackbox_needs_a_browser(self):
+        with mock.patch.object(gf, "find_browser", return_value=None):
+            with self.assertRaises(gf.AuthError) as context:
+                gf.game1_blackbox()
+        self.assertIn("NTPL_CHROME", str(context.exception))
+
+    def test_js_blackbox_encrypts_the_generated_value(self):
+        with mock.patch.object(
+            gf, "game1_blackbox", return_value="tra:test-value"
+        ) as generate:
+            value = gf.JsBlackbox().encrypted(
+                "gsid-1234", "install", "account"
+            )
+            generate.assert_called_once()
+            self.assertEqual(
+                xor_decrypt(value, "gsid-1234", "account"),
+                b"tra:test-value",
+            )
+
+    def test_identity_blackbox_matches_the_file_mode(self):
+        identity = [0] * 30
+        identity[2] = "Windows"
+        payload = {
+            "features": [7],
+            "installation": "install",
+            "session": "gsid",
+        }
+        source = gf.IdentityBlackbox(identity)
+        with mock.patch.object(
+            gf, "_request_payload", return_value=payload
+        ):
+            self.assertEqual(source.plain(), gf.blackbox(identity))
+            self.assertEqual(
+                source.encrypted("gsid-1234", "install", "account"),
+                gf._encrypted(identity, "account", "gsid-1234", "install"),
+            )
 
     def test_error_codes_from_dict_and_list(self):
         self.assertEqual(
@@ -59,8 +145,18 @@ class GameforgeAuthTests(unittest.TestCase):
             gf.requests, "Session", return_value=FakeSession(response)
         ):
             with self.assertRaises(gf.AuthError) as context:
-                gf.login("email", "password", [0] * 30, "install")
+                gf.login("email", "password", "tra:abc", "install")
         self.assertIn("CREDENTIALS_INVALID", context.exception.codes)
+
+    def test_login_sends_the_blackbox(self):
+        response = FakeResponse(201, {"token": "bearer"})
+        session = FakeSession(response)
+        with mock.patch.object(
+            gf.requests, "Session", return_value=session
+        ):
+            gf.login("email", "password", "tra:abc", "install")
+        body = session.calls[0][1]["json"]
+        self.assertEqual(body["blackbox"], "tra:abc")
 
     def test_login_returns_the_bearer(self):
         response = FakeResponse(201, {"token": "bearer"})
@@ -68,7 +164,7 @@ class GameforgeAuthTests(unittest.TestCase):
             gf.requests, "Session", return_value=FakeSession(response)
         ):
             self.assertEqual(
-                gf.login("email", "password", [0] * 30, "install"),
+                gf.login("email", "password", "tra:abc", "install"),
                 "bearer",
             )
 
@@ -87,7 +183,7 @@ class GameforgeAuthTests(unittest.TestCase):
             gf.requests, "Session", return_value=FakeSession(response)
         ):
             with self.assertRaises(gf.ChallengeRequired) as context:
-                gf.login("email", "password", [0] * 30, "install")
+                gf.login("email", "password", "tra:abc", "install")
         self.assertEqual(context.exception.challenge_id, "challenge-1")
 
     def test_ua_magic_shape(self):

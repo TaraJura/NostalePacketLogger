@@ -919,8 +919,8 @@ def build_parser() -> argparse.ArgumentParser:
     headless.add_argument(
         "--identity",
         default=None,
-        help="captured 30-value blackbox identity JSON "
-        "(default: ~/.config/ntpl/identity.json)",
+        help="captured 30-value identity JSON (default: generate the "
+        "device check with game1.js in headless Chrome/Chromium)",
     )
     headless.add_argument(
         "--show-password",
