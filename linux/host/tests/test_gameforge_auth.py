@@ -252,6 +252,32 @@ class GameforgeAuthTests(unittest.TestCase):
                 )
         self.assertIn("403", str(context.exception))
 
+    def test_mint_token_ignores_an_invalid_default_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            identity_path = Path(directory) / "identity.json"
+            identity_path.write_text("email: pass", encoding="utf-8")
+            cert_path = Path(directory) / "cert.pem"
+            cert_path.write_bytes(b"cert")
+            browser = SimpleNamespace(
+                token="bearer", blackbox="tra:plain", extra="tra:extra"
+            )
+            with mock.patch.object(
+                gf, "default_identity_path", return_value=identity_path
+            ), mock.patch(
+                "ntpl.gameforge_browser.browser_token",
+                return_value=browser,
+            ) as browser_token, mock.patch.object(
+                gf, "game_accounts", return_value=["account"]
+            ), mock.patch.object(
+                gf, "default_cert_path", return_value=cert_path
+            ), mock.patch.object(
+                gf, "mint_code", return_value="CODE"
+            ), mock.patch("builtins.print") as printed:
+                token = gf.mint_token("email", "password")
+        self.assertEqual(token, "CODE".encode("latin-1").hex())
+        browser_token.assert_called_once()
+        printed.assert_called()
+
     def test_mint_token_uses_the_website_login(self):
         with tempfile.TemporaryDirectory() as directory:
             cert_path = Path(directory) / "cert.pem"

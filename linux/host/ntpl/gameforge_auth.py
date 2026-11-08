@@ -696,13 +696,16 @@ def mint_token(
         captured = load_identity(identity_path)
         if captured is None:
             raise AuthError(
-                f"{identity_path} is not a 30-value identity list"
+                f"{identity_path} is not a 30-value identity list "
+                "(expected a captured blackbox, not credentials)"
             )
     elif default_identity_path() is not None:
         captured = load_identity()
         if captured is None:
-            raise AuthError(
-                f"{default_identity_path()} is not a 30-value identity list"
+            print(
+                f"ntpl headless: ignoring {default_identity_path()}: "
+                "expected a JSON list of 30 captured blackbox values, "
+                "not credentials"
             )
     cert_path = default_cert_path()
     if cert_path is None:

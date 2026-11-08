@@ -31,7 +31,7 @@ the new window (or run `inject.sh` yourself).
 |---|---|
 | `windows/` | Original MSVC/C# implementation, moved unchanged. Builds with Visual Studio; not exercised on this machine. |
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
-| Linux host tests | 185/185 pass (`make -C linux host-test`). |
+| Linux host tests | 186/186 pass (`make -C linux host-test`). |
 | Headless client | `ntpl headless` ports NosBazar's login cipher, `NoS0577`/`NsTeST` and world handshake to Python. Live 2026-11-08: the login server at `79.110.84.75:4000` answers `failc 1` to an invalid token, proving the packet layout, client version/hash and login cipher. The v2 email/password login is **live-validated (201)**; without an identity file the client signs in through gameforge.com's own form in headless Chrome (Node/CDP; the site solves its PoW challenge) and **iovation returns 200**. The final `thin/codes` call returns `403 Not allowed to create code` for browser-generated devices (the official client adds a `codeId` authorization ticket; Gfless uses a captured identity). A 30-value identity (`--identity`) or a launcher token (`--token-file`) is needed for the game token. The **image-drop captcha** is handled in one GTK window; the website PoW is handled by the site. Docs: `docs/headless.md`. |
 | MCP (agent access) | `python3 -m ntpl mcp` speaks MCP JSON-RPC over stdio and exposes 21 tools (state, entities, drops, map, portals, time-spaces, A* path, spells, move/travel, attack/cast, raw send, rest, pickup, wait, memory). It owns the DLL's single host connection and rebroadcasts it on `127.0.0.1:47900`; run the GUI with `--port 47900`. The DLL port is discovered from its `C:\ntpl-<pid>.port` file (the DLL may have fallen back from 47821 to 47822+). `.mcp.json` is committed; docs in `docs/mcp.md`. |
 | Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live 2026-11-07: map **2** NosVille Meadows (150x150), then map 1 NosVille (160x180) via `c_map`; 2026-11-06: map **20** Mountain Cave 1 (230x260). Map names come from `NSlangData_UK.NOS` → `_code_uk_MapIDData.txt` (`zts<id>e<TAB><name>`, 374 entries). `astar()` is 8-direction with sqrt(2) diagonals and no corner cutting; the path is drawn as a continuous polyline. |
@@ -57,7 +57,7 @@ cd ~/games/gameforge/NostalePacketLogger
 # Linux build (MinGW-w64 i686; installed via apt)
 make -C linux all test-host
 make -C linux check                 # file(1) on the three PE32 outputs
-make -C linux host-test             # 185 stdlib unittest cases
+make -C linux host-test             # 186 stdlib unittest cases
 PYTHONPATH=linux/host python3 -m ntpl mcp   # MCP stdio server + broker on 47900 (DLL port auto-discovered)
 PYTHONPATH=linux/host python3 -m ntpl headless --token-file ~/.config/ntpl/token --game-dir <Nostale dir>  # clientless login
 make -C linux gui-test              # headless GTK4 + map surface smoke

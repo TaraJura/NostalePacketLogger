@@ -65,8 +65,13 @@ Chrome/72 UA with a Chrome 156 blackbox makes Gameforge answer
 `CREDENTIALS_INVALID`.
 
 A captured 30-value identity at `~/.config/ntpl/identity.json` (or
-`--identity`) uses the direct API login; that file is sensitive, mode 0600
-and never committed. With that path, Gameforge's **image-drop captcha** is
+`--identity`) uses the direct API login; that file is a **JSON array of 30
+values decoded from a blackbox captured from a real Gameforge client**, not
+credentials. It is sensitive, mode 0600 and never committed; an invalid
+default file is ignored with a warning, while an explicit `--identity`
+file must be valid. The `nostale-auth` README describes the capture step
+(intercept one `/api/v1/auth/iovation` request and save its `blackbox`
+field); the Gfless identity file is the same 30-value list. With that path, Gameforge's **image-drop captcha** is
 handled in **one captcha window**: the client downloads the instruction
 text, the icon strip and the target scene, and shows the three images with
 an icon-number box. Read the instruction, find the matching icon in the
