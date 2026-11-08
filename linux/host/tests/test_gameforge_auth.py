@@ -13,6 +13,14 @@ class FakeResponse:
         return self._body
 
 
+class FakeSession:
+    def __init__(self, response):
+        self.response = response
+
+    def post(self, *args, **kwargs):
+        return self.response
+
+
 class GameforgeAuthTests(unittest.TestCase):
     def test_generated_identity_shape(self):
         identity = gf.generated_identity()
@@ -47,18 +55,40 @@ class GameforgeAuthTests(unittest.TestCase):
         response = FakeResponse(
             409, {"errorTypes": {"CREDENTIALS_INVALID": 1}}
         )
-        with mock.patch.object(gf.requests, "post", return_value=response):
+        with mock.patch.object(
+            gf.requests, "Session", return_value=FakeSession(response)
+        ):
             with self.assertRaises(gf.AuthError) as context:
                 gf.login("email", "password", [0] * 30, "install")
         self.assertIn("CREDENTIALS_INVALID", context.exception.codes)
 
     def test_login_returns_the_bearer(self):
         response = FakeResponse(201, {"token": "bearer"})
-        with mock.patch.object(gf.requests, "post", return_value=response):
+        with mock.patch.object(
+            gf.requests, "Session", return_value=FakeSession(response)
+        ):
             self.assertEqual(
                 gf.login("email", "password", [0] * 30, "install"),
                 "bearer",
             )
+
+    def test_login_raises_challenge_with_the_id(self):
+        response = FakeResponse(
+            409,
+            {
+                "errorTypes": ["CHALLENGE_REQUIRED"],
+                "challengeId": "challenge-1",
+            },
+        )
+        response.headers = {
+            "gf-challenge-id": "challenge-1;https://challenge.gameforge.com"
+        }
+        with mock.patch.object(
+            gf.requests, "Session", return_value=FakeSession(response)
+        ):
+            with self.assertRaises(gf.ChallengeRequired) as context:
+                gf.login("email", "password", [0] * 30, "install")
+        self.assertEqual(context.exception.challenge_id, "challenge-1")
 
     def test_ua_magic_shape(self):
         magic = gf._ua_magic(

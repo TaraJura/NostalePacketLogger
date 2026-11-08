@@ -56,8 +56,13 @@ and it prompts for the email and password (nothing is stored or logged).
 Gameforge rejects a generated device identity with `CREDENTIALS_INVALID`, so
 the login needs a captured 30-value identity at
 `~/.config/ntpl/identity.json` (or `--identity`); that file is sensitive,
-mode 0600 and never committed. If Gameforge answers with a
-captcha/challenge, the login stops and a token from a launcher is required.
+mode 0600 and never committed. If Gameforge answers with its **image-drop
+captcha**, the client downloads three images (the instruction text, the
+icon strip and the target scene) to `~/.cache/ntpl/captcha-*`, opens them,
+and asks for the icon number that matches the text (1 = leftmost). It
+submits the answer and retries the login; a wrong answer refreshes the
+images. This is Gameforge's human check — you solve it. A `gf-pow-captcha`
+challenge needs a real browser; use a launcher token for that.
 
 ```bash
 linux/scripts/headless.sh --print-packets
@@ -76,8 +81,10 @@ Options: `--login-host/--login-port` (default `79.110.84.75:4000`),
 
 - **Token acquisition**: the current v2 email/password login is implemented
   (terminal prompt or env) and needs a **captured device identity**; a
-  generated identity is rejected as `CREDENTIALS_INVALID`. Captcha/PoW/OTP
-  are not solved. A token from a current launcher always works.
+  generated identity is rejected as `CREDENTIALS_INVALID`. The image-drop
+  captcha is solved by the user in the terminal (images open, type the icon
+  number). The proof-of-work captcha and OTP are not solved. A token from a
+  current launcher always works.
 - **World phase** with a real token must be verified on a test account.
 - **One session per account**: a second login for the same account can
   disconnect the game client or the other session.

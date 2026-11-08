@@ -493,7 +493,32 @@ def run_headless(
         if not (email and password):
             print(f"ntpl headless: {token_error}")
             return 2
-        from .gameforge_auth import AuthError, mint_token
+        from .gameforge_auth import (
+            AuthError,
+            challenge_info,
+            mint_token,
+            solve_image_drop,
+        )
+
+        def on_challenge(exc, session):
+            info = challenge_info(exc.challenge_id, session=session)
+            exc.kind = info.get("type", "")
+            exc.script = info.get("script", "")
+            print(f"Gameforge login check: {exc.kind or 'unknown'}")
+            if exc.kind == "gf-image-drop-captcha":
+                def ask():
+                    return input(
+                        "Icon number that matches the text "
+                        "(1 = first icon): "
+                    )
+
+                return solve_image_drop(
+                    exc.challenge_id, locale, session, ask
+                )
+            print(
+                "This challenge type needs a browser; use a launcher token."
+            )
+            return False
 
         try:
             session_token = mint_token(
@@ -502,6 +527,7 @@ def run_headless(
                 Path(identity).expanduser() if identity else None,
                 account_id=account_id,
                 locale=locale,
+                on_challenge=on_challenge,
             )
         except AuthError as exc:
             print(f"ntpl headless: {exc}")

@@ -18,6 +18,7 @@ import json
 import os
 import random
 import re
+import subprocess
 import time
 import uuid
 from datetime import datetime, timezone
@@ -44,6 +45,24 @@ class AuthError(RuntimeError):
     def __init__(self, message: str, codes: list[str] | None = None) -> None:
         super().__init__(message)
         self.codes = codes or []
+
+
+class ChallengeRequired(AuthError):
+    """The account needs Gameforge's human check before the login passes."""
+
+    def __init__(
+        self,
+        challenge_id: str,
+        url: str,
+        codes: list[str] | None = None,
+    ) -> None:
+        super().__init__(
+            "Gameforge requires a captcha challenge", codes
+        )
+        self.challenge_id = challenge_id
+        self.url = url
+        self.kind = ""
+        self.script = ""
 
 
 def default_prefix() -> Path:
@@ -235,15 +254,17 @@ def login(
     identity: list,
     installation: str,
     locale: str = LOCALE,
+    session: requests.Session | None = None,
 ) -> str:
     """Return the bearer token, or raise AuthError with Gameforge's codes."""
+    session = session or requests.Session()
     headers = {
         "User-Agent": BROWSER_USER_AGENT,
         "TNT-Installation-Id": installation,
         "gf-installation-id": installation,
         "Content-Type": "application/json",
     }
-    response = requests.post(
+    response = session.post(
         "https://spark.gameforge.com/api/v2/authProviders/"
         "credentials/sessions",
         headers=headers,
@@ -260,6 +281,20 @@ def login(
         if token:
             return token
     codes = _codes(response)
+    if "CHALLENGE_REQUIRED" in codes:
+        header = response.headers.get("gf-challenge-id", "")
+        challenge_id = ""
+        url = "https://challenge.gameforge.com"
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        challenge_id = body.get("challengeId") or (
+            header.split(";", 1)[0] if ";" in header else header
+        )
+        if ";" in header:
+            url = header.split(";", 1)[1]
+        raise ChallengeRequired(challenge_id, url, codes)
     raise AuthError(
         "Gameforge login rejected"
         + (f": {', '.join(codes)}" if codes else ""),
@@ -289,6 +324,116 @@ def game_accounts(bearer: str, installation: str) -> list[str]:
     if not nostale:
         raise AuthError("no NosTale game account on this Gameforge account")
     return nostale
+
+
+def challenge_info(
+    challenge_id: str, session: requests.Session | None = None
+) -> dict:
+    session = session or requests.Session()
+    response = session.get(
+        f"https://challenge.gameforge.com/challenge/{challenge_id}",
+        headers={
+            "User-Agent": BROWSER_USER_AGENT,
+            "Origin": "spark://www.gameforge.com",
+        },
+        timeout=20,
+    )
+    if response.status_code != 200:
+        raise AuthError(
+            f"Gameforge challenge info failed ({response.status_code})"
+        )
+    return response.json()
+
+
+def _open_image(path: Path) -> None:
+    try:
+        subprocess.Popen(
+            ["xdg-open", str(path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        pass
+
+
+def solve_image_drop(
+    challenge_id: str,
+    locale: str,
+    session: requests.Session,
+    ask,
+) -> bool:
+    """Fetch the text/icons/target images, let the user pick, post the answer.
+
+    ``ask`` returns the 1-based icon number the user chose; the API expects
+    the 0-based index (the launcher does ``spinbox - 1``).
+    """
+    base = (
+        "https://image-drop-challenge.gameforge.com/challenge/"
+        f"{challenge_id}/{locale}"
+    )
+    headers = {
+        "User-Agent": BROWSER_USER_AGENT,
+        "Origin": "spark://www.gameforge.com",
+        "Accept": "*/*",
+        "Connection": "Keep-Alive",
+    }
+    directory = (
+        Path.home() / ".cache" / "ntpl" / f"captcha-{challenge_id[:8]}"
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+
+    def fetch(last=None):
+        response = session.get(base, headers=headers, timeout=20)
+        if response.status_code != 200:
+            raise AuthError(
+                f"captcha fetch failed ({response.status_code})"
+            )
+        if last is None:
+            last = response.json().get("lastUpdated", "")
+        for remote, name in (
+            ("text", "text"),
+            ("drag-icons", "icons"),
+            ("drop-target", "target"),
+        ):
+            image = session.get(
+                f"{base}/{remote}?{last}",
+                headers={
+                    **headers,
+                    "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+                },
+                timeout=20,
+            )
+            if image.status_code == 200:
+                suffix = (
+                    "webp"
+                    if "webp" in image.headers.get("Content-Type", "")
+                    else "png"
+                )
+                path = directory / f"{name}.{suffix}"
+                path.write_bytes(image.content)
+                _open_image(path)
+        print(f"captcha images: {directory}")
+        return last
+
+    last = fetch()
+    for attempt in range(3):
+        try:
+            answer = int(ask()) - 1
+        except (TypeError, ValueError):
+            print("enter the icon number")
+            continue
+        response = session.post(
+            base,
+            headers={**headers, "Content-Type": "application/json"},
+            json={"answer": answer},
+            timeout=20,
+        )
+        data = response.json() if response.status_code == 200 else {}
+        if data.get("status") == "solved":
+            return True
+        print("wrong icon; the images refresh")
+        fetch(data.get("lastUpdated"))
+    return False
 
 
 def mint_code(
@@ -362,11 +507,32 @@ def mint_token(
     identity_path: Path | None = None,
     account_id: str | None = None,
     locale: str = LOCALE,
+    on_challenge=None,
 ) -> str:
-    """Full chain: email/password -> bearer -> iovation -> thin code (hex)."""
+    """Full chain: email/password -> bearer -> iovation -> thin code (hex).
+
+    ``on_challenge(exc, session)`` may solve Gameforge's human check
+    (image-drop captcha) and return True; the login is then retried.
+    """
     installation = default_installation_id()
     identity = load_identity(identity_path)
-    bearer = login(email, password, identity, installation, locale=locale)
+    session = requests.Session()
+    for _ in range(3):
+        try:
+            bearer = login(
+                email,
+                password,
+                identity,
+                installation,
+                locale=locale,
+                session=session,
+            )
+            break
+        except ChallengeRequired as exc:
+            if on_challenge is None or not on_challenge(exc, session):
+                raise
+    else:
+        raise AuthError("the Gameforge challenge was not solved")
     accounts = game_accounts(bearer, installation)
     chosen = account_id if account_id in accounts else accounts[0]
     cert_path = default_cert_path()
