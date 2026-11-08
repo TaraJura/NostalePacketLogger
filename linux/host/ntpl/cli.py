@@ -701,6 +701,23 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_headless(args: argparse.Namespace) -> int:
+    from .headless import run_headless
+
+    return run_headless(
+        token=args.token,
+        token_file=args.token_file,
+        game_dir=args.game_dir,
+        login_host=args.login_host,
+        login_port=args.login_port,
+        region=args.region,
+        character=args.character,
+        world_id=args.world_id,
+        channel=args.channel,
+        print_packets=args.print_packets,
+    )
+
+
 # --------------------------------------------------------------------- main
 
 
@@ -855,6 +872,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="DLL packet log used to seed the map, portals and vnums",
     )
     mcp.set_defaults(handler=cmd_mcp)
+
+    from .headless import DEFAULT_LOGIN_HOST, DEFAULT_LOGIN_PORT
+
+    headless = sub.add_parser(
+        "headless",
+        help="clientless login: play without the game client "
+        "(needs a Gameforge thin token)",
+    )
+    headless.add_argument(
+        "--token",
+        default=None,
+        help="hex Gameforge thin token (or NTPL_HEADLESS_TOKEN)",
+    )
+    headless.add_argument("--token-file", default=None)
+    headless.add_argument(
+        "--game-dir",
+        default=".",
+        help="directory containing NostaleClientX.exe (default: %(default)s)",
+    )
+    headless.add_argument("--login-host", default=DEFAULT_LOGIN_HOST)
+    headless.add_argument("--login-port", type=int, default=DEFAULT_LOGIN_PORT)
+    headless.add_argument("--region", default="0")
+    headless.add_argument("--character", type=int, default=None)
+    headless.add_argument("--world-id", type=int, default=None)
+    headless.add_argument("--channel", type=int, default=None)
+    headless.add_argument("--print-packets", action="store_true")
+    headless.set_defaults(handler=cmd_headless)
 
     return parser
 

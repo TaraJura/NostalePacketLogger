@@ -340,3 +340,12 @@ __pycache__/
 .venv/
 *.egg-info/
 .pytest_cache/
+
+# ntpl secrets and session data (never commit)
+.env
+*.env
+identity.json
+blackbox.json
+*.token
+token
+token.txt
