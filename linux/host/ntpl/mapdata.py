@@ -234,14 +234,26 @@ def astar(
     grid: MapGrid,
     start: tuple[int, int],
     goal: tuple[int, int],
+    blocked: frozenset[tuple[int, int]] | set[tuple[int, int]] | None = None,
 ) -> list[tuple[int, int]] | None:
     """Shortest 8-direction path over walkable cells, excluding `start`.
 
     Diagonal steps cost sqrt(2) and are only taken when both orthogonal cells
     are walkable (no corner cutting). Returns the cells to walk through (goal
-    included), or None when no path exists or either endpoint is not walkable.
+    included), or None when no path exists, either endpoint is not walkable or
+    the goal is in `blocked`.
+
+    ``blocked`` adds temporary obstacles on top of the terrain (the GUI uses
+    it for map portals so the bot never steps on a warp tile). A blocked
+    *start* is allowed: leaving a cell must never be forbidden, only entering
+    one. Diagonals are also refused when either orthogonal cell is blocked, so
+    a path never cuts a portal corner.
     """
+    blocked = blocked or frozenset()
+
     if not grid.is_walkable(*start) or not grid.is_walkable(*goal):
+        return None
+    if goal in blocked:
         return None
     if start == goal:
         return []
@@ -260,6 +272,15 @@ def astar(
         if current == goal:
             break
         for neighbour in grid.neighbours(*current):
+            if neighbour in blocked:
+                continue
+            dx = neighbour[0] - current[0]
+            dy = neighbour[1] - current[1]
+            if dx and dy and (
+                (current[0] + dx, current[1]) in blocked
+                or (current[0], current[1] + dy) in blocked
+            ):
+                continue
             step = (
                 _SQRT2
                 if neighbour[0] != current[0] and neighbour[1] != current[1]

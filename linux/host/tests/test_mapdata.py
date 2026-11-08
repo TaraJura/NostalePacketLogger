@@ -118,6 +118,35 @@ class AstarTests(unittest.TestCase):
     def test_same_cell(self):
         self.assertEqual(astar(self.grid(), (0, 0), (0, 0)), [])
 
+    def test_blocked_cells_are_avoided(self):
+        grid = MapGrid(5, 5, 5, bytes(25))
+        # A portal wall with one gap on the bottom row.
+        blocked = {(2, y) for y in range(4)}
+        path = astar(grid, (0, 0), (4, 4), blocked)
+        self.assertIsNotNone(path)
+        self.assertEqual(path[-1], (4, 4))
+        self.assertFalse(blocked.intersection(path))
+        self.assertIn((2, 4), path)
+
+    def test_blocked_goal_is_unreachable(self):
+        grid = MapGrid(6, 5, 5, bytes(25))
+        self.assertIsNone(astar(grid, (0, 0), (4, 4), {(4, 4)}))
+
+    def test_blocked_start_may_leave(self):
+        # Standing on a cell that just became blocked must not trap the
+        # character: only entering a blocked cell is forbidden.
+        grid = MapGrid(7, 5, 5, bytes(25))
+        path = astar(grid, (2, 2), (4, 2), {(2, 2)})
+        self.assertIsNotNone(path)
+        self.assertEqual(path[-1], (4, 2))
+
+    def test_diagonal_does_not_cut_a_portal_corner(self):
+        # The target is free but both routes diagonally squeeze past a blocked
+        # orthogonal; the 8-direction walk must not cut that corner.
+        grid = MapGrid(8, 3, 3, bytes(9))
+        blocked = {(1, 0), (0, 1)}
+        self.assertIsNone(astar(grid, (0, 0), (1, 1), blocked))
+
 
 class RankingTests(unittest.TestCase):
     def test_ranking_prefers_covering_walkable_map(self):

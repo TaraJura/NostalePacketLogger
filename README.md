@@ -22,18 +22,18 @@ shared: the transport differs, the game's packets do not.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 123 Python unit tests
+make -C linux host-test                      # 142 Python unit tests
 make -C linux gui-test                       # headless GTK4 + map smoke (xvfb)
-make -C linux bot-test                       # 6 fake-server bot smokes
+make -C linux bot-test                       # 13 fake-server bot smokes
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path
 linux/scripts/dev-test-wine.sh 25
 
 # with the game running in its own prefix:
-linux/scripts/inject.sh
+linux/scripts/inject.sh        # optional: the GUI can inject from its picker
 linux/scripts/host.sh status
 linux/scripts/host.sh monitor
-linux/scripts/gui.sh
+linux/scripts/gui.sh           # lists the running clients, picks/injects one
 
 # agent access (MCP over stdio; owns the DLL link, GUI joins on 47822)
 PYTHONPATH=linux/host python3 -m ntpl mcp
@@ -80,7 +80,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 123 unit tests pass, the GTK4 window and eight bot
+The Linux port builds, its 142 unit tests pass, the GTK4 window and thirteen bot
 smoke tests pass, and the real injector has been run against the **live
 NosTale client** under Wine 11:
 
@@ -120,7 +120,10 @@ recovery banner, green/red active toggles, hover tooltips with monster names
 from the client's language archive, server-sent portals (`gp`) and Time-Space
 entrances (`wp`, with the nosapki stone icon and the client's own "Required
 Level N" wording), and an explicit unknown-vnum option for monsters that
-spawned before injection. A third top-level **Bot log** tab keeps a
+spawned before injection. **Block portals** (on by default) drops the
+client's own `preq` portal request in the DLL and keeps paths off the warp
+tiles, so a farming loop cannot enter another map even from a tile it is
+already standing on. A third top-level **Bot log** tab keeps a
 timestamped, selectable record of every action (attacks, TARGET selections and
 refusals, walks, pickups, recovery, DLL errors) for debugging, and mirrors it
 to `~/.config/ntpl/bot.log` (`NTPL_BOT_LOG` overrides) so it can be tailed

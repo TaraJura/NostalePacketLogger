@@ -282,11 +282,42 @@ class EngineTests(unittest.TestCase):
             packet(Kind.RECV, "su 3 500 1 14881134 10 9 11 4401")
         )
         self.assertEqual(world.last_attacker_id, 500)
+        self.assertEqual(world.self_hit_count, 0)
         # Our own attack on a monster must not be treated as retaliation.
         world = self.engine.feed(
             packet(Kind.RECV, "su 1 14881134 3 501 0 9 11 4401")
         )
         self.assertEqual(world.last_attacker_id, 500)
+        # ... but it counts as a landed hit, so the server's trailing
+        # `cancel 0 0 -1` is not mistaken for a refused attack.
+        self.assertEqual(world.self_hit_count, 1)
+
+    def test_zero_hp_marks_dead_and_revive_clears_it(self):
+        self.engine.feed(
+            packet(Kind.RECV, "at 14881134 20 25 117 0 0 0 0 0 0 0")
+        )
+        world = self.engine.feed(
+            packet(Kind.RECV, "stat 0 2791 100 3827 0 0")
+        )
+        self.assertTrue(world.dead)
+        world = self.engine.feed(
+            packet(Kind.RECV, "revive 1 14881134 0")
+        )
+        self.assertFalse(world.dead)
+
+    def test_revive_for_another_character_keeps_dead(self):
+        self.engine.feed(
+            packet(Kind.RECV, "at 14881134 20 25 117 0 0 0 0 0 0 0")
+        )
+        self.engine.feed(packet(Kind.RECV, "stat 0 2791 100 3827 0 0"))
+        world = self.engine.feed(
+            packet(Kind.RECV, "revive 1 14825946 0")
+        )
+        self.assertTrue(world.dead)
+        world = self.engine.feed(
+            packet(Kind.RECV, "stat 1 2791 100 3827 0 0")
+        )
+        self.assertFalse(world.dead)
 
     def test_skill_used_event(self):
         # Real packet observed in the live log.

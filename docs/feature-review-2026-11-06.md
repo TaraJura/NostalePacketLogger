@@ -26,7 +26,7 @@ left running.
 | Basic auto-attack | `ncif 3 <id>` + `u_s 0 3 <id>`; Retaliate target first | bot + rules + out-of-range smokes | `su 1 14881134 3 5030 866 …`, damage 1056 |
 | Move first | Attacks between path legs, keeps walking; off = clear area | bot smoke with Move first on | path+spell combo ran with it on |
 | Target filters | All / Only selected / All except selected by vnum; unknown-vnum opt-in | rules smoke (allowed 200 vs nearer 201) + unknown toggle test | only-vnum-200 live test attacked 5030, no other target |
-| Monster names | `NSlangData_UK.NOS` → `vnum → name`, 2,795 entries | text-codec/parser tests | mapping used for live entities (5030 vnum 200 etc.) |
+| Monster names | `NSgtdData.NOS` `monster.dat` (vnum → text key) + `NSlangData_UK.NOS` (key → name), 2,679 entries; corrected 2026-11-07 | text-codec/parser tests | mapping used for live entities (vnum 419 = Violent Seedle etc.) |
 | Tooltips | Own/player/monster/NPC/drop details; name, ids, distance | GUI smoke (incl. DLL-log backfill) | data path verified; visual on the live window |
 | Spawn backfill | Entity vnum/player name from `[RECV] in` log lines | spawnlog tests + GUI smoke | used at GUI startup |
 | Skill list | `ski` pages → deduplicated ordered list; `u_s` slots | engine + spawnlog tests, rules/spell-order smokes | live `ski` gives 866→slot 0 … 876→slot 10 |

@@ -67,7 +67,7 @@ map 2 wins outright.
 | `MapGrid.at(x, y)` | terrain byte or `None` |
 | `MapGrid.is_walkable(x, y)` | `at() == 0x00` |
 | `MapGrid.neighbours(x, y)` | walkable 8-direction neighbours; diagonals require both orthogonal cells to be walkable |
-| `astar(grid, start, goal)` | shortest 8-direction path (diagonal cost sqrt 2), goal included |
+| `astar(grid, start, goal, blocked=None)` | shortest 8-direction path (diagonal cost sqrt 2), goal included; `blocked` adds temporary obstacles such as map portals |
 | `find_map_for_positions(grids, points)` | rank maps for live coordinates |
 | `choose_map_for_positions(grids, points, current_id)` | pick one map: tightest perfect fit, keep a tied current |
 | `terrain_rgb(value)` | palette colour |
@@ -77,16 +77,30 @@ Override the archive path with `NTPL_NSTC` or `--file`.
 
 ## Monster names
 
-`NSlangData_<lang>.NOS` in the same `NostaleData` directory holds the client's
-text tables. The monster table is `_code_uk_monster.txt` (the language suffix
-follows the installed client) and contains one record per template:
+The displayed name needs two client tables, and the record ids in them are
+**not** the monster vnum.
+
+`NSgtdData.NOS` in the same `NostaleData` directory contains `monster.dat`,
+whose records map the template vnum to a language key:
 
 ```
-zts200e	Mountain Turtle
-zts206e	Angry Queen Bee
-zts223e	Small Wiggler
-zts5160e	Crazed Crusader
+VNUM	419
+NAME	zts489e
 ```
+
+`NSlangData_<lang>.NOS` holds the text tables. The monster table is
+`_code_uk_monster.txt` (the language suffix follows the installed client) and
+maps that key to the localized name:
+
+```
+zts489e	Violent Seedle
+zts490e	Crazy Dander
+zts491e	Violent Chicken
+```
+
+The key is its own id space: vnum 419 uses key `zts489e`, while the text
+record `zts419e` is "Wheat". Reading the language table by vnum alone gives
+wrong names — the live map 103 shows Violent Seedles, not Wheat.
 
 The archive layout:
 
@@ -104,18 +118,19 @@ entry       count times:
 `.txt`/`.dat` entries use the client's nibble codec: a control byte carries a
 count; when bit 7 is set the low/high half-bytes index a 16-character alphabet,
 otherwise the following bytes are XOR `0x33`; `0xFF` emits a carriage return.
-`monsternames.py` implements the archive reader and the codec, then parses the
-`zts<vnum>e\t<name>` records into `{vnum: name}` (2,795 entries in the current
-UK client). `NTPL_NSLANG` selects an explicit archive; otherwise the file is
-looked up next to `NStcData.NOS` (`NTPL_NSTC`), preferring `UK`, then any other
-language. A missing archive yields an empty table and the UI falls back to the
-entity id.
+`monsternames.py` implements the archive readers and the codec, then joins
+`monster.dat` (`{vnum: key}`) with the text table (`{key: name}`) into
+`{vnum: name}` (2,679 entries in the current UK client). `NTPL_NSLANG` selects
+an explicit language archive and `NTPL_NSGTD` the game-data archive; otherwise
+both are looked up next to `NStcData.NOS` (`NTPL_NSTC`), preferring `UK`, then
+any other language. A missing archive yields an empty table and the UI falls
+back to the entity id.
 
 Important: the `in 3 <vnum> <entityId> <x> <y> ...` spawn packet carries the
 template vnum first and the per-session entity id second. The map's `ncif`,
 `u_s` and `su` packets use the **entity id**; tooltips resolve it to the name
 through the stored vnum. For example, live `in 3 206 5122 ...` is entity 5122,
-an Angry Queen Bee (vnum 206).
+a Mountain Turtle (vnum 206 → `zts200e`).
 
 ### Entities that spawned before the host attached
 
@@ -164,6 +179,12 @@ grouped by function:
   from the DLL log's last `at`. On entry the server sends the map's whole
   portal list as `gp <x> <y> <toMap> …`; those are drawn as rings with a
   "Portal → map N" tooltip and persisted in `~/.config/ntpl/portals.json`.
+  **Block portals** (Path section, on by default) treats those cells as
+  obstacles — A* routes around them, a click on one is refused and every
+  `MOVE` is checked against them — and the DLL drops the client's own `preq`
+  portal request, so a farming loop cannot change maps even from a tile it is
+  already standing on. See
+  [bot-config.md](bot-config.md#block-portals--stay-on-one-map).
   Right after `gp` the server sends the map's **Time-Space entrances** as
   `wp <x> <y> <tsId> <flag> <minLv> <maxLv>`; each is drawn as the nosapki
   Time-Space stone in a gold frame, with the client's own tooltip wording:
@@ -397,9 +418,9 @@ never sees the `at` packet.
 ## Tests
 
 ```bash
-make -C linux host-test   # 123 cases incl. synthetic NOS, 8-way A*, checksum, config
+make -C linux host-test   # 142 cases incl. synthetic NOS, 8-way A*, checksum, config
 make -C linux gui-test    # GUI + map surface + tooltips + unknown-position guard
-make -C linux bot-test    # 9 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach
+make -C linux bot-test    # 13 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive, ghost-target dropping
 ```
 
 The bot test sends a fake player at (25,117) on map 20, a monster at
@@ -453,9 +474,10 @@ from where it stands, and reports “chasing monster 5087”. See
 - Map switching is live-verified from the portal capture 20 ↔ 85:
   `c_map 0 20 0` → `mapout` → `at ... 85 ...` → `c_map 0 85 1`, and back.
   The GUI follows the second `c_map` field immediately.
-- Monster names are mapped live: e.g. entity 5032/vnum 200 (Mountain Turtle),
-  5068/201 (Rock Turtle), 5122/206 (Angry Queen Bee), 5161/223 (Small
-  Wiggler). Tooltips show the name, entity id and vnum.
+- Monster names are mapped live (corrected 2026-11-07 through `monster.dat`):
+  e.g. entity 5032/vnum 200 (Wolf), 5068/201 (Brutal Wolf), 5122/206
+  (Mountain Turtle), 5161/223 (Small Wasp). Tooltips show the name, entity id
+  and vnum.
 - Pathing is now 8-direction A* with diagonal steps and a continuous polyline.
   The headless tests cover the diagonal shortcut and corner-cut rejection;
   the client's MoveTo still performs the actual movement, so watch the first

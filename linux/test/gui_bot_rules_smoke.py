@@ -2,8 +2,8 @@
 
 The fake server presents two monsters:
 
-    501, vnum 201 (Rock Turtle), at (25,118) - closest
-    500, vnum 200 (Mountain Turtle), at (26,119)
+    501, vnum 201 (Brutal Wolf), at (25,118) - closest
+    500, vnum 200 (Wolf), at (26,119)
 
 The filter allows only vnum 200, so the bot must ignore 501.  HP is 40 %, so
 the spell rule (spell 7, my HP below 50 %) must send `u_s 7 3 500` instead of

@@ -26,10 +26,16 @@ the per-session entity id. This works for monsters that spawned before the GUI
 attached because `spawnlog.py` backfills the vnum from the DLL log; see
 [map.md](map.md#entities-that-spawned-before-the-host-attached).
 
-Retaliate applies the same filter: a monster that is hitting you is ignored if
-it is excluded. In "only selected" mode an entity whose vnum cannot be
-resolved is skipped by default; in "all except selected" it is allowed because
-it cannot be on the exclusion list.
+**Retaliate ignores the target filter**: a monster that hits the character is
+fought even when its vnum is excluded (or unknown), because self-defence must
+not depend on a farming whitelist — e.g. an Angry Bee (212) spawned by a
+beehive you killed is attacked back in "Only selected" mode. It also works
+with **Auto-attack off**: a monster that hits the character is attacked back
+(and only that monster), so the bot defends itself while passive targeting is
+disabled. Passive targeting still respects the filter in the usual way: in
+"only selected" mode an entity whose vnum cannot be resolved is skipped by
+default; in "all except selected" it is allowed because it cannot be on the
+exclusion list.
 
 **Also attack monsters with unknown vnum** handles the remaining gap: a
 monster that was already alive when the DLL was injected has no `in` packet in
@@ -45,7 +51,9 @@ Retaliate, Pickup, Auto-recover HP/MP) are **green**, inactive ones are
 recovery check runs before targeting and spell rules. Recovery never abandons
 a fight: if the bot is already hitting a live target in range, it finishes
 that kill first, then sits until the resource that triggered recovery is
-full.
+full. If a monster hits the character while it is recovering (and is within
+attack reach), the bot stands up and fights back instead of sitting in the
+line of fire, then resumes recovery once the attacker is gone.
 
 ## Spells — scanned catalog, rules and execution order
 
@@ -165,6 +173,36 @@ The catalog is loaded in a background thread at startup (Skill.dat decodes
 about 1.2 MB); the picker shows a loading row until it is ready. If the file is
 missing, the picker is empty and manual vnums still work.
 
+## Block portals — stay on one map
+
+NosTale portals are warp tiles: as soon as the character stands on one, the
+client sends its own `preq` (portal request) and the server moves it to the
+other map. There is no packet to decline, so **Block portals** (Path section,
+on by default) blocks the request itself:
+
+- The DLL drops the client's `preq` before it reaches the socket while the
+  toggle is on (the packet still appears in the stream and the log as
+  `SEND|preq`, so a blocked attempt is visible). This is the hard guarantee:
+  even standing on a warp tile or walking off/onto it cannot change the map.
+  The client sends `preq` through its generic packet builder, so both the send
+  hook and the skill call-site hook honour the drop.
+- A* treats every known warp cell of the current map as an obstacle. The cells
+  come from the server's `gp` list, the engine's crossing fallback and the
+  persisted portal map (see [map.md](map.md#portals-and-time-space-stones)).
+- A map click on a portal is refused while the toggle is on.
+- Every `MOVE` is checked against the portal cells, including the straight
+  segment from the current position, so a path built before a `gp` arrived
+  cannot even head for a tile.
+- A drop or monster lying **on** a portal is approached from a neighbouring
+  cell (pickup and melee both work from there).
+
+The GUI tells the DLL `PORTALS|1` on every connect and when the toggle
+changes, so the protection also covers a character that is already standing on
+a portal. Turning the toggle off sends `PORTALS|0` and restores normal
+crossing, for example when you actually want to travel to the next map. The
+setting is saved as `block_portals`; the live state is in the DLL's status line
+(`portalblock=off|BLOCKED`).
+
 ## Save and load
 
 **Save config…** writes every setting below to a JSON file; **Load config…**
@@ -190,6 +228,7 @@ Example:
   "recover_mp": true,
   "low_mp_pct": 30.0,
   "loop": true,
+  "block_portals": true,
   "monster_mode": "only",
   "monster_vnums": [200, 206],
   "attack_unknown": false,

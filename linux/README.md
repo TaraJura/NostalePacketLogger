@@ -64,17 +64,19 @@ uses lowercase includes for that reason.
 
 ```bash
 make -C linux all test-host
-make -C linux host-test          # 123 cases: protocol, client, engine, mapdata, config, names
-make -C linux gui-test           # headless GTK4: map switch, tooltips, toggles, banner
-make -C linux bot-test           # 9 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach
+make -C linux host-test          # 142 cases: protocol, client, engine, mapdata, config, names
+make -C linux gui-test           # headless GTK4: map switch, tooltips, toggles,
+                                 # banner, client picker
+make -C linux bot-test           # 13 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive, ghost-target dropping
 ./linux/scripts/dev-test-wine.sh 25
 ```
 
 `dev-test-wine.sh` creates a temporary Wine prefix and runs two things:
 
 1. `HookStubTest.exe` calls the real `hooks.S` detours with a known EDX and
-   checks that the packet pointer, the original-call replay and the trampoline
-   continuation are all correct. This is the regression test for the x86 ABI.
+   checks that the packet pointer, the original-call replay, the trampoline
+   continuation and the packet-drop path (a 0 return skips the trampoline) are
+   all correct. This is the regression test for the x86 ABI.
 2. a copy of `FakeGame.exe` runs as `NostaleClientX.exe` with `--no-load`; the
    **real** `Injector.exe --all` finds it by name and injects the DLL; the
    Python host then connects over TCP. The DLL reports `NOT-FOUND` for the game
@@ -103,9 +105,11 @@ linux/scripts/host.sh monitor --engine
 linux/scripts/host.sh walk 25 117        # send a walk, wait for tp/mv
 linux/scripts/host.sh map info 20 --at 25,117
 linux/scripts/host.sh map render 20 /tmp/map.png --scale 3
-linux/scripts/gui.sh                     # GTK4 UI (one-command launcher)
+linux/scripts/gui.sh                     # GTK4 UI + startup client picker
 linux/scripts/host.sh gui                # same, via the host wrapper
 ```
+
+The sidebar's **Block portals** toggle (on by default) drops the client's `preq` portal request in the DLL and keeps paths off warp tiles, so a farming loop cannot change maps.
 
 The GUI's **Map / Bot** tab loads the client's own map archive, draws the
 whole walkable grid and the live entities with name tooltips, switches the map

@@ -401,10 +401,10 @@ replays the live 20→85→20 sequence.
 
 `NSlangData_UK.NOS` is a text archive (`count`, then per entry: number, name
 length, name, isDat, size, data). `_code_uk_monster.txt` is nibble-coded and
-decrypts to `zts<vnum>e<TAB><name>` records: **2,795** names. Examples from the
-live session:
+decrypts to `zts<text id>e<TAB><name>` records: **2,795** names. Examples from
+the live session:
 
-| vnum | name | live entity observed |
+| text id | name | live entity observed |
 |---|---|---|
 | 200 | Mountain Turtle | 5032 |
 | 201 | Rock Turtle | 5068 |
@@ -414,6 +414,13 @@ live session:
 | 218 | Wasp | |
 | 219 | Large Wasp | |
 | 223 | Small Wiggler | 5161/5162/5163/5164 |
+
+**Correction (2026-11-07):** the first column is a text id, not a monster
+vnum. The live monster vnum resolves through `NSgtdData.NOS` → `monster.dat`
+(`VNUM` → `NAME zts<id>e`). For example vnum 419 → `zts489e` → Violent
+Seedle, while text record `zts419e` is "Wheat"; a packet `in 3 206` displays
+Mountain Turtle (206 → `zts200e`), not Angry Queen Bee. `monsternames.py`
+performs the join.
 
 `_code_uk_Skill.txt` uses the same record shape and supplies the spell
 description shown in the spell-rule editor. `monsternames.py` implements the

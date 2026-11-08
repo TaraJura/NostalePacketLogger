@@ -10,8 +10,9 @@ the TCP transport; the legacy mapping is at the end.
 |---|---|
 | Server | the injected DLL |
 | Address | `127.0.0.1` only (never a public interface) |
-| Port | `47821`, or `NTPL_PORT` from the environment of the game process |
+| Port | `47821`, or the first free port from `NTPL_PORT` upward (see below) |
 | Connections | one host at a time |
+| Discovery | each DLL writes `C:\ntpl-<pid>.port` with the port it bound |
 | Framing | one UTF-8 line per message, `\n` terminated, `\r` tolerated |
 | Maximum line | 64 KiB (a longer line without a newline disconnects the host) |
 | Encoding | UTF-8; invalid bytes are replaced, not rejected |
@@ -34,6 +35,7 @@ more `|` characters.
 | `POS` | host → DLL | reply `STATUS|POS <x> <y> <charId> <resting>` from the local player object |
 | `TARGET\|<entityId>` | host → DLL | select the entity in the client (target ring + the client's own `ncif`) |
 | `QUIT|` | host → DLL | unhook and stop the server; the module stays mapped until the game exits |
+| `PORTALS\|1` / `PORTALS\|0` | host → DLL | drop or allow the client's own `preq` portal requests; reply `STATUS\|PORTALS BLOCKED` / `ALLOWED` |
 
 The `SEND` overloading is inherited from the original two-pipe design and is
 kept so the packet log and the GUI behaviour stay familiar. Direction is
@@ -69,6 +71,7 @@ build reported, so a host can parse it or just display it:
 - `hooks recv=ACTIVE|FAILED|NOT-FOUND send=... skill=...` — the skill hook
   captures the client's own `u_s` builder output
 - `drops recv=<n> send=<n>`
+- `portalblock=off|BLOCKED` — whether `preq` is currently dropped
 
 ### Movement commands
 
@@ -130,6 +133,21 @@ can confirm the selection from packets alone.
 means the client build does not match the signatures. Both are non-fatal: the
 DLL stays alive and keeps reporting.
 
+### Portal blocking
+
+`preq` is the client's own **portal request**: it is sent when the character
+walks on a warp tile and the server answers by moving it to another map. There
+is no negative reply, so `PORTALS|1` makes the DLL drop the packet instead:
+the send hook still copies it to the stream and the file log (`SEND|preq`), so
+a blocked attempt is visible, but the game's send function is skipped and the
+server never sees it. The client sends `preq` through its generic packet
+builder, so the skill call-site hook applies the same rule; both hooks return
+to their caller without replaying the original send on a drop.
+
+`PORTALS|0` restores normal crossing. The GUI sends the command on every
+connect and whenever **Block portals** is toggled, so the state survives a GUI
+restart but resets to off when the DLL is reinjected.
+
 ### Debug / reverse-engineering commands
 
 These are host → DLL only and exist so the engine can find the player's state
@@ -166,6 +184,34 @@ The DLL does not require a host to capture. Hooks are installed before the
 server starts, and the worker drains the ring into the file log even with no
 client connected. A host can attach at any time, disconnect, and reattach; it
 misses whatever was logged while it was away, but it can read the file log.
+
+## Several clients at once
+
+Every DLL tries `NTPL_PORT` (default 47821), then 47822, 47823 and so on until
+`bind()` succeeds (ten attempts). A second client therefore gets its own port
+instead of waiting forever for one that is already taken. This also handles the
+stale listener Wine sometimes leaves behind on the base port after a client
+restart: the new DLL simply takes the next free port.
+
+After `listen()` succeeds the DLL writes `C:\ntpl-<pid>.port` (inside the
+prefix: `<prefix>/drive_c/ntpl-<pid>.port`) containing the port number, where
+`<pid>` is the game's **Windows** PID. It deletes the file on `QUIT`.
+
+The native host finds clients without probing the ports, because a probe would
+take over the DLL's single host slot and kick whoever is connected:
+
+1. `Injector.exe --list --no-tag`, run with the Wine binary and prefix taken
+   from `/proc/<linux-pid>/exe` and `/proc/<linux-pid>/environ`, reports the
+   Windows PID and window title of every `NostaleClientX.exe` window.
+2. `ntpl.clients` pairs each PID with its port file.
+3. The GUI (or the `Client…` button) lists them; a client with no port file is
+   injected with `Injector.exe --pid <winpid> --dll <dll>` and its port file is
+   awaited.
+
+A process with the client's executable name but a `--type=` switch is a CEF
+helper (gpu/renderer/utility), not a game window, and is never injected. A
+client without `WINEPREFIX` in its environment is ignored so the tool can never
+guess `~/.wine`.
 
 ## Minimal clients
 

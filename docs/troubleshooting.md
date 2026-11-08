@@ -6,8 +6,12 @@
 |---|---|---|
 | `ntpl: cannot connect to 127.0.0.1:47821 after N attempt(s)` | DLL not injected, game not running, wrong prefix, or wrong port | `scripts/inject.sh`; confirm `pgrep -af NostaleClientX`; make sure `NTPL_PORT` is the same in the game's environment and the host |
 | Connects, then immediately disconnects | another host is connected (one at a time) | close the GUI/monitor before using `ntpl send`; or use the monitor's `/send` |
-| Port already in use | a previous DLL instance, or another process | `ss -ltnp | grep 47821`; set `NTPL_PORT` for both sides |
+| Port already in use | a previous DLL instance, or another process | `ss -ltnp \| grep 47821`; the DLL now moves to the next free port and writes `C:\ntpl-<pid>.port`, so the GUI attaches there; set `NTPL_PORT` for both sides to pick a base |
+| Connects to 47821 but no status line ever arrives | a stale listener left by a previous client (Wine keeps the socket open); the real DLL is on another port | use the GUI's **Client…** picker, or read `<prefix>/drive_c/ntpl-<winpid>.port`; do not probe ports (a probe steals the single host slot) |
+| Several clients, GUI on the wrong one | the picker was bypassed | press **Client…**; list is built from `Injector.exe --list` and the DLLs' port files |
 | `ntpl status` times out | connected but the DLL is stuck before its status line | check the DLL log; re-inject |
+| The Bot log stops growing and the bot stops reacting | an old GUI crashed in the 4,000-line trim (PyGObject returns `(found, iter)` from `get_iter_at_line`) | update the host and restart the GUI; `make gui-test` covers the trim path |
+| `attack cancelled; retrying` appears after every hit | the `cancel` that ends a successful cast was counted as a refusal | update the host; the message now only appears when no `su` from the character arrived since the attack |
 
 ## Hooks
 
@@ -33,7 +37,12 @@
 | Spell vnum unknown | the client's hotbar mapping is not documented | cast once manually and read `su 1 <charId> ...` from the log |
 | `TARGET <id> ERR entity not found` | the server/engine knows the monster, but the client has no live object for it (despawned, left the interest area, or the id was reused) | the bot drops that entity from the world state (the server sends no `out` for kills), blocks the id for 5 s and picks the nearest live monster; check the **Bot log** tab. If every monster fails, the client build moved the entity layout |
 | `TARGET <id> ERR client refused the selection` | the object is dead, off-map, or not targetable (type `0xA9 == 4`) | expected for a stale target; the bot skips it for 5 s. See the **Bot log** tab for the exact reply |
+| Bot attacks after death / nothing is nearby | the character is dead (`stat` HP 0) or the target is a client-only ghost the server refuses | the bot now idles while `dead` and resumes on `revive`; a target cancelled 3 times is dropped and blocked. If it still happens, re-inject the current host and DLL |
+| The Bot log spams `HP … recovering` / `attacked while recovering` | old recovery-abort loop (fixed) | update the host and restart the GUI |
 | Attacks land on the previously clicked monster | the injected `ncif` cannot change the client's own selection | re-inject the current DLL (0.2.x) and use `TARGET\|id`; check the Bot log for `monster <id> selected ...` |
+| Bot walked onto a portal and changed map | **Block portals** is off, or the injected DLL predates the `preq` drop | turn the toggle on; `host.sh status` must show `portalblock=BLOCKED` after the GUI connects. If `PORTALS\|1` answers `unknown command`, reinject the current DLL. A dropped attempt still appears as `SEND\|preq` in the packet stream/log |
+| `PORTALS|1` answers `unknown command` | old DLL (before 0.2.3) | reinject the current `PacketLogger.dll` (new filename or client restart after `QUIT`) |
+| Bot cannot reach a target near a map edge | the only route crosses a warp tile and blocking is on | that is the protection working; walk there manually with blocking off, or fight from range |
 
 ## UI
 

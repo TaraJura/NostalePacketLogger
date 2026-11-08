@@ -20,8 +20,13 @@ PORTALS="$(mktemp)"
 BOTLOG="$(mktemp)"
 trap 'rm -f "$PORTALS" "$BOTLOG"' EXIT
 
-exec xvfb-run -a env GDK_BACKEND=x11 \
-    PYTHONPATH="$ROOT/host" \
-    NTPL_PORTALS="$PORTALS" \
-    NTPL_BOT_LOG="$BOTLOG" \
-    python3 "$ROOT/test/gui_smoke.py"
+run_smoke() {
+    xvfb-run -a env GDK_BACKEND=x11 \
+        PYTHONPATH="$ROOT/host" \
+        NTPL_PORTALS="$PORTALS" \
+        NTPL_BOT_LOG="$BOTLOG" \
+        python3 "$ROOT/test/$1"
+}
+
+run_smoke gui_smoke.py
+run_smoke gui_client_picker_smoke.py

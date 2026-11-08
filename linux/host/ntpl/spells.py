@@ -164,7 +164,7 @@ def load_spells(path: str | Path | None = None) -> dict[int, SpellInfo]:
     except OSError:
         return {}
     try:
-        entries = read_archive_entries(data)
+        entries = read_archive_entries(data, {"skill.dat"})
     except ValueError:
         return {}
 

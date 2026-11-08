@@ -42,6 +42,16 @@ packetlogger::Queue* g_send = nullptr;
 
 packetlogger::Status g_status;
 std::atomic<bool>    g_enabled{false};
+std::atomic<bool>    g_block_portal{false};
+
+// `preq` (portal request) is what the client sends when the character steps
+// on a warp tile; the server answers with sp/c_map and moves it to another
+// map. There is no server-side "decline": the only way to stay is not to send
+// the request.
+bool is_portal_request(const char* packet) {
+    return std::memcmp(packet, "preq", 4) == 0 &&
+           (packet[4] == '\0' || packet[4] == ' ');
+}
 
 std::uint8_t g_recv_original[5] = {0};
 std::uint8_t g_send_original[6] = {0};
@@ -68,13 +78,23 @@ void ntpl_on_packet_recv(const char* packet) {
     g_recv->push(packet);
 }
 
-// Called by hooks.S from inside the game's send path.
-void ntpl_on_packet_send(const char* packet) {
-    if (!g_enabled.load(std::memory_order_relaxed) || packet == nullptr ||
-        g_send == nullptr) {
-        return;
+// Called by hooks.S from inside the game's send path. Returns 1 when the
+// original function must run (packet goes out) and 0 when the packet must be
+// dropped. The assembler stub checks the value; the skill stub ignores it.
+extern "C" int ntpl_on_packet_send(const char* packet) {
+    if (!g_enabled.load(std::memory_order_relaxed) || packet == nullptr) {
+        return 1;
     }
-    g_send->push(packet);
+    // Keep the packet in the stream/log even when dropping it: the host can
+    // then show "preq blocked" instead of a silent stop.
+    if (g_send != nullptr) {
+        g_send->push(packet);
+    }
+    if (g_block_portal.load(std::memory_order_relaxed) &&
+        is_portal_request(packet)) {
+        return 0;
+    }
+    return 1;
 }
 }
 
@@ -250,6 +270,14 @@ void remove_hooks() {
 
 void set_enabled(bool enabled) {
     g_enabled.store(enabled, std::memory_order_release);
+}
+
+void set_portal_block(bool enabled) {
+    g_block_portal.store(enabled, std::memory_order_release);
+}
+
+bool portal_block() {
+    return g_block_portal.load(std::memory_order_relaxed);
 }
 
 bool send_packet(const char* packet) {

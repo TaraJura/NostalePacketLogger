@@ -2,14 +2,18 @@
 # Launch the GTK4 UI for the NosTale packet engine.
 #
 #   ./linux/scripts/gui.sh
-#   ./linux/scripts/gui.sh --host 127.0.0.1 --port 47821
+#   ./linux/scripts/gui.sh --no-client-picker     # straight to --host/--port
 #
-# The injected DLL must already be running (linux/scripts/inject.sh). If it is
-# not, the window opens with "not connected" and retries for about 10 seconds;
-# inject and reopen the window afterwards.
+# At startup the window lists the running NosTale clients (via
+# Injector.exe --list) and attaches to the chosen one; a client without the
+# logger is injected from that dialog. One already-injected client is attached
+# without asking. The injector (build/Injector.exe) and DLL must be built with
+# `make -C linux all`.
 #
 # NTPL_PORT is read by both the GUI and the DLL, so exporting it once before
-# starting the game and the GUI keeps them in sync.
+# starting the game and the GUI keeps them in sync; a second client
+# automatically moves to the next free port, and the GUI learns it from the
+# DLL's C:\ntpl-<pid>.port file.
 
 set -euo pipefail
 

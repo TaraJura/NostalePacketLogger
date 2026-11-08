@@ -43,3 +43,7 @@ run gui_recover_smoke.py
 run gui_recover_mp_smoke.py
 run gui_recover_fight_smoke.py
 run gui_loot_smoke.py
+run gui_portal_block_smoke.py
+run gui_retaliate_smoke.py
+run gui_far_leg_smoke.py
+run gui_death_smoke.py

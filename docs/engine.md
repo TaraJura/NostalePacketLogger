@@ -17,10 +17,11 @@ PacketClient ──► Message/Packet ──► Engine ──► WorldState
 |---|---|
 | `protocol.py` | `TYPE\|PAYLOAD` line protocol, `Message`, `Packet`, `default_port()` |
 | `client.py` | TCP connect with retries, line reassembly, send, reader thread |
+| `clients.py` | finds running game windows (`/proc` + `Injector.exe --list`), pairs them with the DLL port files, injects one client |
 | `engine.py` | `WorldState` and packet handlers |
 | `mapdata.py` | `NStcData.NOS` parser, terrain palette, A*, map ranking |
 | `cli.py` | command line actions and confirmations |
-| `gui.py` | GTK4 window: packet table + Map/Bot tab |
+| `gui.py` | GTK4 window: client picker, packet table, Map/Bot tab |
 | `mcp_server.py` | MCP stdio server + local broker: agent tools and a fan-out of the DLL stream for the GUI/CLI |
 
 ## PacketClient
@@ -71,6 +72,8 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `portals` | `(mapId, x, y) → destination mapId` learned from real crossings (departure cell + the following `at` arrival); fallback when `gp` was missed |
 | `stats` | `CharacterStats(hp, hp_max, mp, mp_max)` from `stat`; drives the bars and recovery |
 | `last_attacker_id` / `last_attacker_at` | last entity that hit the local player and the packet timestamp; Retaliate uses it (5 s window) |
+| `dead` | the local character is dead (`stat` with 0 HP); `revive 1 <own charId> 0` or a later stat with HP > 0 clears it |
+| `self_hit_count` | number of landed hits by the local character (`su` with attacker type 1 and the own char id); a later `cancel` only means a real refusal when this did not move |
 | `chat` | last 200 `(type, id, message)` tuples from `say` |
 | `resting` | `True` sitting, `False` standing, `None` unknown; from `rest` and from the `POS` reply (the client's own +0xA9 flag, so an attach-after-sitting is known) |
 | `self_id` | own char id from `at`, `cond` (the live client sends it only for the local player), `rest`, or a matched `tp` |
@@ -110,7 +113,8 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `su` | RECV | `combat`, `last_skill` (first five ints); if the target is self, `last_attacker_id`/`last_attacker_at` |
 | `stat` | RECV | own HP/MP |
 | `st` | RECV | monster status; `hp == 0` removes the entity (kill, no `out` is sent) |
-| `cancel` | RECV | increments `cancel_count`; the GUI clears the attack cooldown and retries at once after a cancelled cast |
+| `revive` | RECV | `revive 1 <charId> 0`; clears `dead` when the char id is the local character |
+| `cancel` | RECV | increments `cancel_count`; the server sends it after every cast, so the GUI clears the cooldown and retries only when no `su` from the character arrived since the attack (otherwise it is the normal end of the animation) |
 | `say` | RECV/SEND | `chat` |
 
 Parsing is deliberately tolerant: a short packet, a non-numeric field, or an
@@ -209,7 +213,7 @@ for message in client.messages():
 ## Map and bot
 
 `mapdata.py` parses the client's `NStcData.NOS` into `MapGrid` objects
-(width, height, one terrain byte per cell). `0x00` is walkable; `astar()` gives
+(width, height, one terrain byte per cell). `0x00` is walkable; `astar()` (with an optional `blocked` set the GUI fills from the map's portal cells) gives
 an 8-direction path over walkable cells (diagonal cost sqrt 2, no corner
 cutting); `find_map_for_positions()` ranks maps
 against live entity coordinates (the 2026-11-06 session identified map **20**,
@@ -227,7 +231,7 @@ follows the equipped SP card, whose vnum is learned from `u_s 0` + `su`.
 **Search** is the target search radius, while the attack itself is capped by
 the skill's own range. The **Targets** list shows the monster vnums currently
 spawned on the loaded map (plus selected entries marked "not on this map"),
-not the 2,795-entry catalog, so the list matches what is around the character.
+not the full static catalog, so the list matches what is around the character.
 On startup the GUI **seeds `map_id`, position and char id from the DLL log's
 last `at` plus the client's own `walk` lines** (`spawnlog.load_last_position`),
 so a window attached after login shows the real map instead of guessing; the
@@ -246,8 +250,10 @@ result to `~/.config/ntpl/portals.json` (`NTPL_PORTALS` overrides), drawing
 magenta rings with a "Portal → map N" tooltip.
 The sidebar also owns the bot configuration:
 
-- `monsternames.py` — `vnum → monster name` and skill descriptions from
-  `NSlangData_<lang>.NOS`;
+- `monsternames.py` — `vnum → monster name` by joining `NSgtdData.NOS` →
+  `monster.dat` (vnum → text key) with `NSlangData_<lang>.NOS` →
+  `_code_<lang>_monster.txt` (key → name); the text key is not the vnum; skill
+  descriptions come from the same language archive keyed by their own text id;
 - `spells.py` — `NSgtdData.NOS` → `Skill.dat` catalog: active spell vnum, name,
   MP cost, range, cast time, cooldown and target type. The bot resolves the
   Skill.dat vnum to the `u_s` **slot** from `ski`; the GUI shows both;

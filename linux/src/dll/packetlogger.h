@@ -39,6 +39,12 @@ bool install_hooks(Status& status);
 void remove_hooks();
 void set_enabled(bool enabled);
 
+// Portal blocking: while enabled, the client's own `preq` (portal request)
+// packet is logged but never reaches the socket, so walking on a warp tile
+// cannot change maps. The GUI sets this from its Block portals toggle.
+void set_portal_block(bool enabled);
+bool portal_block();
+
 // Sends one already-formatted packet through the game's own send function.
 // Must be called from the worker thread (never from inside a hook).
 bool send_packet(const char* packet);

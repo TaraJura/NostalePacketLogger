@@ -21,7 +21,7 @@ void call_hook_recv(const char* packet);
 void call_hook_send(const char* packet);
 
 void ntpl_on_packet_recv(const char* packet);
-void ntpl_on_packet_send(const char* packet);
+int ntpl_on_packet_send(const char* packet);
 
 extern std::uintptr_t ntpl_recv_original_call;
 extern std::uintptr_t ntpl_recv_jmp_back;
@@ -39,6 +39,7 @@ void fake_trampoline();
 namespace {
 char g_recv[256] = {0};
 char g_send[256] = {0};
+int g_send_allow = 1;
 int g_recv_calls = 0;
 int g_send_calls = 0;
 int g_original_calls = 0;
@@ -61,9 +62,10 @@ void ntpl_on_packet_recv(const char* packet) {
     std::snprintf(g_recv, sizeof(g_recv), "%s", packet != nullptr ? packet : "(null)");
 }
 
-void ntpl_on_packet_send(const char* packet) {
+int ntpl_on_packet_send(const char* packet) {
     ++g_send_calls;
     std::snprintf(g_send, sizeof(g_send), "%s", packet != nullptr ? packet : "(null)");
+    return g_send_allow;
 }
 
 // Stands in for the game's recv function. The stub calls it and then jumps to
@@ -92,15 +94,23 @@ int main() {
     call_hook_recv("walk 19 146 0 10");
     call_hook_send("u_s 1 2");
 
+    // Dropping a packet must skip the trampoline and return to the caller.
+    const int trampoline_before = g_trampoline_calls;
+    g_send_allow = 0;
+    call_hook_send("preq");
+    const bool drop_ok = g_trampoline_calls == trampoline_before;
+    g_send_allow = 1;
+
     const bool recv_ok =
         g_recv_calls == 1 && std::strcmp(g_recv, "walk 19 146 0 10") == 0;
     const bool send_ok =
-        g_send_calls == 1 && std::strcmp(g_send, "u_s 1 2") == 0;
+        g_send_calls == 2 && std::strcmp(g_send, "preq") == 0;
     const bool replay_ok = g_original_calls == 1;
     const bool back_ok = g_back_calls == 1;
     const bool trampoline_ok = g_trampoline_calls == 1;
 
-    const bool ok = recv_ok && send_ok && replay_ok && back_ok && trampoline_ok;
+    const bool ok =
+        recv_ok && send_ok && replay_ok && back_ok && trampoline_ok && drop_ok;
 
     std::printf(
         "hook stub test: %s\n"
@@ -108,9 +118,10 @@ int main() {
         "  send callback: %d call(s), text=%s\n"
         "  original call replayed: %d\n"
         "  recv continuation: %d\n"
-        "  send trampoline: %d\n",
+        "  send trampoline: %d\n"
+        "  dropped packet skipped the trampoline: %d\n",
         ok ? "PASS" : "FAIL", g_recv_calls, g_recv, g_send_calls, g_send,
-        g_original_calls, g_back_calls, g_trampoline_calls);
+        g_original_calls, g_back_calls, g_trampoline_calls, drop_ok);
 
     return ok ? 0 : 1;
 }

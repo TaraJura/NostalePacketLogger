@@ -53,6 +53,13 @@ _ntpl_hook_recv:
  *   8B D8       mov ebx, eax
  * Those six bytes are copied into a trampoline; after our detour we jump to
  * the trampoline, which replays them and returns to the instruction after.
+ *
+ * ntpl_on_packet_send returns 0 when the packet must be dropped (portal
+ * blocking drops `preq`). The decision is stashed at -4(%ebp), below the
+ * saved-register block, so popal/popfl cannot clobber it; a zero skips the
+ * trampoline and returns to the caller as if the packet had been sent. The
+ * function is a procedure (no stack arguments, result unused), so this is
+ * safe.
  */
     .globl _ntpl_hook_send
     .def   _ntpl_hook_send; .scl 2; .type 32; .endef
@@ -64,17 +71,27 @@ _ntpl_hook_send:
     subl    $12, %esp
     pushl   20(%ebp)                /* saved EDX, see the layout note above */
     call    _ntpl_on_packet_send
+    movl    %eax, -4(%ebp)          /* 1 = send, 0 = drop */
     movl    %ebp, %esp
-    popal
+    popal                           /* restores the CALLER's EBP too */
     popfl
+    cmpl    $0, -40(%esp)           /* [ebp-4]: esp = ebp+36 here */
+    je      .Lsend_dropped
     jmp     *_ntpl_send_trampoline
+.Lsend_dropped:
+    ret
 
 /* --------------------------------------------------------------- skill ---
- * The client's skill packet builder calls its lower-level send function at
+ * The client's packet builder calls its lower-level send function at
  * 0x72D5B2 with the finished `u_s ...` string in ECX. Hooking that call site
  * captures the client's own skill packet (the normal send hook is a different
  * wrapper and does not see it). Replay the original call, then return to the
  * instruction after the call site.
+ *
+ * Portal blocking also has to happen here: the client sends its `preq` portal
+ * request through the same lower-level send function, so this call site sees
+ * it and the normal send hook does not. On a drop, set EAX=1 (the builder
+ * tests the Boolean result after the call) and skip the original call.
  */
     .globl _ntpl_hook_skill
     .def   _ntpl_hook_skill; .scl 2; .type 32; .endef
@@ -86,15 +103,21 @@ _ntpl_hook_skill:
     subl    $12, %esp
     pushl   24(%ebp)                /* saved ECX = packet pointer */
     call    _ntpl_on_packet_send
+    movl    %eax, -4(%ebp)
     movl    %ebp, %esp
-    popal
+    popal                           /* restores the CALLER's EBP too */
     popfl
+    cmpl    $0, -40(%esp)           /* [ebp-4]: esp = ebp+36 here */
+    je      .Lskill_dropped
     call    *_ntpl_skill_original_call
     /*
      * The call site was replaced with a JMP, not a CALL, so the original
      * return address is not on the stack. Replay the call and then jump to
      * the instruction after the call site explicitly.
      */
+    jmp     *_ntpl_skill_jmp_back
+.Lskill_dropped:
+    movl    $1, %eax                /* pretend success to the builder */
     jmp     *_ntpl_skill_jmp_back
 
 /* ------------------------------------------------------------ game send --

@@ -157,9 +157,10 @@ the surroundings instead of dumping the static catalog.
 
 Supporting data modules:
 
-- `monsternames.py` — reads `NSlangData_<lang>.NOS`, decodes the client's
-  nibble text codec, and provides `vnum → monster name` and the skill
-  description table.
+- `monsternames.py` — decodes the client's NOS archives and provides
+  `vnum → monster name` by joining `NSgtdData.NOS` `monster.dat`
+  (vnum → text key) with `NSlangData_<lang>.NOS` (text key → localized name),
+  plus the skill description table. The text key is not the monster vnum.
 - `spawnlog.py` — backfills entity vnums and player names from the DLL's
   `[RECV] in ...` log lines for entities that spawned before the GUI attached.
 - `botconfig.py` — the JSON bot configuration (target filters, spell rules,

@@ -117,6 +117,7 @@ class BotConfig:
     recover_mp: bool = True
     low_mp_pct: float = 30.0
     loop: bool = True
+    block_portals: bool = True
     monster_mode: str = "all"
     monster_vnums: list[int] = field(default_factory=list)
     attack_unknown: bool = False
@@ -138,6 +139,7 @@ class BotConfig:
             "recover_mp": self.recover_mp,
             "low_mp_pct": self.low_mp_pct,
             "loop": self.loop,
+            "block_portals": self.block_portals,
             "monster_mode": self.monster_mode,
             "monster_vnums": sorted(set(self.monster_vnums)),
             "attack_unknown": self.attack_unknown,
@@ -186,6 +188,7 @@ class BotConfig:
             recover_mp=_as_bool(data.get("recover_mp"), True),
             low_mp_pct=_as_float(data.get("low_mp_pct"), 30.0, 5.0, 90.0),
             loop=_as_bool(data.get("loop"), True),
+            block_portals=_as_bool(data.get("block_portals"), True),
             monster_mode=mode if mode in MONSTER_MODES else "all",
             monster_vnums=sorted(set(vnums)),
             attack_unknown=_as_bool(data.get("attack_unknown"), False),

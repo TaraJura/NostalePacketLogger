@@ -1,14 +1,23 @@
-"""NosTale monster names from ``NSlangData_<lang>.NOS``.
+"""NosTale monster names from the client's game data.
 
-The client ships a language archive with a text table per language. The
-monster table is named ``_code_<lang>_monster.txt`` and its decrypted content
-is one record per template:
+The displayed name needs two tables, and the numbers in them are **not** the
+monster vnum:
 
-    zts<vnum>e<TAB><name>\r
-    zts1e<TAB>Baby Fox\r
-    zts200e<TAB>Mountain Turtle\r
+1. ``NSgtdData.NOS`` → ``monster.dat`` maps the template vnum to a text key::
 
-The archive has no magic string and its layout is:
+       VNUM 419
+       NAME zts489e
+
+2. ``NSlangData_<lang>.NOS`` → ``_code_<lang>_monster.txt`` maps that key to
+   the localized name::
+
+       zts489e<TAB>Violent Seedle
+
+   The text-table key is its own id space. Vnum 419's key is ``zts489e``, so
+   looking up ``zts419e`` returns the unrelated "Wheat"; 419 is a Violent
+   Seedle on the live map 103. ``monster.dat`` is the authoritative bridge.
+
+The NOS archives have no magic string and their layout is:
 
     count       uint32
     entry       count times:
@@ -44,9 +53,6 @@ _CRYPTO = (
     0x0A, 0x00,
 )
 
-_RECORD = re.compile(r"^zts(\d+)e\t(.*)$")
-
-
 class MonsterNameError(ValueError):
     pass
 
@@ -77,6 +83,18 @@ def default_lang_path() -> Path:
         if candidate.is_file():
             return candidate
     return preferred
+
+
+def default_monster_data_path() -> Path:
+    """Locate ``NSgtdData.NOS`` (the archive holding ``monster.dat``).
+
+    ``NTPL_NSGTD`` selects an explicit file, matching ``spells.py``. Otherwise
+    the ``NostaleData`` directory next to ``NStcData.NOS`` is used.
+    """
+    override = os.environ.get("NTPL_NSGTD")
+    if override:
+        return Path(override)
+    return _data_dir() / "NSgtdData.NOS"
 
 
 def decrypt_text_dat(data: bytes) -> bytes:
@@ -117,26 +135,83 @@ def decrypt_text_dat(data: bytes) -> bytes:
     return bytes(out)
 
 
+def parse_text_table(text: str) -> dict[str, str]:
+    """Parse a decrypted ``zts...`` table into ``{key: text}``.
+
+    The key is the code other data files store (``monster.dat`` NAME,
+    ``Skill.dat`` NAME), not the template/skill vnum.
+    """
+    values: dict[str, str] = {}
+    for record in re.split(r"[\r\n]+", text):
+        key, separator, value = record.partition("\t")
+        if not separator:
+            continue
+        key = key.strip()
+        value = value.strip()
+        if key.startswith("zts") and key.endswith("e") and value:
+            values[key] = value
+    return values
+
+
 def parse_monster_text(text: str) -> dict[int, str]:
     """Parse a decrypted ``_code_<lang>_<table>.txt`` text table.
 
     Both the monster and skill tables use the same ``zts<id>e<TAB><text>``
-    record shape; the function name is kept for the monster table callers.
+    record shape. The number in the key is a **text id**, not the monster
+    vnum; use :func:`parse_monster_dat` for the vnum → key bridge.
     """
     names: dict[int, str] = {}
-    for record in re.split(r"[\r\n]+", text):
-        match = _RECORD.match(record)
-        if not match:
-            continue
-        vnum = int(match.group(1))
-        name = match.group(2).strip()
-        if name:
-            names[vnum] = name
+    for key, name in parse_text_table(text).items():
+        match = re.fullmatch(r"zts(\d+)e", key)
+        if match:
+            names[int(match.group(1))] = name
     return names
 
 
-def _read_archive_entries(data: bytes) -> dict[str, bytes]:
-    """Return ``{name: decrypted content}`` for a language archive."""
+def parse_monster_dat(text: str) -> dict[int, str]:
+    """Parse decrypted ``monster.dat`` into ``{vnum: text key}``.
+
+    ``monster.dat`` (inside ``NSgtdData.NOS``) is the authoritative bridge
+    between the server's monster vnum and the language text id. Records are
+    tab-separated field lines::
+
+        #========================================================
+            VNUM    419
+            NAME    zts489e
+            LEVEL   45
+            ...
+
+    A record without a parsable VNUM or NAME is skipped.
+    """
+    keys: dict[int, str] = {}
+    vnum: int | None = None
+    for line in re.split(r"[\r\n]+", text):
+        fields = line.split()
+        if not fields or fields[0].startswith("#"):
+            continue
+        if fields[0] == "VNUM":
+            try:
+                vnum = int(fields[1])
+            except (IndexError, ValueError):
+                vnum = None
+        elif fields[0] == "NAME":
+            if vnum is not None and len(fields) >= 2:
+                keys[vnum] = fields[1]
+            # NAME closes the record; later NAME-like fields (none today)
+            # must not reuse this VNUM.
+            vnum = None
+    return keys
+
+
+def _read_archive_entries(
+    data: bytes, wanted: set[str] | None = None
+) -> dict[str, bytes]:
+    """Return ``{name: decrypted content}`` for a language archive.
+
+    ``wanted`` limits decryption to those lower-case entry names; the others
+    are skipped without decoding (``NSgtdData.NOS`` carries several megabytes
+    of ``Item.dat`` and quest text that no caller needs).
+    """
     if len(data) < 4:
         raise MonsterNameError("language archive is truncated")
     count = struct.unpack_from("<I", data, 0)[0]
@@ -155,6 +230,8 @@ def _read_archive_entries(data: bytes) -> dict[str, bytes]:
         position += 8
         content = data[position : position + data_size]
         position += data_size
+        if wanted is not None and name.lower() not in wanted:
+            continue
         if is_dat or name.endswith(".dat"):
             entries[name] = decrypt_text_dat(content)
         else:
@@ -184,28 +261,99 @@ def _load_text_table(
     return {}
 
 
-def read_archive_entries(data: bytes) -> dict[str, bytes]:
+def _load_text_table_by_key(
+    suffix: str, path: str | Path | None = None
+) -> dict[str, str]:
+    """Like :func:`_load_text_table` but keyed by the full ``zts...`` code."""
+    source = Path(path) if path is not None else default_lang_path()
+    try:
+        data = source.read_bytes()
+    except OSError:
+        return {}
+
+    try:
+        entries = _read_archive_entries(data)
+    except MonsterNameError:
+        return {}
+
+    for name, content in entries.items():
+        if name.lower().endswith(suffix):
+            return parse_text_table(content.decode("cp1252", "replace"))
+    return {}
+
+
+def _load_monster_keys(path: str | Path | None = None) -> dict[int, str]:
+    """Load the vnum → language-key map from ``NSgtdData.NOS``."""
+    source = (
+        Path(path) if path is not None else default_monster_data_path()
+    )
+    try:
+        data = source.read_bytes()
+    except OSError:
+        return {}
+
+    try:
+        entries = _read_archive_entries(data, {"monster.dat"})
+    except MonsterNameError:
+        return {}
+
+    for name, content in entries.items():
+        if name.lower() == "monster.dat":
+            return parse_monster_dat(content.decode("cp1252", "replace"))
+    return {}
+
+
+def read_archive_entries(
+    data: bytes, wanted: set[str] | None = None
+) -> dict[str, bytes]:
     """Public reader for the shared count/name/size NOS container."""
-    return _read_archive_entries(data)
+    return _read_archive_entries(data, wanted)
 
 
-def load_monster_names(path: str | Path | None = None) -> dict[int, str]:
+def load_monster_names(
+    path: str | Path | None = None,
+    monster_data_path: str | Path | None = None,
+) -> dict[int, str]:
     """Load the vnum → monster-name table.
 
-    Returns an empty dict when the archive or the monster table is missing;
-    callers can then fall back to the entity id.
+    Joins ``monster.dat`` (vnum → language key, from ``NSgtdData.NOS``) with
+    ``_code_<lang>_monster.txt`` (key → name). This indirection matters: the
+    live map 103 spawns vnum 419 with key ``zts489e``, i.e. "Violent Seedle",
+    not vnum 419's own text record ("Wheat").
+
+    Returns an empty dict when the language table is missing. If
+    ``NSgtdData.NOS`` is missing the table is keyed by the text id as a
+    best-effort fallback; callers can still fall back to the entity id.
     """
-    return _load_text_table("_monster.txt", path)
+    translations = _load_text_table_by_key("_monster.txt", path)
+    if not translations:
+        return {}
+
+    keys = _load_monster_keys(monster_data_path)
+    if keys:
+        return {
+            vnum: translations[key]
+            for vnum, key in keys.items()
+            if key in translations
+        }
+
+    fallback: dict[int, str] = {}
+    for key, name in translations.items():
+        match = re.fullmatch(r"zts(\d+)e", key)
+        if match:
+            fallback[int(match.group(1))] = name
+    return fallback
 
 
 def load_skill_descriptions(
     path: str | Path | None = None,
 ) -> dict[int, str]:
-    """Load the vnum → skill text/description table.
+    """Load the skill text-id → tooltip table.
 
     ``_code_<lang>_Skill.txt`` is the client's skill tooltip text (for
     example skill 10 is a strength-course description, 876 a Spell Gun
-    description). It is used as a hint next to the spell vnum in the rule
-    editor. A missing table yields an empty dict.
+    description). Keys are the numbers in ``Skill.dat``'s ``NAME zts<id>e``
+    codes, not necessarily the skill vnums. A missing table yields an empty
+    dict.
     """
     return _load_text_table("_skill.txt", path)

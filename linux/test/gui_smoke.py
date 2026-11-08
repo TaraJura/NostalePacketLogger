@@ -21,7 +21,7 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import GLib
 
-from ntpl.gui import Application
+from ntpl.gui import Application, LOG_MAX_LINES
 
 
 def start_fake_server() -> int:
@@ -116,11 +116,11 @@ def main() -> int:
                 and "Player Tester" in player_tip
                 and "char id 123" in player_tip
                 and monster_tip is not None
-                and "Monster Angry Queen Bee" in monster_tip
+                and "Monster Mountain Turtle" in monster_tip
                 and "entity id 500" in monster_tip
                 and "vnum 206" in monster_tip
                 and logged_monster_tip is not None
-                and "Monster Mountain Turtle" in logged_monster_tip
+                and "Monster Wolf" in logged_monster_tip
                 and "vnum 200" in logged_monster_tip
                 and logged_player_tip is not None
                 and "Player Logged" in logged_player_tip
@@ -184,8 +184,24 @@ def main() -> int:
                 and "auto-selected map 85" in log_text
             )
 
+            # Regression: at the line cap the trim path used to pass a
+            # PyGObject (found, iter) pair where an iter was expected, raising
+            # TypeError on every later status update and freezing the bot.
+            trim_ok = False
+            try:
+                app._bot_log_lines = LOG_MAX_LINES + 1
+                app._log_line("trim regression line")
+                trim_ok = True
+            except Exception:  # noqa: BLE001 - reported through trim_ok
+                trim_ok = False
+            finally:
+                app._bot_log_lines = min(
+                    app._bot_log_lines, LOG_MAX_LINES
+                )
+
             result["detail"] = (
                 f"rows={rows} status={status!r} log={log_ok} "
+                f"trim={trim_ok} "
                 f"map={app.map_grid.map_id if app.map_grid else None} "
                 f"surface={app.map_surface is not None} guard={guard} facing={facing} "
                 f"hp={stats.hp}/{stats.hp_max} stats_area={app.stats_area is not None} "
@@ -207,6 +223,7 @@ def main() -> int:
                 and toggle_ok
                 and banner_ok
                 and log_ok
+                and trim_ok
             )
         except Exception as exc:  # noqa: BLE001 - report, do not crash GTK
             result["detail"] = f"exception: {exc!r}"

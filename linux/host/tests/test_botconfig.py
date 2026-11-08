@@ -76,6 +76,22 @@ class BotConfigTests(unittest.TestCase):
         self.assertEqual(rule.cooldown, 0.0)
         self.assertEqual(rule.target, "monster")
 
+    def test_block_portals_defaults_on_and_round_trips(self):
+        self.assertTrue(BotConfig().block_portals)
+        self.assertTrue(
+            BotConfig.from_dict({}).block_portals,
+            "old configs must not lose portal protection",
+        )
+        self.assertFalse(
+            BotConfig.from_dict({"block_portals": False}).block_portals
+        )
+        self.assertTrue(
+            BotConfig.from_dict({"block_portals": "yes"}).block_portals
+        )
+        config = BotConfig(block_portals=False)
+        loaded = BotConfig.from_dict(config.to_dict())
+        self.assertFalse(loaded.block_portals)
+
     def test_spell_rule_order_and_conditions_are_preserved(self):
         config = BotConfig(
             spell_rules=[

@@ -116,6 +116,14 @@ class WorldState:
     # Last entity that hit the local player, with the packet timestamp.
     last_attacker_id: int | None = None
     last_attacker_at: float = 0.0
+    # The local character died (`stat` with 0 HP) and has not been revived
+    # yet. The server sends `revive 1 <charId> 0` when it brings it back.
+    dead: bool = False
+    # Hits landed by the local character (attacker type 1, id == self_id).
+    # The GUI compares it around a cast: the server answers every successful
+    # cast with `su`, then `cancel 0 0 -1` for the end of the animation, so a
+    # cancel only means a real refusal when no self hit arrived in between.
+    self_hit_count: int = 0
     combat: deque[dict] = field(default_factory=lambda: deque(maxlen=100))
     last_packet: Packet | None = None
 
@@ -508,6 +516,8 @@ def _on_skill_used(world: WorldState, packet: Packet) -> None:
         # Something is hitting us; remember it so the bot can retaliate.
         world.last_attacker_id = attacker_id
         world.last_attacker_at = packet.timestamp
+    if attacker_type == 1 and attacker_id == world.self_id:
+        world.self_hit_count += 1
     world.combat.append(
         {
             "attacker_type": attacker_type,
@@ -525,6 +535,15 @@ def _on_stats(world: WorldState, packet: Packet) -> None:
     values = packet.ints(4)  # <hp> <hpMax> <mp> <mpMax>
     if values:
         world.stats.hp, world.stats.hp_max, world.stats.mp, world.stats.mp_max = values
+        if world.stats.hp_max > 0:
+            world.dead = world.stats.hp <= 0
+
+
+def _on_revive(world: WorldState, packet: Packet) -> None:
+    # revive 1 <charId> 0 -- the server brought the character back to life.
+    values = packet.ints(2)
+    if values and world.self_id is not None and values[1] == world.self_id:
+        world.dead = False
 
 
 def _on_chat(world: WorldState, packet: Packet) -> None:
@@ -571,6 +590,7 @@ class Engine:
                 "su": _on_skill_used,   # RECV: a skill hit
                 "cancel": _on_cancel,   # RECV: the cast was cancelled
                 "stat": _on_stats,      # RECV: own hp/mp
+                "revive": _on_revive,   # RECV: the character was revived
                 "say": _on_chat,        # RECV and SEND: chat
             }
         )

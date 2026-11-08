@@ -35,6 +35,13 @@ from .botconfig import (
     save_config,
 )
 from .client import ConnectionLost, PacketClient
+from .clients import (
+    ClientInfo,
+    Discovery,
+    discover_clients,
+    inject_client,
+    wait_for_port,
+)
 from .engine import Engine, Entity, GroundItem
 from .mapdata import (
     DEFAULT_NSTC,
@@ -102,6 +109,15 @@ ATTACK_WALK_DELAY = 0.4
 #: Target acquisition radius when the Combat search field is gone; the
 #: equipped skill's own range is used when it is larger.
 ATTACK_SEARCH_CELLS = 15
+#: The client's MoveTo is animated and accepted by the server only for short
+#: hops. A longer destination makes the client send a single far `walk` that
+#: the server rejects, leaving the character standing still, so every bot leg
+#: is chopped to at most this many cells.
+MAX_MOVE_LEG_CELLS = 3
+#: Consecutive `cancel` replies to attacks on the same target. The server
+#: refuses a client-only ghost entity (a monster that died while the bot was
+#: dead/out of range) forever, so after this many the bot drops the target.
+MAX_CANCEL_STREAK = 3
 #: The server only accepts `get` when the character is on or next to the
 #: drop, so the bot walks to everything farther than this.
 PICKUP_RANGE_CELLS = 1
@@ -181,6 +197,7 @@ class Application(Gtk.Application):
         map_data: str | None = None,
         unique: bool = True,
         log_file: str | None = None,
+        select_client: bool = False,
     ) -> None:
         super().__init__(
             application_id="cz.tarajura.ntpl",
@@ -198,6 +215,21 @@ class Application(Gtk.Application):
         self.inbox: queue.Queue = queue.Queue()
         self.filter_text = ""
         self.status_received = False
+        # Startup client selector: the window lists the running game windows
+        # and injects/attaches to the chosen one instead of always dialing the
+        # default port. Off by default so headless tests stay deterministic.
+        self.select_client = select_client
+        self.client_label: str | None = None
+        self._client_generation = 0
+        self._drain_timer_started = False
+        self._client_scan = 0
+        self._client_dialog = None
+        self._client_dialog_rows: list[ClientInfo] = []
+        self._client_dialog_list = None
+        self._client_dialog_action = None
+        self._client_dialog_status = None
+        self._inject_client: ClientInfo | None = None
+        self.discovery: Discovery | None = None
 
         self.store = None
         self.filter = None
@@ -273,6 +305,13 @@ class Application(Gtk.Application):
         self.auto_attack_toggle = None
         self.loop_toggle = None
         self.draw_path_toggle = None
+        self.block_portal_toggle = None
+        # Map portals that must not be stepped on (Block portals); a stale
+        # guard message is repeated at most every two seconds.
+        self.portal_warn_at = 0.0
+        # Gate cells seen on the current map, to replan a drawn route when a
+        # `gp` burst arrives after it.
+        self._gate_cells_seen: frozenset[tuple[int, int]] = frozenset()
         self.pickup_toggle = None
         self.recover_toggle = None
         self.recover_mp_toggle = None
@@ -329,9 +368,15 @@ class Application(Gtk.Application):
         # The monster the bot is currently hitting; recovery waits until it
         # dies so a low bar never abandons a half-killed target.
         self.fight_target_id = None
-        # Attack pacing / cancel retry.
+        # Attack pacing / cancel retry. `attack_hit_mark` is the self-hit
+        # counter at the last attack; a later `cancel` after a hit is the
+        # normal end of the cast, not a refusal.
         self.last_attack_sent_at = 0.0
         self.last_cancel_count = 0
+        self.attack_hit_mark = 0
+        self.cancel_streak = 0
+        self.cancel_streak_target: int | None = None
+        self.dead_warned = False
         self.map_redraw_scheduled = False
         self.stats_redraw_scheduled = False
         self.bot_running = False
@@ -360,7 +405,10 @@ class Application(Gtk.Application):
         # grey instead of green.
         self._install_css()
         self._build_ui()
-        self._start_client()
+        if self.select_client:
+            self._begin_client_selection(auto_single=True)
+        else:
+            self._start_client()
 
     def _build_ui(self) -> None:
         window = Gtk.ApplicationWindow(application=self, title="NosTale Packet Logger")
@@ -373,6 +421,15 @@ class Application(Gtk.Application):
         clear = Gtk.Button(label="Clear")
         clear.connect("clicked", lambda *_: self.store.remove_all())
         header.pack_start(clear)
+
+        client_button = Gtk.Button(label="Client…")
+        client_button.set_tooltip_text(
+            "List the running NosTale clients and attach to one of them"
+        )
+        client_button.connect(
+            "clicked", lambda *_: self._begin_client_selection(auto_single=False)
+        )
+        header.pack_start(client_button)
 
         packet_page = self._build_packet_page()
         map_page = self._build_map_page()
@@ -597,10 +654,14 @@ class Application(Gtk.Application):
                 self._bot_log_file = None
         self._bot_log_lines += 1
         if self._bot_log_lines > LOG_MAX_LINES:
-            buffer.delete(
-                buffer.get_start_iter(),
-                buffer.get_iter_at_line(LOG_TRIM_LINES),
-            )
+            trim = buffer.get_iter_at_line(LOG_TRIM_LINES)
+            # GTK's C signature has two out parameters (found, iter) and this
+            # PyGObject build returns them as a pair. Treating the pair as an
+            # iter raised TypeError on every status update once the log
+            # reached the cap, which silently froze the bot loop.
+            if isinstance(trim, tuple):
+                trim = trim[1]
+            buffer.delete(buffer.get_start_iter(), trim)
             self._bot_log_lines -= LOG_TRIM_LINES
         if not self._bot_log_scroll_scheduled:
             self._bot_log_scroll_scheduled = True
@@ -726,6 +787,19 @@ class Application(Gtk.Application):
         )
         self._bind_toggle_color(self.draw_path_toggle)
         path_box.append(self.draw_path_toggle)
+        self.block_portal_toggle = Gtk.ToggleButton(label="Block portals")
+        self.block_portal_toggle.set_active(True)
+        self.block_portal_toggle.set_tooltip_text(
+            "Keep the character off map portals while farming: A* paths "
+            "route around warp tiles, a map click on one is refused, and "
+            "every MOVE is checked against the portal cells, so the bot "
+            "cannot accidentally enter another map."
+        )
+        self._bind_toggle_color(self.block_portal_toggle)
+        self.block_portal_toggle.connect(
+            "toggled", lambda *_: self._on_block_portals_toggled()
+        )
+        path_box.append(self.block_portal_toggle)
         sidebar.append(self._frame("Path", path_box))
 
         # Combat.
@@ -920,23 +994,6 @@ class Application(Gtk.Application):
         config_box.append(self.config_info)
         sidebar.append(self._frame("Configuration", config_box))
 
-        hint = Gtk.Label(
-            label=(
-                "Click the map and the character walks there. Turn on Draw "
-                "path to plan a route instead: the first click sets its "
-                "start, later clicks add waypoints, and Start walks to the "
-                "start point before following the route. Combat selects the "
-                "monster in the client first (target ring), then attacks; it "
-                "picks the one hitting you first (Retaliate), then the "
-                "nearest. Low HP/MP sits until full."
-            )
-        )
-        hint.set_xalign(0)
-        hint.set_wrap(True)
-        hint.set_max_width_chars(42)
-        hint.add_css_class("dim-label")
-        sidebar.append(hint)
-
         sidebar_scroll = Gtk.ScrolledWindow()
         sidebar_scroll.set_child(sidebar)
         sidebar_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -1119,8 +1176,8 @@ class Application(Gtk.Application):
     def _refresh_target_list(self) -> None:
         """List the monsters spawned on the current map, not the whole catalog.
 
-        The static table holds 2,795 entries; showing its first 40 was the
-        confusing part. Selections that are not on this map stay visible (so
+        The static table holds thousands of entries; showing its first 40
+        was the confusing part. Selections that are not on this map stay visible (so
         they can be unchecked) and are marked, instead of hiding the choice.
         """
         if self.target_list is None:
@@ -1295,6 +1352,17 @@ class Application(Gtk.Application):
         for (map_id, x, y), destination in self.engine.world.gates.items():
             if set_gate(self.portals, map_id, x, y, destination):
                 merged = True
+        # A `gp` burst can arrive after a route was drawn: replan it with the
+        # new portal cells instead of leaving a path that crosses one.
+        gate_cells = frozenset(
+            (x, y)
+            for (map_id, x, y) in self.engine.world.gates
+            if self.map_grid is not None and map_id == self.map_grid.map_id
+        )
+        if gate_cells != self._gate_cells_seen:
+            self._gate_cells_seen = gate_cells
+            if self.waypoints:
+                self._rebuild_path()
         for (map_id, x, y), destination in self.engine.world.portals.items():
             if add_portal(self.portals, map_id, x, y, destination):
                 merged = True
@@ -1940,6 +2008,7 @@ class Application(Gtk.Application):
         )
         self._send(packet)
         self.last_attack_sent_at = now
+        self.attack_hit_mark = self.engine.world.self_hit_count
         if target_type == 3:
             self.fight_target_id = target_id
         # The per-rule cooldown (max of the rule and Skill.dat) is enforced in
@@ -1994,6 +2063,10 @@ class Application(Gtk.Application):
                 self.loop_toggle is not None
                 and self.loop_toggle.get_active()
             ),
+            block_portals=bool(
+                self.block_portal_toggle is not None
+                and self.block_portal_toggle.get_active()
+            ),
             monster_mode=self._current_monster_mode(),
             monster_vnums=sorted(v for v in self.target_vnums if v > 0),
             attack_unknown=bool(
@@ -2015,6 +2088,8 @@ class Application(Gtk.Application):
         self.recover_mp_toggle.set_active(config.recover_mp)
         self.low_mp_pct.set_value(config.low_mp_pct)
         self.loop_toggle.set_active(config.loop)
+        if self.block_portal_toggle is not None:
+            self.block_portal_toggle.set_active(config.block_portals)
 
         mode_index = (
             MONSTER_MODES.index(config.monster_mode)
@@ -2320,6 +2395,13 @@ class Application(Gtk.Application):
             context.stroke()
             y += 44.0
 
+    def _attack_reach(self) -> float:
+        """The equipped card's basic attack range (15 cells if unknown)."""
+        info = self.spells.get(self._basic_skill_vnum() or 0)
+        if info is not None and info.range > 0:
+            return float(info.range)
+        return float(ATTACK_SEARCH_CELLS)
+
     def _retaliation_target(self, radius: int) -> Entity | None:
         world = self.engine.world
         if world.last_attacker_id is None:
@@ -2330,8 +2412,9 @@ class Application(Gtk.Application):
         entity = world.entities.get(world.last_attacker_id)
         if entity is None or entity.kind != 3:
             return None
-        if not self._monster_allowed(entity):
-            return None
+        # Self-defence ignores the target filter: a bee that hits you is
+        # fought even in "Only selected" mode when its vnum is not selected.
+        # Farming the map may be whitelisted; being killed is not.
         if self._target_blocked(entity.entity_id):
             return None
         position = self._player_cell()
@@ -2768,6 +2851,11 @@ class Application(Gtk.Application):
         if not self.map_grid.is_walkable(*cell):
             self._set_status(f"cell {cell} is blocked")
             return
+        if cell in self._portal_cells():
+            self._set_status(
+                f"cell {cell} is a map portal; refused (Block portals is on)"
+            )
+            return
 
         draw_path = bool(
             self.draw_path_toggle is not None
@@ -2827,7 +2915,9 @@ class Application(Gtk.Application):
             self._set_status(f"standing up, then walking to {cell}")
             GLib.timeout_add(700, self._start_travel, cell, on_arrival)
             return False
-        path = astar(self.map_grid, position, cell)
+        path = astar(
+            self.map_grid, position, cell, self._portal_cells()
+        )
         if path is None:
             self._set_status(f"no path to {cell}")
             return False
@@ -2932,6 +3022,12 @@ class Application(Gtk.Application):
             return False
 
         target = self.travel_targets[self.travel_index]
+        if target in self._portal_cells():
+            self._stop_travel()
+            self._set_status(
+                f"portal at {target}; walk stopped (Block portals is on)"
+            )
+            return False
         if actual == target:
             self.travel_index += 1
             return True
@@ -3166,7 +3262,9 @@ class Application(Gtk.Application):
 
         path: list[tuple[int, int]] = []
         for waypoint in self.waypoints:
-            leg = astar(self.map_grid, current, waypoint)
+            leg = astar(
+                self.map_grid, current, waypoint, self._portal_cells()
+            )
             if leg is None:
                 self._set_status(f"no path to {waypoint}")
                 self._set_path_info(f"no path to {waypoint}")
@@ -3185,6 +3283,52 @@ class Application(Gtk.Application):
             f"path: {len(path)} cells · {len(self.waypoints)} waypoint(s)"
         )
 
+    def _sync_portal_block(self) -> None:
+        """Tell the DLL whether to drop the client's `preq` portal requests.
+
+        Path avoidance keeps the bot off warp tiles, but the client also sends
+        `preq` by itself when it is already standing on one (for example right
+        after a warp). Dropping that packet in the DLL is the only hard block.
+        """
+        if self.client is None or not self.client.connected:
+            return
+        enabled = bool(
+            self.block_portal_toggle is not None
+            and self.block_portal_toggle.get_active()
+        )
+        try:
+            self.client.send_raw(f"PORTALS|{1 if enabled else 0}")
+        except (ConnectionLost, ValueError):
+            pass
+
+    def _on_block_portals_toggled(self) -> None:
+        """Re-plan around the new obstacles and stop a stale click-to-walk."""
+        enabled = bool(
+            self.block_portal_toggle is not None
+            and self.block_portal_toggle.get_active()
+        )
+        self._sync_portal_block()
+        if self.travel_targets:
+            self._stop_travel(quiet=True)
+        if (
+            enabled
+            and self.pending_target is not None
+            and self.pending_target in self._portal_cells()
+        ):
+            # A MOVE toward a warp tile is already in flight; drop the leg so
+            # the next tick sends a safe destination instead of waiting for it.
+            self.pending_target = None
+            self.pending_is_path = False
+            self.pending_loot_id = None
+        self._rebuild_path()
+        if self.map_area is not None:
+            self.map_area.queue_draw()
+        self._set_status(
+            "portals blocked: paths avoid warp tiles"
+            if enabled
+            else "portal blocking off: paths may cross warp tiles"
+        )
+
     def _on_page_switch(self, _notebook, _page, _page_num) -> None:
         self._ensure_map_loaded()
         if self.map_area is not None:
@@ -3192,43 +3336,350 @@ class Application(Gtk.Application):
 
     # -- connection -----------------------------------------------------
 
-    def _start_client(self) -> None:
-        self.client = PacketClient(self.host, self.port)
+    def _start_client(self, port: int | None = None) -> None:
+        """(Re)start the reader thread against the selected client.
+
+        A generation counter retires the previous worker when the user picks
+        another client: the old thread may be blocked in ``recv`` for up to
+        half a second, and must not push its packets into the new session.
+        """
+        if port is not None:
+            self.port = port
+        self._client_generation += 1
+        generation = self._client_generation
+        old, self.client = self.client, PacketClient(self.host, self.port)
+        if old is not None:
+            old.close()
+        client = self.client
 
         def worker() -> None:
-            while not self._closing:
+            while (
+                not self._closing
+                and generation == self._client_generation
+            ):
                 try:
-                    self.client.connect(retries=10, delay=0.2)
+                    client.connect(retries=10, delay=0.2)
                 except ConnectionLost as exc:
+                    if (
+                        self._closing
+                        or generation != self._client_generation
+                    ):
+                        return
                     GLib.idle_add(
                         self._set_status,
                         f"not connected: {exc} — is the logger DLL "
-                        "injected? retrying every second",
+                        "injected? pick a client under Client…, retrying "
+                        "every second",
                     )
                     time.sleep(RECONNECT_DELAY)
                     continue
 
-                GLib.idle_add(self._on_connected)
+                if self._closing or generation != self._client_generation:
+                    return
+                GLib.idle_add(self._on_connected, generation)
 
                 try:
-                    while not self._closing:
-                        message = self.client.recv(timeout=0.5)
+                    while (
+                        not self._closing
+                        and generation == self._client_generation
+                    ):
+                        message = client.recv(timeout=0.5)
                         if message is not None:
                             self.inbox.put(message)
                 except (ConnectionLost, ProtocolError, OSError) as exc:
+                    if generation != self._client_generation:
+                        return
                     GLib.idle_add(
                         self._set_status,
                         f"disconnected: {exc} — reconnecting…",
                     )
 
-                if not self._closing:
+                if not self._closing and generation == self._client_generation:
                     # The DLL accepts one host at a time and replaces the old
                     # one, so another CLI/monitor can kick the GUI off. Reconnect
                     # instead of leaving the window dead.
                     time.sleep(RECONNECT_DELAY)
 
         threading.Thread(target=worker, name="ntpl-gui-reader", daemon=True).start()
-        GLib.timeout_add(DRAIN_INTERVAL_MS, self._drain)
+        if not self._drain_timer_started:
+            self._drain_timer_started = True
+            GLib.timeout_add(DRAIN_INTERVAL_MS, self._drain)
+
+    # -- client selection -----------------------------------------------
+
+    def _begin_client_selection(self, auto_single: bool = False) -> None:
+        """Scan for running game windows and either attach or show the picker.
+
+        ``auto_single`` is for startup: one client whose logger is already
+        running is attached without a dialog. Everything else (no client,
+        several clients, or a client to inject into) asks the user.
+        """
+        self._client_scan += 1
+        scan = self._client_scan
+        if self._client_dialog is not None:
+            self._set_selector_status("Scanning for NosTale clients…")
+        else:
+            self._set_status("looking for NosTale clients…")
+
+        def worker() -> None:
+            discovery = discover_clients()
+            GLib.idle_add(self._on_client_scan, discovery, scan, auto_single)
+
+        threading.Thread(
+            target=worker, name="ntpl-client-scan", daemon=True
+        ).start()
+
+    def _on_client_scan(
+        self, discovery: Discovery, scan: int, auto_single: bool
+    ) -> bool:
+        if self._closing or scan != self._client_scan:
+            return False
+        self.discovery = discovery
+        clients = discovery.clients
+        if auto_single and len(clients) == 1 and clients[0].port:
+            self._attach_client(clients[0], clients[0].port)
+            return False
+        self._show_client_dialog(discovery)
+        return False
+
+    def _show_client_dialog(self, discovery: Discovery) -> None:
+        self._close_client_dialog()
+        clients = discovery.clients
+        self._client_dialog_rows = list(clients)
+
+        dialog = Gtk.Window(title="Select NosTale client")
+        dialog.set_transient_for(self.window)
+        dialog.set_modal(True)
+        dialog.set_resizable(False)
+        dialog.set_default_size(500, -1)
+        dialog.connect("close-request", self._on_client_dialog_closed)
+        self._client_dialog = dialog
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_top(14)
+        box.set_margin_bottom(14)
+        box.set_margin_start(14)
+        box.set_margin_end(14)
+
+        heading = Gtk.Label()
+        if clients:
+            heading.set_markup(
+                f"<b>Found {len(clients)} NosTale client(s)</b>"
+            )
+        else:
+            heading.set_markup("<b>No NosTale client found</b>")
+        heading.set_xalign(0)
+        box.append(heading)
+
+        hint = Gtk.Label(
+            label=(
+                "Choose the window to attach to. A client without the logger "
+                "is injected automatically (Inject && connect)."
+            )
+        )
+        hint.set_wrap(True)
+        hint.set_xalign(0)
+        hint.set_max_width_chars(56)
+        hint.add_css_class("dim-label")
+        box.append(hint)
+
+        if clients:
+            listbox = Gtk.ListBox()
+            listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+            listbox.add_css_class("boxed-list")
+            listbox.connect("row-selected", self._on_client_row_selected)
+            listbox.connect(
+                "row-activated", lambda _l, _r: self._on_client_connect_clicked()
+            )
+            first = None
+            for client in clients:
+                row = Gtk.ListBoxRow()
+                inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+                inner.set_margin_top(8)
+                inner.set_margin_bottom(8)
+                inner.set_margin_start(10)
+                inner.set_margin_end(10)
+                title = Gtk.Label()
+                title.set_markup(
+                    f"<b>{GLib.markup_escape_text(client.title)}</b>"
+                )
+                title.set_xalign(0)
+                subtitle = Gtk.Label(
+                    label=f"PID {client.winpid} · {client.status}"
+                )
+                subtitle.set_xalign(0)
+                subtitle.add_css_class("dim-label")
+                inner.append(title)
+                inner.append(subtitle)
+                row.set_child(inner)
+                listbox.append(row)
+                if first is None:
+                    first = row
+            self._client_dialog_list = listbox
+            box.append(listbox)
+            if first is not None:
+                listbox.select_row(first)
+        else:
+            empty = Gtk.Label(
+                label=(
+                    "Start the game, then press Refresh. The window lists "
+                    "every NostaleClientX.exe window in the running Wine "
+                    "prefix."
+                )
+            )
+            empty.set_wrap(True)
+            empty.set_xalign(0)
+            empty.add_css_class("dim-label")
+            box.append(empty)
+
+        self._client_dialog_status = Gtk.Label(
+            label=" · ".join(discovery.errors)
+        )
+        self._client_dialog_status.set_wrap(True)
+        self._client_dialog_status.set_xalign(0)
+        self._client_dialog_status.add_css_class("dim-label")
+        box.append(self._client_dialog_status)
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        buttons.set_halign(Gtk.Align.END)
+        refresh = Gtk.Button(label="Refresh")
+        refresh.connect(
+            "clicked",
+            lambda *_: self._begin_client_selection(auto_single=False),
+        )
+        cancel = Gtk.Button(label="Cancel")
+        cancel.connect("clicked", lambda *_: dialog.close())
+        self._client_dialog_action = Gtk.Button(label="Connect")
+        self._client_dialog_action.add_css_class("suggested-action")
+        self._client_dialog_action.set_sensitive(bool(clients))
+        self._client_dialog_action.connect(
+            "clicked", lambda *_: self._on_client_connect_clicked()
+        )
+        buttons.append(refresh)
+        buttons.append(cancel)
+        buttons.append(self._client_dialog_action)
+        box.append(buttons)
+
+        dialog.set_child(box)
+        dialog.present()
+
+    def _on_client_dialog_closed(self, *_args) -> bool:
+        self._client_dialog = None
+        self._client_dialog_list = None
+        self._client_dialog_action = None
+        self._client_dialog_status = None
+        # A Cancel or a refresh drops any injection still running.
+        self._inject_client = None
+        # Cancel must not leave the window inert: fall back to the configured
+        # host/port exactly like the pre-selector GUI did.
+        if self.client is None and not self._closing:
+            self._set_status(f"connecting to {self.host}:{self.port}…")
+            self._start_client()
+        return False
+
+    def _close_client_dialog(self) -> None:
+        dialog, self._client_dialog = self._client_dialog, None
+        self._client_dialog_list = None
+        self._client_dialog_action = None
+        self._client_dialog_status = None
+        self._inject_client = None
+        if dialog is not None:
+            dialog.destroy()
+
+    def _set_selector_status(self, text: str) -> None:
+        if self._client_dialog_status is not None:
+            self._client_dialog_status.set_text(text)
+        self._set_status(text)
+
+    def _on_client_row_selected(self, _listbox, row) -> None:
+        action = self._client_dialog_action
+        if action is None:
+            return
+        if row is None or row.get_index() >= len(self._client_dialog_rows):
+            action.set_sensitive(False)
+            return
+        client = self._client_dialog_rows[row.get_index()]
+        action.set_label("Connect" if client.port else "Inject & connect")
+        injectable = self.discovery.injectable if self.discovery else False
+        action.set_sensitive(bool(client.port) or injectable)
+
+    def _on_client_connect_clicked(self) -> None:
+        listbox = self._client_dialog_list
+        row = listbox.get_selected_row() if listbox is not None else None
+        if row is None or row.get_index() >= len(self._client_dialog_rows):
+            return
+        client = self._client_dialog_rows[row.get_index()]
+        if client.port:
+            self._attach_client(client, client.port)
+            return
+        self._inject_and_attach(client)
+
+    def _inject_and_attach(self, client: ClientInfo) -> None:
+        action = self._client_dialog_action
+        if action is not None:
+            action.set_sensitive(False)
+        self._inject_client = client
+        self._set_selector_status(
+            f"Injecting the logger into {client.title} (PID {client.winpid})…"
+        )
+        discovery = self.discovery
+        injector = discovery.injector if discovery else None
+        dll = discovery.dll if discovery else None
+
+        def worker() -> None:
+            ok, output = inject_client(client, injector, dll)
+            port = (
+                wait_for_port(client.context, client.winpid) if ok else None
+            )
+            GLib.idle_add(self._on_client_injected, client, ok, output, port)
+
+        threading.Thread(
+            target=worker, name="ntpl-inject", daemon=True
+        ).start()
+
+    def _on_client_injected(
+        self,
+        client: ClientInfo,
+        ok: bool,
+        output: str,
+        port: int | None,
+    ) -> bool:
+        # The dialog was cancelled or refreshed while the injector ran.
+        if self._inject_client is not client:
+            return False
+        self._inject_client = None
+        if ok:
+            # An older DLL has no port file; the default remains the best
+            # guess and the reconnect loop reports it if it is wrong.
+            port = port or client.context.base_port
+            client.port = port
+            self._attach_client(client, port)
+            return False
+
+        if self._client_dialog is None:
+            self._set_status(f"injection failed: {output}")
+            return False
+        self._set_selector_status(f"Injection failed: {output}")
+        if self._client_dialog_action is not None:
+            self._client_dialog_action.set_sensitive(True)
+        return False
+
+    def _attach_client(self, client: ClientInfo, port: int) -> None:
+        """Point the reader thread at one client and reset the old world."""
+        self._close_client_dialog()
+        if self.bot_running:
+            self._stop_bot()
+        # Another client is another character and another map: packets already
+        # parsed for the previous one must not leak into the new session.
+        self.engine = Engine()
+        self.char_id = None
+        self.last_move = None
+        self.status_received = False
+        self.client_label = f"{client.title} · PID {client.winpid}"
+        self._set_status(
+            f"attaching to {self.client_label} on 127.0.0.1:{port}…"
+        )
+        self._start_client(port)
 
     def _drain(self) -> bool:
         dirty = False
@@ -3412,13 +3863,20 @@ class Application(Gtk.Application):
         else:
             self.send_entry.set_text("")
 
-    def _on_connected(self) -> None:
+    def _on_connected(self, generation: int | None = None) -> bool:
+        if generation is not None and generation != self._client_generation:
+            return False
         if not self.status_received:
-            self._set_status(f"connected to {self.host}:{self.client.port}")
+            where = f"connected to {self.host}:{self.client.port}"
+            if self.client_label:
+                where = f"{self.client_label} · {where}"
+            self._set_status(where)
         # The GUI can attach after login, so there may be no `at` packet.
         # Ask the DLL for the client's own local position instead of sending a
         # probe walk (which would make the server teleport the character).
+        self._sync_portal_block()
         self._request_position()
+        return False
 
     def _request_position(self) -> bool:
         if self.client is None or not self.client.connected:
@@ -3482,6 +3940,33 @@ class Application(Gtk.Application):
         if self.client is None or not self.client.connected:
             self._set_status("not connected")
             return False
+
+        # Last line of defence: with Block portals on, no MOVE may end on a
+        # warp tile or cross one on the way. Paths already avoid them; this
+        # catches a path built before the toggle or a freshly received `gp`.
+        blocked = self._portal_cells()
+        if blocked:
+            position = self._player_cell()
+            route = (
+                self._segment_cells(position, (x, y))
+                if position is not None
+                else [(x, y)]
+            )
+            # Leaving the cell under the character is always allowed; only
+            # entering a portal is blocked.
+            hit = next(
+                (cell for cell in route[1:] if cell in blocked), None
+            )
+            if hit is not None:
+                now = time.monotonic()
+                if now >= self.portal_warn_at:
+                    self.portal_warn_at = now + 2.0
+                    self._set_status(
+                        f"MOVE to {x},{y} crosses portal {hit}; refused "
+                        "(Block portals is on)"
+                    )
+                return False
+
         try:
             self.client.send_raw(f"{MOVE_PREFIX}{x} {y}")
         except (ConnectionLost, ValueError) as exc:
@@ -3578,6 +4063,10 @@ class Application(Gtk.Application):
     def _start_bot(self) -> None:
         if self.bot_running:
             return
+        if self.waypoints:
+            # Re-plan from the current position so a route drawn earlier (or
+            # before a map change) cannot start with a stale first leg.
+            self._rebuild_path()
         if not self.path_cells:
             # A path is optional: without one the bot can stand and fight /
             # pick up / recover (stationary combat mode).
@@ -3625,7 +4114,13 @@ class Application(Gtk.Application):
             ):
                 self.bot_goals.append(self.path_cells[-1])
         elif self.waypoints:
-            self.bot_goals = list(self.waypoints)
+            # A* could not connect the route to the waypoints: walking the raw
+            # clicks would send far MOVEs the server rejects.
+            self._set_status(
+                "no walkable path to the waypoints; cannot start"
+            )
+            self._set_path_info("no path")
+            return
         else:
             self.bot_goals = []
         self.bot_running = True
@@ -3648,6 +4143,10 @@ class Application(Gtk.Application):
         # Attack pacing / cancel retry.
         self.last_attack_sent_at = 0.0
         self.last_cancel_count = 0
+        self.attack_hit_mark = 0
+        self.cancel_streak = 0
+        self.cancel_streak_target = None
+        self.dead_warned = False
         self.unknown_warn_at = 0.0
         self.out_of_range_warn_at = 0.0
         if self.bot_timer is None:
@@ -3684,25 +4183,82 @@ class Application(Gtk.Application):
                 self._set_status("path finished")
                 self._stop_bot()
 
+    def _portal_cells(self) -> frozenset[tuple[int, int]]:
+        """Warp cells on the current map while **Block portals** is active.
+
+        The union of the server's own `gp` list, the engine's crossing
+        fallback and the persisted portal map. `gp` is exact; a learned
+        crossing can be a cell off, and including both is deliberate:
+        blocking one extra cell is harmless, stepping on the real portal is
+        not.
+        """
+        toggle = self.block_portal_toggle
+        if toggle is None or not toggle.get_active() or self.map_grid is None:
+            return frozenset()
+        map_id = self.map_grid.map_id
+        cells = {
+            (x, y)
+            for (gate_map, x, y) in self.engine.world.gates
+            if gate_map == map_id
+        }
+        cells.update(
+            (x, y)
+            for (portal_map, x, y) in self.engine.world.portals
+            if portal_map == map_id
+        )
+        cells.update(
+            (x, y)
+            for (portal_map, x, y) in self.portals
+            if portal_map == map_id
+        )
+        return frozenset(cells)
+
+    @staticmethod
+    def _segment_cells(
+        start: tuple[int, int], end: tuple[int, int]
+    ) -> list[tuple[int, int]]:
+        """Cells on the straight 8-direction walk from `start` to `end`."""
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        steps = max(abs(dx), abs(dy))
+        if steps == 0:
+            return [start]
+        return [
+            (
+                round(start[0] + dx * index / steps),
+                round(start[1] + dy * index / steps),
+            )
+            for index in range(steps + 1)
+        ]
+
     def _walkable_cell(self, x: int, y: int) -> tuple[int, int] | None:
-        """The cell itself when walkable, else a walkable neighbour."""
+        """The cell itself when usable, else a usable neighbour.
+
+        Portal cells are skipped while blocking is on, so a drop lying on a
+        warp tile is picked up from the cell next to it instead.
+        """
         grid = self.map_grid
         if grid is None:
             return None
-        if 0 <= x < grid.width and 0 <= y < grid.height:
-            if grid.is_walkable(x, y):
-                return (x, y)
-            for dx, dy in (
-                (1, 0), (-1, 0), (0, 1), (0, -1),
-                (1, 1), (-1, -1), (1, -1), (-1, 1),
-            ):
-                nx, ny = x + dx, y + dy
-                if (
-                    0 <= nx < grid.width
-                    and 0 <= ny < grid.height
-                    and grid.is_walkable(nx, ny)
-                ):
-                    return (nx, ny)
+        blocked = self._portal_cells()
+
+        def usable(nx: int, ny: int) -> bool:
+            return (
+                0 <= nx < grid.width
+                and 0 <= ny < grid.height
+                and grid.is_walkable(nx, ny)
+                and (nx, ny) not in blocked
+            )
+
+        if usable(x, y):
+            return (x, y)
+        for dx, dy in (
+            (1, 0), (-1, 0), (0, 1), (0, -1),
+            (1, 1), (-1, -1), (1, -1), (-1, 1),
+        ):
+            nx, ny = x + dx, y + dy
+            if usable(nx, ny):
+                return (nx, ny)
         return None
 
     def _approach_cell(
@@ -3727,7 +4283,9 @@ class Application(Gtk.Application):
         goal = self._walkable_cell(drop.x, drop.y)
         if goal is None:
             return False
-        path = astar(self.map_grid, position, goal)
+        path = astar(
+            self.map_grid, position, goal, self._portal_cells()
+        )
         if path is None or len(path) < 2:
             return False
         leg = path[min(3, len(path) - 1)]
@@ -3773,7 +4331,9 @@ class Application(Gtk.Application):
         goal = self._approach_cell(monster)
         if goal is None:
             return False
-        path = astar(self.map_grid, position, goal)
+        path = astar(
+            self.map_grid, position, goal, self._portal_cells()
+        )
         if path is None or len(path) < 2:
             return False
         leg = path[min(3, len(path) - 1)]
@@ -3873,13 +4433,61 @@ class Application(Gtk.Application):
         world = self.engine.world
         char_id = self._char_id()
 
+        if world.dead:
+            # Dead characters cannot attack or move; the server answers every
+            # `u_s` with `cancel` and every walk is ignored. Wait quietly for
+            # the revive packet instead of hammering the server.
+            if not self.dead_warned:
+                self.dead_warned = True
+                self.pending_target = None
+                self.pending_is_path = False
+                self.pending_loot_id = None
+                self.fight_target_id = None
+                self.recovering = False
+                self._set_status("dead; waiting for the revive")
+            return True
+        self.dead_warned = False
+
         # A cancelled cast (dead/out-of-range target, interrupted) must not
         # burn the whole cooldown: retry at once with the next live target.
         if world.cancel_count != self.last_cancel_count:
             self.last_cancel_count = world.cancel_count
             if now - self.last_attack_sent_at < 2.0:
-                self.attack_cooldown_until = now + 0.1
-                self._set_status("attack cancelled; retrying")
+                if world.self_hit_count > self.attack_hit_mark:
+                    # The server answers a successful cast with `su` and then
+                    # `cancel 0 0 -1` when the animation ends. That is the
+                    # normal end of the cast, not a refusal; the skill's own
+                    # cooldown already paces the next swing.
+                    self.attack_hit_mark = world.self_hit_count
+                    self.cancel_streak = 0
+                    self.cancel_streak_target = None
+                else:
+                    target = self.fight_target_id
+                    if target is not None and target == self.cancel_streak_target:
+                        self.cancel_streak += 1
+                    else:
+                        self.cancel_streak_target = target
+                        self.cancel_streak = 1
+                    if (
+                        target is not None
+                        and self.cancel_streak >= MAX_CANCEL_STREAK
+                    ):
+                        # The client still has an object for it (TARGET says
+                        # OK) but the server refuses every hit: a ghost entity
+                        # from a kill that happened while the bot was dead or
+                        # out of range. Drop it and pick another target.
+                        world.entities.pop(target, None)
+                        self.target_blocked[target] = now + TARGET_BLOCK_S
+                        self._set_status(
+                            f"target {target} refused "
+                            f"{self.cancel_streak} attacks; dropping it"
+                        )
+                        self.fight_target_id = None
+                        self.cancel_streak = 0
+                        self.cancel_streak_target = None
+                    else:
+                        self.attack_cooldown_until = now + 0.1
+                        self._set_status("attack cancelled; retrying")
 
         # -- recovery: sit below the configured HP/MP %, wait until full --
         recover_hp = (
@@ -3906,6 +4514,25 @@ class Application(Gtk.Application):
             if not self.recovering and self.fight_target_id is not None:
                 if self.fight_target_id not in world.entities:
                     self.fight_target_id = None
+            # Sitting under fire gets the character killed. When a monster
+            # that is hitting us is within attack reach, fight it first and
+            # recover afterwards. Retaliation ignores the target filter.
+            if self._retaliation_target(int(self._attack_reach())) is not None:
+                if self.recovering:
+                    self.recovering = False
+                    self.recover_need_hp = False
+                    self.recover_need_mp = False
+                    # Without this, the start-recovery block below sees the
+                    # still-low HP in the SAME tick and starts again, then the
+                    # next tick aborts again: a 50 ms log spam loop.
+                    hp_low = mp_low = False
+                    if world.resting is True and char_id is not None:
+                        self._send(f"rest 1 1 {char_id}")
+                    self._set_status(
+                        "attacked while recovering; fighting back"
+                    )
+                elif hp_low or mp_low:
+                    hp_low = mp_low = False
             if not self.recovering and (hp_low or mp_low):
                 if self._finish_kill_first():
                     # Keep fighting; the next tick after the kill starts
@@ -4076,18 +4703,22 @@ class Application(Gtk.Application):
             self.auto_attack_toggle is not None
             and self.auto_attack_toggle.get_active()
         )
-        if auto_attack:
+        # Retaliate defends on its own: with Auto-attack off, a monster that
+        # hits the character is still attacked back. Only the attacker is
+        # targeted, never a passive neighbour.
+        retaliate = (
+            self.retaliate_toggle is not None
+            and self.retaliate_toggle.get_active()
+        )
+        if auto_attack or retaliate:
             radius = ATTACK_SEARCH_CELLS
             base_info = self.spells.get(self._basic_skill_vnum() or 0)
             if base_info is not None and base_info.range > 0:
                 radius = max(radius, int(base_info.range))
             monster = None
-            if (
-                self.retaliate_toggle is not None
-                and self.retaliate_toggle.get_active()
-            ):
+            if retaliate:
                 monster = self._retaliation_target(radius)
-            if monster is None:
+            if monster is None and auto_attack:
                 monster = self._nearest_monster(radius)
 
             if (
@@ -4175,6 +4806,7 @@ class Application(Gtk.Application):
                         )
                         self._send(packet)
                         self.last_attack_sent_at = now
+                        self.attack_hit_mark = world.self_hit_count
                         self.fight_target_id = monster.entity_id
                         # The skill's own cast time and cooldown pace the next
                         # action; the Min delay spin is only a floor on top.
@@ -4259,17 +4891,55 @@ class Application(Gtk.Application):
                 return False
 
         target = self.bot_goals[self.path_index]
+        if target in self._portal_cells():
+            # The path was built before the portal was known (or before the
+            # toggle came on). Skipping the leg is safer than retrying it.
+            self._set_status(
+                f"portal at {target} blocks this path leg; skipping it"
+            )
+            self._advance_path()
+            return True
         current = self._player_cell()
         if current is not None and current == target:
             self._advance_path()
             return True
+
+        # A raw waypoint (or a goal reached after a loop) can be far away.
+        # The client/server accept only short hops, so walk toward it in
+        # MAX_MOVE_LEG_CELLS-cell steps and only advance the route when the
+        # goal itself is reached.
+        goal_reached = True
+        if (
+            current is not None
+            and max(
+                abs(target[0] - current[0]), abs(target[1] - current[1])
+            )
+            > MAX_MOVE_LEG_CELLS
+        ):
+            if self.map_grid is None:
+                self._set_status(
+                    f"goal {target} is far and no map is loaded; skipping"
+                )
+                self._advance_path()
+                return True
+            path = astar(
+                self.map_grid, current, target, self._portal_cells()
+            )
+            if path is None:
+                self._set_status(
+                    f"no walkable path to {target}; skipping this leg"
+                )
+                self._advance_path()
+                return True
+            goal_reached = False
+            target = path[min(MAX_MOVE_LEG_CELLS - 1, len(path) - 1)]
 
         if now < self.walk_not_before:
             return True
 
         if self._client_move(target[0], target[1]):
             self.pending_target = target
-            self.pending_is_path = True
+            self.pending_is_path = goal_reached
             self.pending_loot_id = None
             self.pending_since = now
             # A whole leg takes ~0.45 s per cell. Diagonal legs cover
@@ -4293,6 +4963,7 @@ class Application(Gtk.Application):
 
     def do_shutdown(self) -> None:
         self._closing = True
+        self._client_generation += 1
         self._stop_bot()
         if self.client is not None:
             self.client.close()
@@ -4304,6 +4975,13 @@ def run_gui(
     port: int | None = None,
     map_data: str | None = None,
     log_file: str | None = None,
+    select_client: bool = True,
 ) -> int:
-    app = Application(host, port, map_data, log_file=log_file)
+    app = Application(
+        host,
+        port,
+        map_data,
+        log_file=log_file,
+        select_client=select_client,
+    )
     return int(app.run([]))

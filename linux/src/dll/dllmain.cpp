@@ -34,7 +34,8 @@ std::string status_line() {
     std::snprintf(
         buffer, sizeof(buffer),
         "STATUS|ntpl %s | recv=0x%08lX send=0x%08lX tnt=0x%08lX | "
-        "hooks recv=%s send=%s skill=%s | drops recv=%lu send=%lu",
+        "hooks recv=%s send=%s skill=%s | drops recv=%lu send=%lu | "
+        "portalblock=%s",
         ntpl::kVersion,
         static_cast<unsigned long>(st.recv_addr),
         static_cast<unsigned long>(st.send_addr),
@@ -43,9 +44,43 @@ std::string status_line() {
         hook_state(st.send_found, st.send_hooked),
         hook_state(st.skill_found, st.skill_hooked),
         static_cast<unsigned long>(packetlogger::recv_dropped()),
-        static_cast<unsigned long>(packetlogger::send_dropped()));
+        static_cast<unsigned long>(packetlogger::send_dropped()),
+        packetlogger::portal_block() ? "BLOCKED" : "off");
 
     return std::string(buffer);
+}
+
+// The GUI/CLI runs outside Wine and cannot see Windows PIDs, so each DLL
+// instance advertises its listening port in a small file keyed by the game's
+// Windows PID. The GUI pairs that file with the injector's --list output and
+// can then attach to any of several running clients, each on its own port.
+std::string port_file_path(DWORD pid) {
+    char path[MAX_PATH] = {0};
+    std::snprintf(path, sizeof(path), "C:\\ntpl-%lu.port",
+                  static_cast<unsigned long>(pid));
+    return std::string(path);
+}
+
+void publish_port(std::uint16_t port) {
+    const std::string path = port_file_path(GetCurrentProcessId());
+    char text[16] = {0};
+    const int length = std::snprintf(text, sizeof(text), "%u\r\n", port);
+
+    HANDLE file =
+        CreateFileA(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        ntpl::logf("cannot write %s", path.c_str());
+        return;
+    }
+
+    DWORD written = 0;
+    WriteFile(file, text, static_cast<DWORD>(length), &written, nullptr);
+    CloseHandle(file);
+}
+
+void unpublish_port() {
+    DeleteFileA(port_file_path(GetCurrentProcessId()).c_str());
 }
 
 // Moves everything captured since the last pass to the file log and, when a
@@ -245,6 +280,17 @@ void handle_command(const std::string& command) {
         return;
     }
 
+    // PORTALS|1 / PORTALS|0 -- drop or allow the client's own `preq` portal
+    // requests. The packet is still logged, so the host sees the attempt.
+    if (command.compare(0, 8, "PORTALS|") == 0) {
+        const bool enabled = command.size() > 8 && command[8] == '1';
+        packetlogger::set_portal_block(enabled);
+        ntpl::logf("portal blocking %s", enabled ? "on" : "off");
+        tcpserver::send_line(std::string("STATUS|PORTALS ") +
+                             (enabled ? "BLOCKED" : "ALLOWED"));
+        return;
+    }
+
     tcpserver::send_line("STATUS|unknown command: " + command);
 }
 
@@ -273,19 +319,29 @@ DWORD WINAPI main_thread(LPVOID module) {
             "signatures (see docs/hooking.md)");
     }
 
-    const std::uint16_t port = ntpl::config_port();
+    const std::uint16_t base_port = ntpl::config_port();
+    std::uint16_t port = base_port;
     bool server_up = false;
-    for (int attempt = 0; attempt < 6 && !server_up; ++attempt) {
+    // Several clients can share one prefix. The base port belongs to whichever
+    // DLL starts first (a restarted client may also find a stale listener left
+    // behind by Wine), so every instance probes upward for a free port instead
+    // of waiting forever on one that will never free up.
+    for (unsigned offset = 0; offset < 10 && !server_up; ++offset) {
+        const unsigned candidate = static_cast<unsigned>(base_port) + offset;
+        if (candidate > 65535) {
+            break;
+        }
+        port = static_cast<std::uint16_t>(candidate);
         server_up = tcpserver::start(port);
-        if (!server_up) {
-            ntpl::logf("cannot listen on 127.0.0.1:%u, retrying in 5 s",
-                       static_cast<unsigned>(port));
-            Sleep(5000);
+        if (!server_up && offset == 0) {
+            ntpl::logf("cannot listen on 127.0.0.1:%u, trying the next ports",
+                       static_cast<unsigned>(base_port));
         }
     }
 
     if (server_up) {
         ntpl::logf("listening on 127.0.0.1:%u", static_cast<unsigned>(port));
+        publish_port(port);
     } else {
         ntpl::logf("TCP server could not start; packet capture still works "
                    "and goes to the file log only");
@@ -341,6 +397,7 @@ DWORD WINAPI main_thread(LPVOID module) {
     packetlogger::remove_hooks();
 
     tcpserver::stop();
+    unpublish_port();
     ntpl::logf("stopped; module stays loaded until the game exits");
     ntpl::log_close();
 

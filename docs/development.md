@@ -28,9 +28,9 @@ The MinGW compiler is `i686-w64-mingw32-g++`. Override with
 ## Tests
 
 ```bash
-make -C linux host-test        # 123 stdlib unittest cases
+make -C linux host-test        # 142 stdlib unittest cases
 make -C linux gui-test         # headless GTK4, needs xvfb
-make -C linux bot-test         # 9 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach
+make -C linux bot-test         # 13 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive, ghost-target dropping
 make -C linux all test-host
 linux/scripts/dev-test-wine.sh 25
 ```
@@ -40,19 +40,28 @@ reassembly and peer close), the engine's world-state handlers, the map
 parser/A* (synthetic NOS, bad headers, walls, unreachable targets, ranking,
 8-direction diagonals and no corner cutting), bot-config validation/clamping,
 spawn-log parsing (spawns and the `ski` skill list), Skill.dat spell metadata,
-rule-order persistence, and the monster/skill text tables. The GUI test opens the
-real window under Xvfb and checks rows, status, map switch, tooltips, toggle
-colors and the recovery banner. The bot smokes cover combat + path movement,
+rule-order persistence, and the monster/skill text tables. The GUI tests open
+the real window under Xvfb: one checks rows, status, map switch, tooltips,
+toggle colors and the recovery banner; the other drives the client picker
+with two fake clients (Connect attaches to the selected port, an uninjected
+client offers Inject & connect). The bot smokes cover combat + path movement,
 target filters + spell rules + config save/load, the scan-backed spell picker
-dialog, scanned-spell rotation in list order, rejected walks and recovery.
+dialog, scanned-spell rotation in list order, rejected walks, recovery,
+portal blocking (A* avoids warp tiles, a MOVE onto one is refused, `PORTALS|1`
+is sent), retaliate-only defence (Auto-attack off, the attacker is attacked
+and a landed `su`+`cancel` is not logged as a cancelled attack), far-goal leg
+chopping (a goal 4 cells away is walked as a 3-cell MOVE, not one rejected far
+`walk`), and death/ghost handling (no attack while dead, resume on `revive`,
+and a target whose every hit is cancelled is dropped after 3 refusals).
 The combat smoke asserts the `get`/`TARGET`/`u_s`/`MOVE` sequence (Retaliate
 picks the monster that hit us) and that the fake client's own `walk` confirms
 the move. The rules smoke filters two monsters by vnum, checks that HP 40 %
 triggers a spell rule (`u_s 7 3 500`), and round-trips the JSON configuration.
 The reject smoke makes the server silent and asserts the bot stops after three
 rejected moves. The recovery smoke starts at 20/100 HP and asserts the bot
-sits, waits for full HP and then stands. The Wine script covers the x86 stubs
-(`HookStubTest.exe`), the DLL lifecycle and the command path with a fake game.
+sits, waits for full HP and then stands. The Wine script covers the x86 stubs (`HookStubTest.exe`: packet pointer,
+original-call replay, trampoline and the drop path), the DLL lifecycle and the
+command path with a fake game.
 
 Nothing in this repository can test the real detours against the real client;
 that requires the live game. The procedure is:

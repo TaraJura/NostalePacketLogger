@@ -98,7 +98,8 @@ linux/scripts/inject.sh
 
 The injector enumerates **Windows** PIDs by executable name
 (`NostaleClientX.exe`, `NostaleX.dat`, `CustomClient.exe`) inside the prefix.
-You do not need to translate Linux PIDs.
+You do not need to translate Linux PIDs. `Injector.exe --list` shows the
+windows, `--pid <winpid>` injects just one, and `--all` injects every one.
 
 Expected output:
 
@@ -122,6 +123,14 @@ ntpl 0.2.1 | recv=0x004A1B20 send=0x004A3C40 tnt=0x004B00A4 | hooks recv=ACTIVE 
 If either address is `0x00000000` or a hook says `NOT-FOUND`, the client build
 does not match the signatures. See [hooking.md](hooking.md#maintaining-the-signatures-after-a-client-patch).
 
+Several clients can run at once. Each DLL takes the first free port from
+`NTPL_PORT` upward and records it in `<prefix>/drive_c/ntpl-<winpid>.port`
+(see [ipc.md](ipc.md#several-clients-at-once)). The GUI discovers the game
+windows through `Injector.exe --list`, pairs them with those port files and
+lets the user pick one at startup; a client whose logger is not running yet is
+injected from the same dialog. The **Client…** header button reopens the
+picker. A single client that is already injected is attached without a dialog.
+
 ## Use the host
 
 ```bash
@@ -138,7 +147,7 @@ linux/scripts/host.sh replay capture.log      # resend the SEND lines
 linux/scripts/host.sh map info 20 --at 25,117 # map size + walkability
 linux/scripts/host.sh map render 20 /tmp/map.png --scale 3
 linux/scripts/host.sh map best                # rank maps by live entity positions
-linux/scripts/gui.sh                          # GTK4 window (one-command launcher)
+linux/scripts/gui.sh                          # GTK4 window + client picker
 linux/scripts/host.sh gui                     # same, through the host wrapper
 
 # reverse-engineering aids (loopback only)
@@ -160,8 +169,10 @@ tab reads the client's own `NostaleData/NStcData.NOS` (path configurable with
 overlays live entities with hover tooltips, accepts waypoints by clicking,
 computes an **8-direction A\*** path, and can loop it while auto-attacking
 monsters (the client selects the monster via `TARGET|id` before each attack).
-The sidebar has live HP/MP bars, green/red toggles, a red recovery banner,
-target filters, conditional spell rules and JSON save/load. Server-sent `gp`
+The sidebar has live HP/MP bars, green/red toggles (including **Block
+portals**, which drops the client's `preq` portal request in the DLL and
+keeps paths off warp tiles so farming cannot change maps), a red recovery banner, target filters, conditional spell rules and
+JSON save/load. Server-sent `gp`
 portals and `wp` Time-Space entrances are drawn on the map. The **Bot log**
 tab keeps a timestamped, selectable history of every action (attacks, target
 selections/refusals, walks, pickups, recovery, DLL errors) for debugging;
@@ -241,10 +252,10 @@ both.
 ## Tests
 
 ```bash
-make host-test          # 123 stdlib unit tests: protocol, engine, map, config, spells
+make host-test          # 142 stdlib unit tests: protocol, engine, map, config, spells
 
 make gui-test           # headless GTK4 window + map surface against a fake stream
-make bot-test           # 9 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach
+make bot-test           # 13 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive, ghost-target dropping
 make all test-host
 ./scripts/dev-test-wine.sh 25
 ```
@@ -311,9 +322,11 @@ The recommended setup is still a dedicated prefix.
 - Map switching uses the **second** `c_map` field (`c_map <type> <mapId>
   <state>`) plus `at`; the GUI switches immediately and drops stale entities.
   Live captures cover map 20 ↔ 85.
-- Monster names come from `NSlangData_UK.NOS` / `_code_uk_monster.txt`; the
-  map tooltips use them. `spawnlog.py` backfills entity vnums and player names
-  for spawns that happened before the host connected.
+- Monster names join `NSgtdData.NOS` / `monster.dat` (vnum → text key) with
+  `NSlangData_UK.NOS` / `_code_uk_monster.txt` (text key → name); the map
+  tooltips use them. The text key is not the vnum (map 103: vnum 419 is a
+  Violent Seedle). `spawnlog.py` backfills entity vnums and player names for
+  spawns that happened before the host connected.
 
 ## Honest status
 

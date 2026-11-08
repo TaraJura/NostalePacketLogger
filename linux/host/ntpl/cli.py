@@ -669,7 +669,15 @@ def cmd_gui(args: argparse.Namespace) -> int:
         )
         return 2
 
-    return run_gui(args.host, args.port, args.map_data, args.log)
+    return run_gui(
+        args.host,
+        args.port,
+        args.map_data,
+        args.log,
+        select_client=(
+            not args.no_client_picker and args.port == default_port()
+        ),
+    )
 
 
 def cmd_mcp(args: argparse.Namespace) -> int:
@@ -804,6 +812,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="DLL packet log for backfilling entity vnums/names "
         "(default: NTPL_LOG or the Wine prefix's C:\\NosTalePacketLog.txt)",
+    )
+    gui.add_argument(
+        "--no-client-picker",
+        action="store_true",
+        help="connect straight to --host/--port instead of listing the "
+        "running clients (implied by a non-default --port, e.g. the MCP "
+        "broker on 47822)",
     )
     gui.set_defaults(handler=cmd_gui)
 

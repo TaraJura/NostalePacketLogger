@@ -103,11 +103,24 @@ _ntpl_hook_send:
     subl    $12, %esp
     pushl   20(%ebp)            # saved EDX = packet pointer
     call    _ntpl_on_packet_send
+    movl    %eax, -4(%ebp)      # 1 = send, 0 = drop
     movl    %ebp, %esp
-    popal
+    popal                       # restores the CALLER's EBP
     popfl
+    cmpl    $0, -40(%esp)       # [ebp-4]; after popal/popfl esp = ebp+36
+    je      .Lsend_dropped
     jmp     *_ntpl_send_trampoline
+.Lsend_dropped:
+    ret                         # packet dropped; return to the caller
 ```
+
+`ntpl_on_packet_send` returns whether the packet may be sent. Returning 0
+skips the trampoline entirely: the function is a register-convention procedure
+whose result the callers ignore, so returning to the caller is safe. This is
+how **Block portals** drops `preq`. Note that the decision must be read
+relative to **ESP**, not EBP: `popal` restores the caller's EBP, so
+`-4(%ebp)` after `popal` is the wrong address. That bug made the first drop
+attempt send the packet anyway and is covered by `HookStubTest.exe`.
 
 The trampoline runs with the registers and flags exactly as the game had them,
 executes the original prologue, and jumps back. The 6-byte length is
@@ -144,13 +157,24 @@ _ntpl_hook_skill:
     subl    $12, %esp
     pushl   24(%ebp)            # saved ECX = packet pointer
     call    _ntpl_on_packet_send
+    movl    %eax, -4(%ebp)
     movl    %ebp, %esp
     popal
     popfl
+    cmpl    $0, -40(%esp)
+    je      .Lskill_dropped
     call    *_ntpl_skill_original_call
     jmp     *_ntpl_skill_jmp_back     # NOT `ret`: the hook is a JMP, so no
                                       # return address was pushed
+.Lskill_dropped:
+    movl    $1, %eax            # the builder tests this Boolean
+    jmp     *_ntpl_skill_jmp_back
 ```
+
+The client sends its `preq` portal request through this same builder, so the
+drop is applied here too (with EAX=1 so the builder thinks the send
+succeeded). Without that, **Block portals** would only stop the paths, not the
+warp: the normal send hook never sees `preq`.
 
 `Memory::Hook` replaces the call with a **JMP**; the original return address is
 not on the stack. The stub must therefore replay the call and jump back to the

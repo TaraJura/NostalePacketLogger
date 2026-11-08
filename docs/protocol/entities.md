@@ -25,10 +25,10 @@ in 2 1488 2230353 105 24 2 100 109 0 0 3 4165102 1 0 -1 Panda-Leuchtii<3 ...
     — Pet vnum 1488 at (105, 24), named "Panda-Leuchtii<3"
 
 in 3 206 5122 132 182 2 100 100 0 0 0 -1 0 0 -1 - 0 -1 0 0 0 0 0 0 0 0 0 0 0 1 0
-    — Monster vnum 206 (entity 5122) at (132, 182); live name "Angry Queen Bee"
+    — Monster vnum 206 (entity 5122) at (132, 182); 206 → zts200e → "Mountain Turtle"
 
 in 3 223 5164 103 169 2 100 100 0 0 0 -1 1 0 -1 - 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0
-    — Monster vnum 223 (entity 5164) at (103, 169); live name "Small Wiggler"
+    — Monster vnum 223 (entity 5164) at (103, 169); 223 → zts217e → "Small Wasp"
 ```
 
 **Notes**:
@@ -39,9 +39,13 @@ in 3 223 5164 103 169 2 100 100 0 0 0 -1 1 0 -1 - 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0
 - **Monster packets carry the template vnum first and the per-session
   `entityId` second.** `ncif`, `u_s` and `su` use the `entityId`; the map
   tooltip and target filter need the vnum. The engine stores both.
-- The client derives the displayed monster name from the vnum; the host reads
-  `NSlangData_<lang>.NOS` → `_code_<lang>_monster.txt` (`zts<vnum>e<TAB><name>`)
-  via `monsternames.py`. The skill table uses the same `zts<id>e` records.
+- The client derives the displayed monster name from the vnum in two steps:
+  `NSgtdData.NOS` → `monster.dat` maps the vnum to a text key (`VNUM 419` →
+  `NAME zts489e`), and `NSlangData_<lang>.NOS` → `_code_<lang>_monster.txt`
+  maps that key (`zts489e<TAB>Violent Seedle`). The key is **not** the vnum:
+  vnum 419 is a Violent Seedle, while text record 419 is "Wheat".
+  `monsternames.py` performs the join. The skill table uses the same
+  `zts<id>e` key space (`Skill.dat` NAME).
 - A monster that was already alive when the DLL was injected has no `in`
   packet in the log, so its vnum is unknown until it respawns/re-enters view.
   `spawnlog.py` recovers the ones whose `in` was logged before the GUI
