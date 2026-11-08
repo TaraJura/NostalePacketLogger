@@ -30,7 +30,7 @@ The MinGW compiler is `i686-w64-mingw32-g++`. Override with
 ```bash
 make -C linux host-test        # 142 stdlib unittest cases
 make -C linux gui-test         # headless GTK4, needs xvfb
-make -C linux bot-test         # 13 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive, ghost-target dropping
+make -C linux bot-test         # 15 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, ghost-target dropping, target focus
 make -C linux all test-host
 linux/scripts/dev-test-wine.sh 25
 ```
@@ -52,7 +52,10 @@ is sent), retaliate-only defence (Auto-attack off, the attacker is attacked
 and a landed `su`+`cancel` is not logged as a cancelled attack), far-goal leg
 chopping (a goal 4 cells away is walked as a 3-cell MOVE, not one rejected far
 `walk`), and death/ghost handling (no attack while dead, resume on `revive`,
-and a target whose every hit is cancelled is dropped after 3 refusals).
+and a target whose every hit is cancelled is dropped after 2 refusals, the
+next refusal pausing combat), and target focus (a monster moved next to the
+character does not steal the fight from the current target; after its death
+the nearest one is chosen).
 The combat smoke asserts the `get`/`TARGET`/`u_s`/`MOVE` sequence (Retaliate
 picks the monster that hit us) and that the fake client's own `walk` confirms
 the move. The rules smoke filters two monsters by vnum, checks that HP 40 %

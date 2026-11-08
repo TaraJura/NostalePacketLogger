@@ -255,7 +255,7 @@ both.
 make host-test          # 142 stdlib unit tests: protocol, engine, map, config, spells
 
 make gui-test           # headless GTK4 window + map surface against a fake stream
-make bot-test           # 13 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive, ghost-target dropping
+make bot-test           # 15 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, ghost-target dropping, target focus
 make all test-host
 ./scripts/dev-test-wine.sh 25
 ```

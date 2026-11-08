@@ -72,6 +72,7 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `portals` | `(mapId, x, y) → destination mapId` learned from real crossings (departure cell + the following `at` arrival); fallback when `gp` was missed |
 | `stats` | `CharacterStats(hp, hp_max, mp, mp_max)` from `stat`; drives the bars and recovery |
 | `last_attacker_id` / `last_attacker_at` | last entity that hit the local player and the packet timestamp; Retaliate uses it (5 s window) |
+| `revival_offered` | the server offered the in-place revival dialog (`dlgi #revival^0 …`); cleared by `revive` |
 | `dead` | the local character is dead (`stat` with 0 HP); `revive 1 <own charId> 0` or a later stat with HP > 0 clears it |
 | `self_hit_count` | number of landed hits by the local character (`su` with attacker type 1 and the own char id); a later `cancel` only means a real refusal when this did not move |
 | `chat` | last 200 `(type, id, message)` tuples from `say` |
@@ -113,6 +114,7 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `su` | RECV | `combat`, `last_skill` (first five ints); if the target is self, `last_attacker_id`/`last_attacker_at` |
 | `stat` | RECV | own HP/MP |
 | `st` | RECV | monster status; `hp == 0` removes the entity (kill, no `out` is sent) |
+| `dlgi` | RECV | dialog; `#revival` marks the "Continue here? 10 Seeds of Power" offer, stored as `revival_offered` |
 | `revive` | RECV | `revive 1 <charId> 0`; clears `dead` when the char id is the local character |
 | `cancel` | RECV | increments `cancel_count`; the server sends it after every cast, so the GUI clears the cooldown and retries only when no `su` from the character arrived since the attack (otherwise it is the normal end of the animation) |
 | `say` | RECV/SEND | `chat` |

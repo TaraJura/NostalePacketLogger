@@ -321,6 +321,8 @@ class Application(Gtk.Application):
         self.pickup_toggle = None
         self.recover_toggle = None
         self.recover_mp_toggle = None
+        self.revive_toggle = None
+        self.revive_sent_at = 0.0
         self.attack_unknown_toggle = None
         self.recover_banner = None
         self.unknown_warn_at = 0.0
@@ -981,6 +983,15 @@ class Application(Gtk.Application):
                 self.low_mp_pct,
             )
         )
+        self.revive_toggle = Gtk.ToggleButton(label="Revive on death")
+        self.revive_toggle.set_active(False)
+        self.revive_toggle.set_tooltip_text(
+            "Accept the in-place revival dialog (Continue here? You'll "
+            "need 10 Seeds of Power) and resume. Off: the bot stops when "
+            "the character dies and you revive manually."
+        )
+        self._bind_toggle_color(self.revive_toggle)
+        recover_box.append(self.revive_toggle)
         sidebar.append(self._frame("Recovery", recover_box))
 
         # Configuration: export/import every bot setting as JSON.
@@ -2068,6 +2079,10 @@ class Application(Gtk.Application):
                 and self.recover_mp_toggle.get_active()
             ),
             low_mp_pct=float(self.low_mp_pct.get_value()),
+            revive_on_death=bool(
+                self.revive_toggle is not None
+                and self.revive_toggle.get_active()
+            ),
             loop=bool(
                 self.loop_toggle is not None
                 and self.loop_toggle.get_active()
@@ -2076,6 +2091,17 @@ class Application(Gtk.Application):
                 self.block_portal_toggle is not None
                 and self.block_portal_toggle.get_active()
             ),
+            draw_path=bool(
+                self.draw_path_toggle is not None
+                and self.draw_path_toggle.get_active()
+            ),
+            map_id=(
+                self.map_grid.map_id
+                if self.map_grid is not None
+                else self.engine.world.map_id
+            ),
+            waypoints=list(self.waypoints),
+            path_start=self.path_start,
             monster_mode=self._current_monster_mode(),
             monster_vnums=sorted(v for v in self.target_vnums if v > 0),
             attack_unknown=bool(
@@ -2096,9 +2122,39 @@ class Application(Gtk.Application):
         self.low_hp_pct.set_value(config.low_hp_pct)
         self.recover_mp_toggle.set_active(config.recover_mp)
         self.low_mp_pct.set_value(config.low_mp_pct)
+        if self.revive_toggle is not None:
+            self.revive_toggle.set_active(config.revive_on_death)
         self.loop_toggle.set_active(config.loop)
         if self.block_portal_toggle is not None:
             self.block_portal_toggle.set_active(config.block_portals)
+        if self.draw_path_toggle is not None:
+            self.draw_path_toggle.set_active(config.draw_path)
+
+        # The drawn route is part of the configuration: restore the waypoints
+        # and rebuild the A* path so the map shows the same line as when it
+        # was saved. The route belongs to a map, so a mismatch is reported
+        # instead of drawing it over unrelated terrain.
+        self.path_start = config.path_start
+        self.waypoints = list(config.waypoints)
+        current_map = (
+            self.map_grid.map_id
+            if self.map_grid is not None
+            else self.engine.world.map_id
+        )
+        if (
+            config.map_id is not None
+            and current_map is not None
+            and config.map_id != current_map
+        ):
+            self.path_cells = []
+            self._set_path_info(
+                f"route is for map {config.map_id} "
+                f"(current map {current_map})"
+            )
+        else:
+            self._rebuild_path()
+        if self.map_area is not None:
+            self.map_area.queue_draw()
 
         mode_index = (
             MONSTER_MODES.index(config.monster_mode)
@@ -3992,6 +4048,28 @@ class Application(Gtk.Application):
             return False
         return True
 
+    def _send_revive(self) -> None:
+        """Confirm the server's in-place revival dialog.
+
+        The client's Continue button emits this burst right before the server
+        answers with `cond` + `revive 1 <charId> 0` (and spends 10 Seeds of
+        Power). Reproducing it is the only way to accept the dialog without
+        clicking the game window.
+        """
+        for packet in (
+            "mall 50",
+            "c_close 1",
+            "c_close 0",
+            "bp_close",
+            "f_stash_end",
+            "mall 50",
+            "c_close 1",
+            "mall 50",
+            "c_close 1",
+        ):
+            if not self._send(packet):
+                return
+
     def _client_move(self, x: int, y: int) -> bool:
         """Walk through the game's own MoveTo function (not packet injection)."""
         if self.client is None or not self.client.connected:
@@ -4423,6 +4501,32 @@ class Application(Gtk.Application):
         )
         return True
 
+    def _locked_target(self, radius: int) -> Entity | None:
+        """The monster the bot is already fighting, while it is still valid.
+
+        Focus fire: a closer monster must not steal the fight. Retaliate is
+        checked before this, so a monster that hits the character still gets
+        priority. The lock breaks when the target dies (the `st` death handler
+        removes it), is blocked/refused, leaves the radius or loses line of
+        sight.
+        """
+        if self.fight_target_id is None:
+            return None
+        entity = self.engine.world.entities.get(self.fight_target_id)
+        if entity is None or entity.kind != 3:
+            return None
+        if self._target_blocked(entity.entity_id):
+            return None
+        position = self._player_cell()
+        if position is None:
+            return None
+        distance = max(
+            abs(entity.x - position[0]), abs(entity.y - position[1])
+        )
+        if distance > radius or not self._has_line_of_sight(entity):
+            return None
+        return entity
+
     def _nearest_monster(self, radius: int) -> Entity | None:
         position = self._player_cell()
         if position is None:
@@ -4499,8 +4603,25 @@ class Application(Gtk.Application):
 
         if world.dead:
             # Dead characters cannot attack or move; the server answers every
-            # `u_s` with `cancel` and every walk is ignored. Wait quietly for
-            # the revive packet instead of hammering the server.
+            # `u_s` with `cancel` and every walk is ignored.
+            revive = bool(
+                self.revive_toggle is not None
+                and self.revive_toggle.get_active()
+            )
+            if not revive:
+                if not self.dead_warned:
+                    self.dead_warned = True
+                    self.pending_target = None
+                    self.pending_is_path = False
+                    self.pending_loot_id = None
+                    self.fight_target_id = None
+                    self.recovering = False
+                    self._stop_bot()
+                    self._set_status(
+                        "dead; revive is off — bot stopped "
+                        "(revive manually, then Start)"
+                    )
+                return False
             if not self.dead_warned:
                 self.dead_warned = True
                 self.pending_target = None
@@ -4508,9 +4629,30 @@ class Application(Gtk.Application):
                 self.pending_loot_id = None
                 self.fight_target_id = None
                 self.recovering = False
-                self._set_status("dead; waiting for the revive")
+                self.revive_sent_at = 0.0
+                self._set_status(
+                    "dead; waiting for the revival offer"
+                )
+            if world.revival_offered and self.revive_sent_at == 0.0:
+                # The server offered `dlgi #revival` ("Continue here? You'll
+                # need 10 Seeds of Power"). Answer it like the client does.
+                self.revive_sent_at = now
+                self._send_revive()
+                self._set_status(
+                    "revival offered; accepting (10 Seeds of Power)"
+                )
+            elif (
+                self.revive_sent_at > 0.0
+                and now - self.revive_sent_at > 5.0
+            ):
+                self._stop_bot()
+                self._set_status(
+                    "revive failed (10 Seeds of Power?); bot stopped"
+                )
+                return False
             return True
         self.dead_warned = False
+        self.revive_sent_at = 0.0
 
         # A cancelled cast (dead/out-of-range target, interrupted) must not
         # burn the whole cooldown: retry at once with the next live target.
@@ -4805,7 +4947,12 @@ class Application(Gtk.Application):
                 radius = max(radius, int(base_info.range))
             monster = None
             if retaliate:
+                # The monster hitting us always wins the target lock.
                 monster = self._retaliation_target(radius)
+            if monster is None and auto_attack:
+                # Stay on the current target until it dies or becomes
+                # invalid; only then pick the nearest monster.
+                monster = self._locked_target(radius)
             if monster is None and auto_attack:
                 monster = self._nearest_monster(radius)
 

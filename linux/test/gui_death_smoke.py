@@ -123,6 +123,9 @@ def main() -> int:
             app.path_cells = []
             app.auto_attack_toggle.set_active(True)
             app.retaliate_toggle.set_active(True)
+            # Keep running through the death so the ghost-target phase runs;
+            # the revive option is tested separately in gui_revive_smoke.
+            app.revive_toggle.set_active(True)
             app._start_bot()
             GLib.timeout_add(1500, dead_check)
         except Exception as exc:  # noqa: BLE001 - report, do not crash GTK

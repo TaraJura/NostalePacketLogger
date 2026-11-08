@@ -26,6 +26,12 @@ the per-session entity id. This works for monsters that spawned before the GUI
 attached because `spawnlog.py` backfills the vnum from the DLL log; see
 [map.md](map.md#entities-that-spawned-before-the-host-attached).
 
+**Target focus**: once the bot attacks a monster it keeps that target
+until it dies. A closer monster only becomes the target after the current one
+is gone (dead, blocked, out of the acquisition radius or without line of
+sight). The one exception is **Retaliate**: the monster that is hitting the
+character always takes priority.
+
 Attacking also requires **line of sight**: the straight line from the
 character to the monster must not cross a blocked terrain cell, so the bot
 does not fire through town walls or rock ledges (the server refuses those
@@ -181,6 +187,23 @@ The catalog is loaded in a background thread at startup (Skill.dat decodes
 about 1.2 MB); the picker shows a loading row until it is ready. If the file is
 missing, the picker is empty and manual vnums still work.
 
+## Death — revive or stop
+
+The server offers an in-place revival dialog after a death
+(`dlgi #revival^0 #revival^1 …`, shown as "Continue here? You'll need 10 Seeds
+of Power"). The Recovery section has a **Revive on death** toggle:
+
+- **Off (default)**: the bot stops as soon as `stat` reports 0 HP. Nothing is
+  spent and no input is sent while dead; revive manually in the game and
+  press Start again.
+- **On**: the bot waits for `dlgi #revival`, then confirms it with the same
+  burst the client's Continue button sends (`mall 50`, `c_close …`,
+  `bp_close`, `f_stash_end`) and resumes when the server answers `revive`.
+  This spends **10 Seeds of Power** per death; if the revive does not arrive
+  within 5 s (not enough seeds, dialog absent) the bot stops.
+
+Saved as `revive_on_death`.
+
 ## Block portals — stay on one map
 
 NosTale portals are warp tiles: as soon as the character stands on one, the
@@ -216,7 +239,10 @@ setting is saved as `block_portals`; the live state is in the DLL's status line
 **Save config…** writes every setting below to a JSON file; **Load config…**
 reads one back. Loading stops a running bot (paths and cooldowns belong to the
 old session), validates and clamps every value, and reports errors in the
-status bar. Waypoints, the current path and live entity state are not saved.
+status bar. The drawn **route** is saved too — waypoints, the Draw path
+start point, its map id and the Draw path toggle — so loading the config
+redraws the same A* path on the map. Live entity state (monsters, drops,
+positions) is not saved.
 
 Example:
 
@@ -235,8 +261,13 @@ Example:
   "low_hp_pct": 30.0,
   "recover_mp": true,
   "low_mp_pct": 30.0,
+  "revive_on_death": false,
   "loop": true,
   "block_portals": true,
+  "draw_path": false,
+  "map_id": 20,
+  "waypoints": [[25, 118], [30, 120]],
+  "path_start": [24, 117],
   "monster_mode": "only",
   "monster_vnums": [200, 206],
   "attack_unknown": false,

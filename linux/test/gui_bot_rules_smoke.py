@@ -239,6 +239,10 @@ def main() -> int:
             unknown_on = app._monster_allowed(unknown)
             unknown_ok = unknown_off and unknown_on
 
+            # The drawn route is part of the configuration too.
+            app.draw_path_toggle.set_active(True)
+            app.path_start = (25, 117)
+            app.waypoints = [(25, 119), (25, 121)]
             saved = app._save_config_to(temp_path)
             app.low_hp_pct.set_value(55)
             app.target_vnums = set()
@@ -252,6 +256,10 @@ def main() -> int:
                 and app.target_vnums == {200}
                 and len(app.spell_rows) == 1
                 and app.spell_rows[0]["spell"].get_text() == "867"
+                and app.draw_path_toggle.get_active()
+                and app.path_start == (25, 117)
+                and app.waypoints == [(25, 119), (25, 121)]
+                and bool(app.path_cells)
             )
 
             # Scanned spell metadata is enforced during selection.

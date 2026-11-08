@@ -47,3 +47,5 @@ run gui_portal_block_smoke.py
 run gui_retaliate_smoke.py
 run gui_far_leg_smoke.py
 run gui_death_smoke.py
+run gui_revive_smoke.py
+run gui_focus_smoke.py

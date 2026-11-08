@@ -305,6 +305,21 @@ class EngineTests(unittest.TestCase):
         )
         self.assertFalse(world.dead)
 
+    def test_revival_dialog_is_detected_and_cleared_by_revive(self):
+        self.engine.feed(
+            packet(Kind.RECV, "at 14881134 20 25 117 0 0 0 0 0 0 0")
+        )
+        self.engine.feed(packet(Kind.RECV, "stat 0 2791 100 3827 0 0"))
+        world = self.engine.feed(
+            packet(Kind.RECV, "dlgi #revival^0 #revival^1 571 0 0")
+        )
+        self.assertTrue(world.revival_offered)
+        world = self.engine.feed(
+            packet(Kind.RECV, "revive 1 14881134 0")
+        )
+        self.assertFalse(world.revival_offered)
+        self.assertFalse(world.dead)
+
     def test_revive_for_another_character_keeps_dead(self):
         self.engine.feed(
             packet(Kind.RECV, "at 14881134 20 25 117 0 0 0 0 0 0 0")

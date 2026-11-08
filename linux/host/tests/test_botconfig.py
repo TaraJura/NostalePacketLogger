@@ -92,6 +92,54 @@ class BotConfigTests(unittest.TestCase):
         loaded = BotConfig.from_dict(config.to_dict())
         self.assertFalse(loaded.block_portals)
 
+    def test_revive_on_death_defaults_off_and_round_trips(self):
+        self.assertFalse(BotConfig().revive_on_death)
+        self.assertFalse(BotConfig.from_dict({}).revive_on_death)
+        self.assertTrue(
+            BotConfig.from_dict({"revive_on_death": True}).revive_on_death
+        )
+        self.assertTrue(
+            BotConfig.from_dict(
+                BotConfig(revive_on_death=True).to_dict()
+            ).revive_on_death
+        )
+
+    def test_waypoints_map_and_draw_mode_round_trip(self):
+        config = BotConfig(
+            draw_path=True,
+            map_id=20,
+            waypoints=[(25, 118), (30, 120)],
+            path_start=(24, 117),
+        )
+        loaded = BotConfig.from_dict(config.to_dict())
+        self.assertTrue(loaded.draw_path)
+        self.assertEqual(loaded.map_id, 20)
+        self.assertEqual(loaded.waypoints, [(25, 118), (30, 120)])
+        self.assertEqual(loaded.path_start, (24, 117))
+
+    def test_invalid_waypoints_are_dropped_and_capped(self):
+        loaded = BotConfig.from_dict(
+            {
+                "map_id": "20",
+                "waypoints": [
+                    [1, 2],
+                    ["3", "4"],
+                    [5],
+                    "bad",
+                    [-1, 2],
+                    [40000, 1],
+                ],
+                "path_start": [7],
+            }
+        )
+        self.assertEqual(loaded.waypoints, [(1, 2), (3, 4)])
+        self.assertIsNone(loaded.map_id)  # strings are not a map id
+        self.assertIsNone(loaded.path_start)
+
+        many = [[i, i] for i in range(700)]
+        loaded = BotConfig.from_dict({"waypoints": many})
+        self.assertEqual(len(loaded.waypoints), 500)
+
     def test_spell_rule_order_and_conditions_are_preserved(self):
         config = BotConfig(
             spell_rules=[

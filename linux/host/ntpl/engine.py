@@ -119,6 +119,10 @@ class WorldState:
     # The local character died (`stat` with 0 HP) and has not been revived
     # yet. The server sends `revive 1 <charId> 0` when it brings it back.
     dead: bool = False
+    # The server offered the "Continue here? You'll need 10 Seeds of Power"
+    # dialog (`dlgi #revival^0 #revival^1 ...`). Confirming it revives the
+    # character in place and spends the seeds.
+    revival_offered: bool = False
     # Hits landed by the local character (attacker type 1, id == self_id).
     # The GUI compares it around a cast: the server answers every successful
     # cast with `su`, then `cancel 0 0 -1` for the end of the animation, so a
@@ -544,6 +548,13 @@ def _on_revive(world: WorldState, packet: Packet) -> None:
     values = packet.ints(2)
     if values and world.self_id is not None and values[1] == world.self_id:
         world.dead = False
+        world.revival_offered = False
+
+
+def _on_dialog(world: WorldState, packet: Packet) -> None:
+    # dlgi #revival^0 #revival^1 571 0 0 -- the in-place revival offer.
+    if "#revival" in packet.text:
+        world.revival_offered = True
 
 
 def _on_chat(world: WorldState, packet: Packet) -> None:
@@ -591,6 +602,7 @@ class Engine:
                 "cancel": _on_cancel,   # RECV: the cast was cancelled
                 "stat": _on_stats,      # RECV: own hp/mp
                 "revive": _on_revive,   # RECV: the character was revived
+                "dlgi": _on_dialog,     # RECV: dialog (revival offer)
                 "say": _on_chat,        # RECV and SEND: chat
             }
         )

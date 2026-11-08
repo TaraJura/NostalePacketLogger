@@ -20,7 +20,13 @@ Schema (version 1)::
       "low_hp_pct": 30,
       "recover_mp": true,
       "low_mp_pct": 30,
+      "revive_on_death": false,     # accept dlgi #revival (10 Seeds of Power)
       "loop": true,
+      "block_portals": true,
+      "draw_path": false,
+      "map_id": 20,                 # map the route belongs to
+      "waypoints": [[25, 118], [30, 120]],
+      "path_start": [24, 117],      # Draw path start, or null
       "monster_mode": "only",       # all | only | except
       "monster_vnums": [200, 206],
       "attack_unknown": false,      # only mode: allow vnum 0
@@ -55,6 +61,7 @@ SPELL_TARGETS = ("monster", "self")
 
 MAX_MONSTER_VNUMS = 5000
 MAX_SPELL_RULES = 100
+MAX_WAYPOINTS = 500
 
 
 class ConfigError(ValueError):
@@ -116,8 +123,13 @@ class BotConfig:
     low_hp_pct: float = 30.0
     recover_mp: bool = True
     low_mp_pct: float = 30.0
+    revive_on_death: bool = False
     loop: bool = True
     block_portals: bool = True
+    draw_path: bool = False
+    map_id: int | None = None
+    waypoints: list[tuple[int, int]] = field(default_factory=list)
+    path_start: tuple[int, int] | None = None
     monster_mode: str = "all"
     monster_vnums: list[int] = field(default_factory=list)
     attack_unknown: bool = False
@@ -138,8 +150,15 @@ class BotConfig:
             "low_hp_pct": self.low_hp_pct,
             "recover_mp": self.recover_mp,
             "low_mp_pct": self.low_mp_pct,
+            "revive_on_death": self.revive_on_death,
             "loop": self.loop,
             "block_portals": self.block_portals,
+            "draw_path": self.draw_path,
+            "map_id": self.map_id,
+            "waypoints": [[x, y] for x, y in self.waypoints],
+            "path_start": (
+                list(self.path_start) if self.path_start is not None else None
+            ),
             "monster_mode": self.monster_mode,
             "monster_vnums": sorted(set(self.monster_vnums)),
             "attack_unknown": self.attack_unknown,
@@ -162,6 +181,21 @@ class BotConfig:
                     continue
                 if 0 < vnum <= 10**9:
                     vnums.append(vnum)
+
+        waypoints: list[tuple[int, int]] = []
+        raw_waypoints = data.get("waypoints", [])
+        if isinstance(raw_waypoints, (list, tuple)):
+            for value in raw_waypoints[:MAX_WAYPOINTS]:
+                cell = _as_cell(value)
+                if cell is not None:
+                    waypoints.append(cell)
+
+        raw_map = data.get("map_id")
+        map_id = (
+            raw_map
+            if isinstance(raw_map, int) and 0 < raw_map <= 10**9
+            else None
+        )
 
         raw_rules = data.get("spell_rules", [])
         rules: list[SpellRule] = []
@@ -187,13 +221,31 @@ class BotConfig:
             low_hp_pct=_as_float(data.get("low_hp_pct"), 30.0, 5.0, 90.0),
             recover_mp=_as_bool(data.get("recover_mp"), True),
             low_mp_pct=_as_float(data.get("low_mp_pct"), 30.0, 5.0, 90.0),
+            revive_on_death=_as_bool(data.get("revive_on_death"), False),
             loop=_as_bool(data.get("loop"), True),
             block_portals=_as_bool(data.get("block_portals"), True),
+            draw_path=_as_bool(data.get("draw_path"), False),
+            map_id=map_id,
+            waypoints=waypoints,
+            path_start=_as_cell(data.get("path_start")),
             monster_mode=mode if mode in MONSTER_MODES else "all",
             monster_vnums=sorted(set(vnums)),
             attack_unknown=_as_bool(data.get("attack_unknown"), False),
             spell_rules=rules,
         )
+
+
+def _as_cell(value: object) -> tuple[int, int] | None:
+    """A map cell from ``[x, y]``; invalid or out-of-range entries are None."""
+    if not isinstance(value, (list, tuple)) or len(value) < 2:
+        return None
+    try:
+        x, y = int(value[0]), int(value[1])  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if 0 <= x <= 32767 and 0 <= y <= 32767:
+        return (x, y)
+    return None
 
 
 def _as_bool(value: object, default: bool) -> bool:
