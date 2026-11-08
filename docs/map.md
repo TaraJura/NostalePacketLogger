@@ -420,7 +420,7 @@ never sees the `at` packet.
 ```bash
 make -C linux host-test   # 142 cases incl. synthetic NOS, 8-way A*, checksum, config
 make -C linux gui-test    # GUI + map surface + tooltips + unknown-position guard
-make -C linux bot-test    # 16 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, ghost-target dropping, target focus, focus+retaliate
+make -C linux bot-test    # 17 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, ghost-target dropping, target focus, focus+retaliate, cancel pairing
 ```
 
 The bot test sends a fake player at (25,117) on map 20, a monster at

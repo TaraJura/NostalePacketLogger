@@ -50,3 +50,4 @@ run gui_death_smoke.py
 run gui_revive_smoke.py
 run gui_focus_smoke.py
 run gui_focus_retaliate_smoke.py
+run gui_cancel_pair_smoke.py

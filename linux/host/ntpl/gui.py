@@ -118,6 +118,12 @@ MAX_MOVE_LEG_CELLS = 3
 #: refuses a client-only ghost entity (a monster that died while the bot was
 #: dead/out of range) forever, so after this many the bot drops the target.
 MAX_CANCEL_STREAK = 2
+#: Unresolved casts kept to pair `su`/`cancel` replies with the attack that
+#: caused them. With a short skill cooldown the next attack is already sent
+#: when the previous cast's cancel arrives, so a cancel does not necessarily
+#: belong to the newest attack.
+CAST_PENDING_MAX = 8
+CAST_PENDING_TTL_S = 3.0
 #: Refused attacks within this window (across targets) pause combat. The
 #: server refuses everything in a town/safe zone or through walls; hopping to
 #: the next target just looks like a robot spamming `u_s`.
@@ -378,12 +384,14 @@ class Application(Gtk.Application):
         self.fight_target_id = None
         # The last retaliate-driven switch already written to the log.
         self.retaliate_logged: tuple[int, int] | None = None
-        # Attack pacing / cancel retry. `attack_hit_mark` is the self-hit
-        # counter at the last attack; a later `cancel` after a hit is the
-        # normal end of the cast, not a refusal.
+        # Attack pacing / cancel retry. Every attack is queued as
+        # [sent_at, landed, target_id]; the server's `su`/`cancel` replies are
+        # matched to the oldest queued cast in send order. A `cancel` after a
+        # landed `su` is the normal end of the cast, not a refusal.
         self.last_attack_sent_at = 0.0
         self.last_cancel_count = 0
-        self.attack_hit_mark = 0
+        self.pending_casts: list[list] = []
+        self.hit_marks_seen = 0
         self.cancel_streak = 0
         self.cancel_streak_target: int | None = None
         self.cancel_events: list[float] = []
@@ -1993,6 +2001,20 @@ class Application(Gtk.Application):
                 return index, rule
         return None
 
+    def _note_attack(self, target_id: int | None, now: float) -> None:
+        """Queue an attack so the server's matching `cancel` is classified.
+
+        `cancel 0 0 -1` ends one cast, not necessarily the newest: with a
+        short skill cooldown the next attack is already sent when the
+        previous cast's `su`/`cancel` pair arrives. Entries are kept in send
+        order and paired with the server's replies in the same order.
+        """
+        self.last_attack_sent_at = now
+        casts = self.pending_casts
+        casts.append([now, False, target_id])
+        while len(casts) > CAST_PENDING_MAX:
+            casts.pop(0)
+
     def _cast_spell(
         self,
         index: int,
@@ -2029,8 +2051,7 @@ class Application(Gtk.Application):
             target_id, skill=send_skill, target_type=target_type
         )
         self._send(packet)
-        self.last_attack_sent_at = now
-        self.attack_hit_mark = self.engine.world.self_hit_count
+        self._note_attack(target_id, now)
         if target_type == 3:
             self.fight_target_id = target_id
         # The per-rule cooldown (max of the rule and Skill.dat) is enforced in
@@ -4280,8 +4301,9 @@ class Application(Gtk.Application):
         self.retaliate_logged = None
         # Attack pacing / cancel retry.
         self.last_attack_sent_at = 0.0
-        self.last_cancel_count = 0
-        self.attack_hit_mark = 0
+        self.last_cancel_count = self.engine.world.cancel_count
+        self.pending_casts.clear()
+        self.hit_marks_seen = self.engine.world.self_hit_count
         self.cancel_streak = 0
         self.cancel_streak_target = None
         self.cancel_events.clear()
@@ -4313,6 +4335,7 @@ class Application(Gtk.Application):
         self.recover_need_mp = False
         self.fight_target_id = None
         self.retaliate_logged = None
+        self.pending_casts.clear()
         self._set_status("bot stopped")
         self._set_path_info("stopped")
 
@@ -4658,30 +4681,53 @@ class Application(Gtk.Application):
         self.dead_warned = False
         self.revive_sent_at = 0.0
 
+        # Match the server's hit/cancel replies to the cast they belong to.
+        # A splash cast can report several hits; they all belong to the oldest
+        # cast the server is answering. A lost cancel must not wedge the queue.
+        while (
+            self.pending_casts
+            and now - self.pending_casts[0][0] > CAST_PENDING_TTL_S
+        ):
+            self.pending_casts.pop(0)
+        if world.self_hit_count > self.hit_marks_seen:
+            self.hit_marks_seen = world.self_hit_count
+            if self.pending_casts:
+                self.pending_casts[0][1] = True
+
         # A cancelled cast (dead/out-of-range target, interrupted) must not
         # burn the whole cooldown: retry at once with the next live target.
         if world.cancel_count != self.last_cancel_count:
             self.last_cancel_count = world.cancel_count
             if now - self.last_attack_sent_at < 2.0:
-                if world.self_hit_count > self.attack_hit_mark:
-                    # The server answers a successful cast with `su` and then
-                    # `cancel 0 0 -1` when the animation ends. That is the
-                    # normal end of the cast, not a refusal; the skill's own
-                    # cooldown already paces the next swing.
-                    self.attack_hit_mark = world.self_hit_count
+                cast = (
+                    self.pending_casts.pop(0)
+                    if self.pending_casts
+                    else None
+                )
+                if cast is None:
+                    # Attached mid-cast: an unknown cancel must not drop a
+                    # live target.
+                    self.cancel_streak = 0
+                    self.cancel_streak_target = None
+                elif cast[1]:
+                    # `su` landed, then the server ended the animation with
+                    # `cancel`: normal end of the cast, not a refusal.
+                    self.cancel_streak = 0
+                    self.cancel_streak_target = None
+                elif cast[2] is None or cast[2] != self.fight_target_id:
+                    # A refusal of a cast aimed at a target the bot already
+                    # left says nothing about the current fight; counting it
+                    # would drop the new target for the old one's refusal.
                     self.cancel_streak = 0
                     self.cancel_streak_target = None
                 else:
-                    target = self.fight_target_id
-                    if target is not None and target == self.cancel_streak_target:
+                    target = cast[2]
+                    if target == self.cancel_streak_target:
                         self.cancel_streak += 1
                     else:
                         self.cancel_streak_target = target
                         self.cancel_streak = 1
-                    if (
-                        target is not None
-                        and self.cancel_streak >= MAX_CANCEL_STREAK
-                    ):
+                    if self.cancel_streak >= MAX_CANCEL_STREAK:
                         # The client still has an object for it (TARGET says
                         # OK) but the server refuses every hit: a ghost entity
                         # from a kill that happened while the bot was dead or
@@ -4698,26 +4744,23 @@ class Application(Gtk.Application):
                     else:
                         self.attack_cooldown_until = now + 0.1
                         self._set_status("attack cancelled; retrying")
-                    if world.self_hit_count <= self.attack_hit_mark:
-                        self.cancel_events.append(now)
-                        self.cancel_events = [
-                            when
-                            for when in self.cancel_events
-                            if now - when <= CANCEL_WINDOW_S
-                        ]
-                        if (
-                            len(self.cancel_events) >= CANCEL_PAUSE_TRIGGER
-                            and now >= self.combat_paused_until
-                        ):
-                            self.cancel_events.clear()
-                            self.combat_pause_pos = self._player_cell()
-                            self.combat_paused_until = (
-                                now + CANCEL_PAUSE_S
-                            )
-                            self._set_status(
-                                "attacks keep being refused (safe zone / "
-                                "no line of sight); pausing combat"
-                            )
+                    self.cancel_events.append(now)
+                    self.cancel_events = [
+                        when
+                        for when in self.cancel_events
+                        if now - when <= CANCEL_WINDOW_S
+                    ]
+                    if (
+                        len(self.cancel_events) >= CANCEL_PAUSE_TRIGGER
+                        and now >= self.combat_paused_until
+                    ):
+                        self.cancel_events.clear()
+                        self.combat_pause_pos = self._player_cell()
+                        self.combat_paused_until = now + CANCEL_PAUSE_S
+                        self._set_status(
+                            "attacks keep being refused (safe zone / "
+                            "no line of sight); pausing combat"
+                        )
 
         # -- recovery: sit below the configured HP/MP %, wait until full --
         recover_hp = (
@@ -5075,8 +5118,7 @@ class Application(Gtk.Application):
                             monster.entity_id, skill=send_skill
                         )
                         self._send(packet)
-                        self.last_attack_sent_at = now
-                        self.attack_hit_mark = world.self_hit_count
+                        self._note_attack(monster.entity_id, now)
                         self.fight_target_id = monster.entity_id
                         # The skill's own cast time and cooldown pace the next
                         # action; the Min delay spin is only a floor on top.

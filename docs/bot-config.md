@@ -41,7 +41,9 @@ does not fire through town walls or rock ledges (the server refuses those
 anyway). If attacks are still refused repeatedly (safe zone, invisible
 obstacle), the bot **pauses combat** after a few refusals instead of hopping
 to the next target; the pause ends after 30 s or once the character has
-moved five cells away.
+moved five cells away. A server `cancel` is paired with the cast it ends, so
+the normal end of a landed cast is not counted as a refusal even when the
+next attack has already been sent.
 
 **Retaliate ignores the target filter**: a monster that hits the character is
 fought even when its vnum is excluded (or unknown), because self-defence must
