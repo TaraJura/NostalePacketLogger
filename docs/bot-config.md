@@ -46,7 +46,10 @@ obstacle), the bot **pauses combat** after a few refusals instead of hopping
 to the next target; the pause ends after 30 s or once the character has
 moved five cells away. A server `cancel` is paired with the cast it ends, so
 the normal end of a landed cast is not counted as a refusal even when the
-next attack has already been sent.
+next attack has already been sent. A refused cast waits for the skill's own
+cooldown instead of retrying at once (an early retry is refused again).
+Only a target that has **never landed a hit** is treated as a client-only
+ghost and dropped after 2 refusals; a target that has been hit is kept.
 
 **Retaliate ignores the target filter**: a monster that hits the character is
 fought even when its vnum is excluded (or unknown), because self-defence must

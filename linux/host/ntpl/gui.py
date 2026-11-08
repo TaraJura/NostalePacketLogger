@@ -158,6 +158,9 @@ TARGET_PREFIX = "TARGET|"
 TARGET_BLOCK_S = 5.0
 #: A monster that hit the character this recently is the Retaliate priority.
 RETALIATE_WINDOW_S = 5.0
+#: A target that landed a hit this recently is alive: a refused cast is
+#: pacing/state (skill cooldown, late target selection), not a ghost.
+HIT_TARGET_GRACE_S = 30.0
 
 
 class PacketRow(GObject.Object):
@@ -394,6 +397,11 @@ class Application(Gtk.Application):
         self.last_cancel_count = 0
         self.pending_casts: list[list] = []
         self.hit_marks_seen = 0
+        # Target id -> last time a cast that landed a `su` was resolved. A
+        # target that has been hit is real; a refused cast must not drop it
+        # as a ghost (that only applies to never-hit client-only entities).
+        self.hit_target_at: dict[int, float] = {}
+        self.cancel_warn_at = 0.0
         self.cancel_streak = 0
         self.cancel_streak_target: int | None = None
         self.cancel_events: list[float] = []
@@ -4314,6 +4322,8 @@ class Application(Gtk.Application):
         self.last_cancel_count = self.engine.world.cancel_count
         self.pending_casts.clear()
         self.hit_marks_seen = self.engine.world.self_hit_count
+        self.hit_target_at.clear()
+        self.cancel_warn_at = 0.0
         self.cancel_streak = 0
         self.cancel_streak_target = None
         self.cancel_events.clear()
@@ -4704,8 +4714,9 @@ class Application(Gtk.Application):
             if self.pending_casts:
                 self.pending_casts[0][1] = True
 
-        # A cancelled cast (dead/out-of-range target, interrupted) must not
-        # burn the whole cooldown: retry at once with the next live target.
+        # A cancelled cast does not shorten the skill cooldown: the server
+        # refuses an attack sent before the skill's own cooldown is over, so
+        # an immediate retry would just be refused again.
         if world.cancel_count != self.last_cancel_count:
             self.last_cancel_count = world.cancel_count
             if now - self.last_attack_sent_at < 2.0:
@@ -4724,6 +4735,16 @@ class Application(Gtk.Application):
                     # `cancel`: normal end of the cast, not a refusal.
                     self.cancel_streak = 0
                     self.cancel_streak_target = None
+                    if cast[2] is not None:
+                        self.hit_target_at[cast[2]] = now
+                        if len(self.hit_target_at) > 64:
+                            cutoff = now - 60.0
+                            self.hit_target_at = {
+                                entity_id: when
+                                for entity_id, when in
+                                self.hit_target_at.items()
+                                if when >= cutoff
+                            }
                 elif cast[2] is None or cast[2] != self.fight_target_id:
                     # A refusal of a cast aimed at a target the bot already
                     # left says nothing about the current fight; counting it
@@ -4732,28 +4753,51 @@ class Application(Gtk.Application):
                     self.cancel_streak_target = None
                 else:
                     target = cast[2]
-                    if target == self.cancel_streak_target:
-                        self.cancel_streak += 1
-                    else:
-                        self.cancel_streak_target = target
-                        self.cancel_streak = 1
-                    if self.cancel_streak >= MAX_CANCEL_STREAK:
-                        # The client still has an object for it (TARGET says
-                        # OK) but the server refuses every hit: a ghost entity
-                        # from a kill that happened while the bot was dead or
-                        # out of range. Drop it and pick another target.
-                        world.entities.pop(target, None)
-                        self.target_blocked[target] = now + TARGET_BLOCK_S
-                        self._set_status(
-                            f"target {target} refused "
-                            f"{self.cancel_streak} attacks; dropping it"
-                        )
-                        self.fight_target_id = None
+                    hit_at = self.hit_target_at.get(target)
+                    recently_hit = (
+                        hit_at is not None
+                        and now - hit_at <= HIT_TARGET_GRACE_S
+                    )
+                    if recently_hit:
+                        # The target has landed hits, so it is not a ghost.
+                        # The refusal is pacing/state (skill cooldown, a late
+                        # target selection, safe zone). Keep the focus and let
+                        # the skill's own cooldown pace the next try.
                         self.cancel_streak = 0
                         self.cancel_streak_target = None
+                        if now >= self.cancel_warn_at:
+                            self.cancel_warn_at = now + 5.0
+                            self._set_status(
+                                "attack refused; keeping target "
+                                "(it has been hit)"
+                            )
                     else:
-                        self.attack_cooldown_until = now + 0.1
-                        self._set_status("attack cancelled; retrying")
+                        if target == self.cancel_streak_target:
+                            self.cancel_streak += 1
+                        else:
+                            self.cancel_streak_target = target
+                            self.cancel_streak = 1
+                        if self.cancel_streak >= MAX_CANCEL_STREAK:
+                            # The client still has an object for it (TARGET
+                            # says OK) but the server refuses every hit: a
+                            # ghost entity from a kill that happened while the
+                            # bot was dead or out of range. Drop it and pick
+                            # another target.
+                            world.entities.pop(target, None)
+                            self.target_blocked[target] = (
+                                now + TARGET_BLOCK_S
+                            )
+                            self._set_status(
+                                f"target {target} refused "
+                                f"{self.cancel_streak} attacks; dropping it"
+                            )
+                            self.fight_target_id = None
+                            self.cancel_streak = 0
+                            self.cancel_streak_target = None
+                        else:
+                            self._set_status(
+                                "attack cancelled; retrying"
+                            )
                     self.cancel_events.append(now)
                     self.cancel_events = [
                         when
