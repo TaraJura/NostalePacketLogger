@@ -131,6 +131,16 @@ lets the user pick one at startup; a client whose logger is not running yet is
 injected from the same dialog. The **Client…** header button reopens the
 picker. A single client that is already injected is attached without a dialog.
 
+The GUI is **non-unique**: start `linux/scripts/gui.sh` once per game
+client. Each window takes an attach lock for its game window
+(`~/.cache/ntpl/gui-client-<winpid>.lock`), so the picker disables clients
+already owned by another window and the only free client is attached
+automatically. The DLL serves one host connection per client, which is what
+the lock enforces. Every window has its own bot state, map and window title
+(`NosTale Packet Logger — <client> · PID`), and loads/saves its own bot
+config. The direct `--no-client-picker --port` path is for a known port
+(e.g. the MCP broker on 47900) and does not take a client lock.
+
 ## Use the host
 
 ```bash
@@ -148,6 +158,7 @@ linux/scripts/host.sh map info 20 --at 25,117 # map size + walkability
 linux/scripts/host.sh map render 20 /tmp/map.png --scale 3
 linux/scripts/host.sh map best                # rank maps by live entity positions
 linux/scripts/gui.sh                          # GTK4 window + client picker
+linux/scripts/gui.sh                          # again: another window/client
 linux/scripts/host.sh gui                     # same, through the host wrapper
 
 # reverse-engineering aids (loopback only)

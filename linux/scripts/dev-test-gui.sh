@@ -30,3 +30,4 @@ run_smoke() {
 
 run_smoke gui_smoke.py
 run_smoke gui_client_picker_smoke.py
+run_smoke gui_multi_client_smoke.py

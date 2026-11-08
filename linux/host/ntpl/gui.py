@@ -38,8 +38,11 @@ from .client import ConnectionLost, PacketClient
 from .clients import (
     ClientInfo,
     Discovery,
+    acquire_client_lock,
+    client_lock_owner,
     discover_clients,
     inject_client,
+    release_client_lock,
     wait_for_port,
 )
 from .engine import Engine, Entity, GroundItem
@@ -237,6 +240,9 @@ class Application(Gtk.Application):
         # default port. Off by default so headless tests stay deterministic.
         self.select_client = select_client
         self.client_label: str | None = None
+        # The game window this GUI attached to; its attach lock keeps a second
+        # GUI from dialing the same DLL (the logger serves one host).
+        self.attached_client: ClientInfo | None = None
         self._client_generation = 0
         self._drain_timer_started = False
         self._client_scan = 0
@@ -3619,8 +3625,22 @@ class Application(Gtk.Application):
             return False
         self.discovery = discovery
         clients = discovery.clients
-        if auto_single and len(clients) == 1 and clients[0].port:
-            self._attach_client(clients[0], clients[0].port)
+        free = [
+            client
+            for client in clients
+            if client.port
+            and client_lock_owner(client.winpid) in (None, os.getpid())
+        ]
+        free_pids = {client.winpid for client in free}
+        busy = [client for client in clients if client.winpid not in free_pids]
+        others_owned = bool(busy) and all(
+            client_lock_owner(client.winpid) not in (None, os.getpid())
+            for client in busy
+        )
+        if auto_single and free and (
+            len(clients) == 1 or (len(free) == 1 and others_owned)
+        ):
+            self._attach_client(free[0], free[0].port)
             return False
         self._show_client_dialog(discovery)
         return False
@@ -3657,7 +3677,8 @@ class Application(Gtk.Application):
         hint = Gtk.Label(
             label=(
                 "Choose the window to attach to. A client without the logger "
-                "is injected automatically (Inject && connect)."
+                "is injected automatically (Inject && connect). Clients "
+                "attached by another GUI are disabled."
             )
         )
         hint.set_wrap(True)
@@ -3687,16 +3708,27 @@ class Application(Gtk.Application):
                     f"<b>{GLib.markup_escape_text(client.title)}</b>"
                 )
                 title.set_xalign(0)
-                subtitle = Gtk.Label(
-                    label=f"PID {client.winpid} · {client.status}"
-                )
+                owner = client_lock_owner(client.winpid)
+                if owner is not None and owner != os.getpid():
+                    row.set_sensitive(False)
+                    subtitle_text = (
+                        f"PID {client.winpid} · attached to another GUI "
+                        f"(PID {owner})"
+                    )
+                elif owner == os.getpid():
+                    subtitle_text = (
+                        f"PID {client.winpid} · attached to this window"
+                    )
+                else:
+                    subtitle_text = f"PID {client.winpid} · {client.status}"
+                subtitle = Gtk.Label(label=subtitle_text)
                 subtitle.set_xalign(0)
                 subtitle.add_css_class("dim-label")
                 inner.append(title)
                 inner.append(subtitle)
                 row.set_child(inner)
                 listbox.append(row)
-                if first is None:
+                if first is None and row.get_sensitive():
                     first = row
             self._client_dialog_list = listbox
             box.append(listbox)
@@ -3734,7 +3766,7 @@ class Application(Gtk.Application):
         cancel.connect("clicked", lambda *_: dialog.close())
         self._client_dialog_action = Gtk.Button(label="Connect")
         self._client_dialog_action.add_css_class("suggested-action")
-        self._client_dialog_action.set_sensitive(bool(clients))
+        self._client_dialog_action.set_sensitive(False)
         self._client_dialog_action.connect(
             "clicked", lambda *_: self._on_client_connect_clicked()
         )
@@ -3744,6 +3776,11 @@ class Application(Gtk.Application):
         box.append(buttons)
 
         dialog.set_child(box)
+        if self._client_dialog_list is not None:
+            self._on_client_row_selected(
+                self._client_dialog_list,
+                self._client_dialog_list.get_selected_row(),
+            )
         dialog.present()
 
     def _on_client_dialog_closed(self, *_args) -> bool:
@@ -3753,11 +3790,19 @@ class Application(Gtk.Application):
         self._client_dialog_status = None
         # A Cancel or a refresh drops any injection still running.
         self._inject_client = None
-        # Cancel must not leave the window inert: fall back to the configured
-        # host/port exactly like the pre-selector GUI did.
+        # With running clients the dialog exists to pick one: cancelling must
+        # not dial a default port that may belong to another GUI's client.
+        # Only the empty case keeps the old fallback so the window can wait
+        # for a logger that is started later.
+        has_clients = bool(self.discovery and self.discovery.clients)
         if self.client is None and not self._closing:
-            self._set_status(f"connecting to {self.host}:{self.port}…")
-            self._start_client()
+            if has_clients:
+                self._set_status(
+                    "no client selected — use Client… to attach"
+                )
+            else:
+                self._set_status(f"connecting to {self.host}:{self.port}…")
+                self._start_client()
         return False
 
     def _close_client_dialog(self) -> None:
@@ -3798,6 +3843,18 @@ class Application(Gtk.Application):
         self._inject_and_attach(client)
 
     def _inject_and_attach(self, client: ClientInfo) -> None:
+        if not acquire_client_lock(client.winpid):
+            owner = client_lock_owner(client.winpid)
+            message = (
+                f"{client.title} is already attached by another GUI "
+                f"(PID {owner})"
+                if owner is not None
+                else f"cannot attach to {client.title}"
+            )
+            if self.discovery is not None:
+                self._show_client_dialog(self.discovery)
+            self._set_selector_status(message)
+            return
         action = self._client_dialog_action
         if action is not None:
             action.set_sensitive(False)
@@ -3829,6 +3886,7 @@ class Application(Gtk.Application):
     ) -> bool:
         # The dialog was cancelled or refreshed while the injector ran.
         if self._inject_client is not client:
+            release_client_lock(client.winpid)
             return False
         self._inject_client = None
         if ok:
@@ -3839,6 +3897,7 @@ class Application(Gtk.Application):
             self._attach_client(client, port)
             return False
 
+        release_client_lock(client.winpid)
         if self._client_dialog is None:
             self._set_status(f"injection failed: {output}")
             return False
@@ -3849,6 +3908,23 @@ class Application(Gtk.Application):
 
     def _attach_client(self, client: ClientInfo, port: int) -> None:
         """Point the reader thread at one client and reset the old world."""
+        if not acquire_client_lock(client.winpid):
+            owner = client_lock_owner(client.winpid)
+            message = (
+                f"{client.title} is already attached by another GUI "
+                f"(PID {owner})"
+                if owner is not None
+                else f"cannot attach to {client.title}"
+            )
+            if self.discovery is not None and self._client_dialog is not None:
+                self._show_client_dialog(self.discovery)
+                self._set_selector_status(message)
+            else:
+                self._set_status(message)
+            return
+        previous, self.attached_client = self.attached_client, client
+        if previous is not None and previous.winpid != client.winpid:
+            release_client_lock(previous.winpid)
         self._close_client_dialog()
         if self.bot_running:
             self._stop_bot()
@@ -3859,6 +3935,10 @@ class Application(Gtk.Application):
         self.last_move = None
         self.status_received = False
         self.client_label = f"{client.title} · PID {client.winpid}"
+        if self.window is not None:
+            self.window.set_title(
+                f"NosTale Packet Logger — {self.client_label}"
+            )
         self._set_status(
             f"attaching to {self.client_label} on 127.0.0.1:{port}…"
         )
@@ -5391,6 +5471,9 @@ class Application(Gtk.Application):
         self._closing = True
         self._client_generation += 1
         self._stop_bot()
+        if self.attached_client is not None:
+            release_client_lock(self.attached_client.winpid)
+            self.attached_client = None
         if self.client is not None:
             self.client.close()
         Gtk.Application.do_shutdown(self)
@@ -5407,6 +5490,7 @@ def run_gui(
         host,
         port,
         map_data,
+        unique=False,
         log_file=log_file,
         select_client=select_client,
     )

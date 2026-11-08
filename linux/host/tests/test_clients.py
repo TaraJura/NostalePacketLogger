@@ -7,17 +7,23 @@ injector output is a captured sample, so the suite stays stdlib-only.
 from __future__ import annotations
 
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from ntpl.clients import (
     DEFAULT_PORT,
     ClientInfo,
     WineContext,
+    acquire_client_lock,
+    client_lock_owner,
+    client_lock_path,
     parse_injector_list,
     port_file,
     read_port,
+    release_client_lock,
     running_wine_contexts,
     windows_path,
 )
@@ -156,6 +162,52 @@ class WindowsPathTest(unittest.TestCase):
             windows_path(context, Path("/tmp/a b/dll.dll")),
             "Z:\\tmp\\a b\\dll.dll",
         )
+
+
+class ClientLockTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        patcher = mock.patch.dict(
+            os.environ, {"NTPL_RUNTIME_DIR": self.directory.name}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_acquire_and_release(self) -> None:
+        self.assertTrue(acquire_client_lock(4242))
+        self.assertEqual(client_lock_owner(4242), os.getpid())
+        self.assertTrue(acquire_client_lock(4242))
+        release_client_lock(4242)
+        self.assertIsNone(client_lock_owner(4242))
+
+    def test_another_live_gui_blocks(self) -> None:
+        path = client_lock_path(4243)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{os.getppid()}\n", encoding="ascii")
+        self.assertFalse(acquire_client_lock(4243))
+        self.assertEqual(client_lock_owner(4243), os.getppid())
+        release_client_lock(4243)
+        self.assertTrue(path.exists())
+        path.unlink()
+
+    def test_stale_lock_is_removed(self) -> None:
+        process = subprocess.Popen(["true"])
+        process.wait()
+        path = client_lock_path(4244)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{process.pid}\n", encoding="ascii")
+        self.assertIsNone(client_lock_owner(4244))
+        self.assertTrue(acquire_client_lock(4244))
+        release_client_lock(4244)
+
+    def test_malformed_lock_is_removed(self) -> None:
+        path = client_lock_path(4245)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("not-a-pid\n", encoding="ascii")
+        self.assertIsNone(client_lock_owner(4245))
+        self.assertTrue(acquire_client_lock(4245))
+        release_client_lock(4245)
 
 
 if __name__ == "__main__":

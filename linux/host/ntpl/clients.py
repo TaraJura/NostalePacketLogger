@@ -370,3 +370,110 @@ def discover_clients(proc_root: str = "/proc") -> Discovery:
     if contexts and not discovery.clients:
         discovery.errors.append("no game window found in the running client")
     return discovery
+
+
+# ------------------------------------------------------------ attach locks
+
+#: Override the runtime directory in tests or a custom launcher.
+RUNTIME_ENV = "NTPL_RUNTIME_DIR"
+LOCK_TEMPLATE = "gui-client-{winpid}.lock"
+
+
+def runtime_dir() -> Path:
+    """Where the per-client GUI attach locks live."""
+    override = os.environ.get(RUNTIME_ENV)
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".cache" / "ntpl"
+
+
+def client_lock_path(winpid: int) -> Path:
+    return runtime_dir() / LOCK_TEMPLATE.format(winpid=winpid)
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def client_lock_owner(winpid: int) -> int | None:
+    """PID of the GUI attached to this game window, or None.
+
+    A malformed lock, or one whose process is gone, is removed.
+    """
+    path = client_lock_path(winpid)
+    try:
+        owner = int(path.read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return None
+    if owner == os.getpid() or _pid_alive(owner):
+        return owner
+    try:
+        path.unlink()
+    except OSError:
+        pass
+    return None
+
+
+def acquire_client_lock(winpid: int) -> bool:
+    """Attach this GUI to one game window; False when another GUI owns it.
+
+    The lock is a 0600 file under :func:`runtime_dir`, created with a hard
+    link so two GUI processes starting together cannot both win. The DLL
+    accepts one host connection per game window, so this prevents a second
+    window from dialing the same logger.
+    """
+    owner = client_lock_owner(winpid)
+    if owner == os.getpid():
+        return True
+    if owner is not None:
+        return False
+    path = client_lock_path(winpid)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    except OSError:
+        return False
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(f"{os.getpid()}\n", encoding="ascii")
+        os.chmod(temporary, 0o600)
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            return client_lock_owner(winpid) == os.getpid()
+        except OSError:
+            return False
+        return True
+    except OSError:
+        return False
+    finally:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+
+
+def release_client_lock(winpid: int) -> None:
+    """Drop this GUI's attach lock; another GUI's lock is left alone."""
+    path = client_lock_path(winpid)
+    try:
+        owner = int(path.read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        return
+    if owner != os.getpid():
+        return
+    try:
+        path.unlink()
+    except OSError:
+        pass

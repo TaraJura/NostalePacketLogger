@@ -10,6 +10,11 @@
 # without asking. The injector (build/Injector.exe) and DLL must be built with
 # `make -C linux all`.
 #
+# The window is non-unique: run this script again for another game client.
+# Windows coordinate through per-client attach locks, so a client attached by
+# one window is disabled in the others' picker; each window keeps its own bot
+# state, map and window title, and loads its own bot config.
+#
 # NTPL_PORT is read by both the GUI and the DLL, so exporting it once before
 # starting the game and the GUI keeps them in sync; a second client
 # automatically moves to the next free port, and the GUI learns it from the
