@@ -495,6 +495,7 @@ def run_headless(
             return 2
         from .gameforge_auth import (
             AuthError,
+            _open_image,
             challenge_info,
             mint_token,
             solve_image_drop,
@@ -506,11 +507,22 @@ def run_headless(
             exc.script = info.get("script", "")
             print(f"Gameforge login check: {exc.kind or 'unknown'}")
             if exc.kind == "gf-image-drop-captcha":
-                def ask():
-                    return input(
-                        "Icon number that matches the text "
-                        "(1 = first icon): "
-                    )
+                def ask(paths):
+                    try:
+                        from .captcha_ui import ask_captcha
+
+                        return ask_captcha(paths)
+                    except Exception as error:  # noqa: BLE001 - no GTK/display
+                        print(
+                            f"captcha window unavailable ({error}); "
+                            f"images: {paths}"
+                        )
+                        for path in paths.values():
+                            _open_image(path)
+                        return input(
+                            "Icon number that matches the text "
+                            "(1 = first icon): "
+                        )
 
                 return solve_image_drop(
                     exc.challenge_id, locale, session, ask

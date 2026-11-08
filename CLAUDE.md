@@ -134,6 +134,8 @@ PYTHONPATH=linux/host python3 -m ntpl status
   NsTeST, world handshake, clist/select, keepalive; feeds the same `Engine`),
   `gameforge_auth.py` (current v2 credentials login, 30-value device
   blackbox, iovation, thin/codes; terminal prompt, no stored credentials),
+  `captcha_ui.py` (single GTK4 window for Gameforge's image-drop captcha:
+  instruction, icon strip, target scene and an icon-number box),
   `botconfig.py`
   (JSON bot configuration: target filters, spell rules, validation and atomic
   save/load), `cli.py` (`walk` waits for the server's `tp`/`mv`; `cast` waits

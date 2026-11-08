@@ -364,8 +364,9 @@ def solve_image_drop(
 ) -> bool:
     """Fetch the text/icons/target images, let the user pick, post the answer.
 
-    ``ask`` returns the 1-based icon number the user chose; the API expects
-    the 0-based index (the launcher does ``spinbox - 1``).
+    ``ask(paths)`` receives the saved images (``{"text", "icons", "target"}``)
+    and returns the 1-based icon number the user chose, or None to cancel;
+    the API expects the 0-based index (the launcher does ``spinbox - 1``).
     """
     base = (
         "https://image-drop-challenge.gameforge.com/challenge/"
@@ -411,21 +412,24 @@ def solve_image_drop(
                 )
                 path = directory / f"{name}.{suffix}"
                 path.write_bytes(image.content)
-                _open_image(path)
-        print(f"captcha images: {directory}")
+                paths[name] = path
         return last
 
-    last = fetch()
+    paths: dict[str, Path] = {}
+    fetch()
     for attempt in range(3):
+        answer = ask(paths)
+        if answer is None:
+            return False
         try:
-            answer = int(ask()) - 1
+            value = int(answer) - 1
         except (TypeError, ValueError):
             print("enter the icon number")
             continue
         response = session.post(
             base,
             headers={**headers, "Content-Type": "application/json"},
-            json={"answer": answer},
+            json={"answer": value},
             timeout=20,
         )
         data = response.json() if response.status_code == 200 else {}
