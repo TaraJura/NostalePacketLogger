@@ -65,6 +65,9 @@ linux/scripts/headless.sh --print-packets
 # Password: ...
 ```
 
+If you need to see the password while pasting it, add `--show-password`
+(the prompt echoes it). It still uses the same login.
+
 Options: `--login-host/--login-port` (default `79.110.84.75:4000`),
 `--region`, `--character <slot>`, `--world-id/--channel`, `--account-id`,
 `--locale`, `--identity`, `--print-packets`.

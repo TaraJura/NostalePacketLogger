@@ -720,6 +720,7 @@ def cmd_headless(args: argparse.Namespace) -> int:
         account_id=args.account_id,
         locale=args.locale,
         identity=args.identity,
+        show_password=args.show_password,
     )
 
 
@@ -920,6 +921,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="captured 30-value blackbox identity JSON "
         "(default: ~/.config/ntpl/identity.json)",
+    )
+    headless.add_argument(
+        "--show-password",
+        action="store_true",
+        help="echo the password while typing (to verify a paste)",
     )
     headless.set_defaults(handler=cmd_headless)
 

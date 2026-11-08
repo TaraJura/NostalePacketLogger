@@ -461,6 +461,7 @@ def run_headless(
     account_id: str | None = None,
     locale: str = "en-US",
     identity: str | None = None,
+    show_password: bool = False,
 ) -> int:
     directory = Path(game_dir).expanduser()
     if not (directory / "NostaleClientX.exe").exists():
@@ -480,9 +481,14 @@ def run_headless(
             print("NosTale headless login (credentials are not stored)")
             email = input("Gameforge email: ").strip()
             if email:
-                import getpass
+                if show_password:
+                    password = input("Password (visible): ")
+                else:
+                    import getpass
 
-                password = getpass.getpass("Password: ")
+                    password = getpass.getpass(
+                        "Password (hidden; --show-password shows it): "
+                    )
     if not session_token:
         if not (email and password):
             print(f"ntpl headless: {token_error}")
