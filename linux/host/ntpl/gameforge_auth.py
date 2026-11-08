@@ -24,6 +24,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import unquote
 
 import requests
 
@@ -193,6 +194,37 @@ def find_browser() -> str | None:
         if path:
             return path
     return None
+
+
+def decode_blackbox(value: str) -> list | None:
+    """Decode a ``tra:`` blackbox back to its 30-value list."""
+    if value.startswith("tra:"):
+        value = value[4:]
+    try:
+        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+        result = bytearray()
+        previous = 0
+        for byte in raw:
+            result.append((byte - previous) & 0xFF)
+            previous = byte
+        data = json.loads(unquote(bytes(result).decode("latin-1")))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if isinstance(data, list) and len(data) == 30:
+        return data
+    return None
+
+
+def blackbox_user_agent(value: str) -> str:
+    """The browser UA the blackbox was generated with.
+
+    Gameforge ties the fingerprint to the request's User-Agent: a blackbox
+    made by Chrome must not be sent with the launcher's Chrome/72 UA.
+    """
+    data = decode_blackbox(value)
+    if data is not None and isinstance(data[26], str) and data[26]:
+        return data[26]
+    return BROWSER_USER_AGENT
 
 
 def game1_blackbox(extra: dict | None = None, timeout: float = 60.0) -> str:
@@ -367,17 +399,29 @@ def login(
     installation: str,
     locale: str = LOCALE,
     session: requests.Session | None = None,
+    challenge_id: str | None = None,
 ) -> str:
-    """Return the bearer token, or raise AuthError with Gameforge's codes."""
+    """Return the bearer token, or raise AuthError with Gameforge's codes.
+
+    The User-Agent is taken from the blackbox itself (the website does the
+    same); sending the launcher's Chrome/72 UA with a real Chrome blackbox
+    makes Gameforge answer CREDENTIALS_INVALID. ``challenge_id`` is sent as
+    ``gf-challenge-id`` after a solved captcha, as the website's
+    ``withFetchPatch.js`` does.
+    """
     session = session or requests.Session()
     headers = {
-        "User-Agent": BROWSER_USER_AGENT,
+        "User-Agent": blackbox_user_agent(blackbox_value),
         "TNT-Installation-Id": installation,
         "gf-installation-id": installation,
         "Content-Type": "application/json",
+        "Origin": "https://gameforge.com",
+        "Referer": "https://gameforge.com/en-US/sign-in",
     }
+    if challenge_id:
+        headers["gf-challenge-id"] = challenge_id
     response = session.post(
-        "https://spark.gameforge.com/api/v2/authProviders/"
+        "https://spark-web.gameforge.com/api/v2/authProviders/"
         "credentials/sessions",
         headers=headers,
         json={
@@ -576,8 +620,15 @@ def mint_code(
         },
         timeout=30,
     )
-    if response.status_code != 200 or response.json().get("status") != "ok":
-        raise AuthError(f"iovation failed ({response.status_code})")
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+    if response.status_code != 200 or data.get("status") != "ok":
+        raise AuthError(
+            f"iovation failed ({response.status_code}): "
+            f"{response.text[:120]}"
+        )
     time.sleep(2.0)
     try:
         info = requests.get(
@@ -652,6 +703,7 @@ def mint_token(
         IdentityBlackbox(captured) if captured is not None else JsBlackbox()
     )
     session = requests.Session()
+    challenge_id = None
     for _ in range(3):
         try:
             bearer = login(
@@ -661,11 +713,13 @@ def mint_token(
                 installation,
                 locale=locale,
                 session=session,
+                challenge_id=challenge_id,
             )
             break
         except ChallengeRequired as exc:
             if on_challenge is None or not on_challenge(exc, session):
                 raise
+            challenge_id = exc.challenge_id
     else:
         raise AuthError("the Gameforge challenge was not solved")
     accounts = game_accounts(bearer, installation)

@@ -27,6 +27,12 @@ class FakeResponse:
     def json(self):
         return self._body
 
+    @property
+    def text(self):
+        import json
+
+        return json.dumps(self._body)
+
 
 class FakeSession:
     def __init__(self, response):
@@ -46,6 +52,20 @@ class GameforgeAuthTests(unittest.TestCase):
         second = gf.blackbox(identity)
         self.assertTrue(first.startswith("tra:"))
         self.assertEqual(first, second)
+
+    def test_blackbox_user_agent_round_trip(self):
+        identity = [0] * 30
+        identity[2] = "Windows"
+        identity[26] = "Mozilla/5.0 (Test) Chrome/156.0 Safari/537.36"
+        value = gf.blackbox(identity)
+        self.assertEqual(len(gf.decode_blackbox(value)), 30)
+        self.assertEqual(gf.blackbox_user_agent(value), identity[26])
+
+    def test_blackbox_user_agent_falls_back(self):
+        self.assertEqual(
+            gf.blackbox_user_agent("tra:not-a-blackbox"),
+            gf.BROWSER_USER_AGENT,
+        )
 
     def test_load_identity_reads_a_30_value_list(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -148,6 +168,34 @@ class GameforgeAuthTests(unittest.TestCase):
                 gf.login("email", "password", "tra:abc", "install")
         self.assertIn("CREDENTIALS_INVALID", context.exception.codes)
 
+    def test_login_uses_the_blackbox_user_agent_and_web_host(self):
+        identity = [0] * 30
+        identity[26] = "Mozilla/5.0 (Test) Chrome/156.0 Safari/537.36"
+        response = FakeResponse(201, {"token": "bearer"})
+        session = FakeSession(response)
+        with mock.patch.object(
+            gf.requests, "Session", return_value=session
+        ):
+            gf.login("email", "password", gf.blackbox(identity), "install")
+        url, kwargs = session.calls[0]
+        self.assertIn("spark-web.gameforge.com", url[0])
+        self.assertEqual(
+            kwargs["headers"]["User-Agent"], identity[26]
+        )
+
+    def test_login_sends_a_solved_challenge_id(self):
+        response = FakeResponse(201, {"token": "bearer"})
+        session = FakeSession(response)
+        with mock.patch.object(
+            gf.requests, "Session", return_value=session
+        ):
+            gf.login(
+                "email", "password", "tra:abc", "install",
+                challenge_id="challenge-1",
+            )
+        headers = session.calls[0][1]["headers"]
+        self.assertEqual(headers["gf-challenge-id"], "challenge-1")
+
     def test_login_sends_the_blackbox(self):
         response = FakeResponse(201, {"token": "bearer"})
         session = FakeSession(response)
@@ -185,6 +233,19 @@ class GameforgeAuthTests(unittest.TestCase):
             with self.assertRaises(gf.ChallengeRequired) as context:
                 gf.login("email", "password", "tra:abc", "install")
         self.assertEqual(context.exception.challenge_id, "challenge-1")
+
+    def test_iovation_failure_reports_the_status(self):
+        class Source:
+            def plain(self):
+                return "tra:abc"
+
+        response = FakeResponse(403, {"status": "failed"})
+        with mock.patch.object(gf.time, "sleep"), mock.patch.object(
+            gf.requests, "post", return_value=response
+        ):
+            with self.assertRaises(gf.AuthError) as context:
+                gf.mint_code("bearer", "account", Source(), "install", b"cert")
+        self.assertIn("403", str(context.exception))
 
     def test_ua_magic_shape(self):
         magic = gf._ua_magic(
