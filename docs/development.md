@@ -35,6 +35,11 @@ make -C linux all test-host
 linux/scripts/dev-test-wine.sh 25
 ```
 
+The README screenshots are regenerated with
+`linux/scripts/readme-shots.sh` (Xvfb + xdotool + ffmpeg) from
+`linux/test/gui_readme_shots.py`; it uses real map/monster data and a fake
+packet source, so no game client or account is shown.
+
 The unit tests cover the wire protocol, the TCP client (including split-line
 reassembly and peer close), the engine's world-state handlers, the map
 parser/A* (synthetic NOS, bad headers, walls, unreachable targets, ranking,
@@ -42,9 +47,11 @@ parser/A* (synthetic NOS, bad headers, walls, unreachable targets, ranking,
 spawn-log parsing (spawns and the `ski` skill list), Skill.dat spell metadata,
 rule-order persistence, and the monster/skill text tables. The GUI tests open
 the real window under Xvfb: one checks rows, status, map switch, tooltips,
-toggle colors and the recovery banner; the other drives the client picker
+toggle colors and the recovery banner; the second drives the client picker
 with two fake clients (Connect attaches to the selected port, an uninjected
-client offers Inject & connect). The bot smokes cover combat + path movement,
+client offers Inject & connect); the third owns one client's attach lock in a
+child process, checks the new window skips it, attaches the free client and
+releases its own lock on shutdown. The bot smokes cover combat + path movement,
 target filters + spell rules + config save/load, the scan-backed spell picker
 dialog, scanned-spell rotation in list order, rejected walks, recovery,
 portal blocking (A* avoids warp tiles, a MOVE onto one is refused, `PORTALS|1`

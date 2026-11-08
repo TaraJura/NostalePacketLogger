@@ -17,14 +17,26 @@ Two implementations live here:
 The packet documentation in [`docs/protocol/`](docs/protocol/README.md) is
 shared: the transport differs, the game's packets do not.
 
+## Screenshots
+
+![Map / Bot tab](docs/assets/gui-map.png)
+
+| Live packet stream | One window per game client |
+| :---: | :---: |
+| ![Packet stream](docs/assets/gui-packets.png) | ![Multi-client picker](docs/assets/gui-picker.png) |
+
+The **Map / Bot** tab draws the A\* route, monsters, portals and the bot
+controls. The picker gives each running game client its own window; a client
+already attached by another window is disabled.
+
 ## Quick start on Linux
 
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 142 Python unit tests
-make -C linux gui-test                       # headless GTK4 + map smoke (xvfb)
-make -C linux bot-test                       # 15 fake-server bot smokes
+make -C linux host-test                      # 190 Python unit tests
+make -C linux gui-test                       # headless GTK4 smokes (xvfb)
+make -C linux bot-test                       # 20 fake-server bot smokes
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path
 linux/scripts/dev-test-wine.sh 25
@@ -33,7 +45,7 @@ linux/scripts/dev-test-wine.sh 25
 linux/scripts/inject.sh        # optional: the GUI can inject from its picker
 linux/scripts/host.sh status
 linux/scripts/host.sh monitor
-linux/scripts/gui.sh           # lists the running clients, picks/injects one
+linux/scripts/gui.sh           # one window per client; run again for another
 
 # agent access (MCP over stdio; owns the DLL link, GUI joins on 47900)
 PYTHONPATH=linux/host python3 -m ntpl mcp
@@ -80,9 +92,9 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 142 unit tests pass, the GTK4 window and fifteen bot
-smoke tests pass, and the real injector has been run against the **live
-NosTale client** under Wine 11:
+The Linux port builds, its 190 unit tests pass, the three GTK4 window smokes
+and twenty bot smoke tests pass, and the real injector has been run against
+the **live NosTale client** under Wine 11:
 
 - both hooks `ACTIVE` (`recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`),
   `drops recv=0`;
