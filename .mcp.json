@@ -2,7 +2,7 @@
   "mcpServers": {
     "nostale": {
       "command": "python3",
-      "args": ["-m", "ntpl", "mcp"],
+      "args": ["-m", "ntpl", "mcp", "--listen", "47900"],
       "env": {
         "PYTHONPATH": "linux/host"
       }

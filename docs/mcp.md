@@ -6,9 +6,13 @@ character through the client's own MoveTo, attack, cast, pick up drops, send
 raw packets and wait for the server's confirmations.
 
 ```bash
-PYTHONPATH=linux/host python3 -m ntpl mcp            # stdio; broker on 47822
+PYTHONPATH=linux/host python3 -m ntpl mcp            # stdio; broker on 47900
 PYTHONPATH=linux/host python3 -m ntpl mcp --listen 0 # no broker (agent only)
 ```
+
+The server discovers the DLL's port from the `C:\ntpl-<pid>.port` file of the
+running injected client (the DLL falls back from 47821 to the next free port
+when 47821 is taken), so it works after a fallback without extra flags.
 
 No third-party packages: the MCP layer is standard-library JSON-RPC.
 
@@ -16,16 +20,23 @@ No third-party packages: the MCP layer is standard-library JSON-RPC.
 
 The injected DLL accepts **one host** and silently replaces the previous one.
 The MCP server starts a broker that owns that single connection and
-rebroadcasts the packet stream to local TCP clients on port **47822**. Start
+rebroadcasts the packet stream to local TCP clients on port **47900**. Start
 the GUI against the broker:
 
 ```bash
-linux/scripts/gui.sh --port 47822
+linux/scripts/gui.sh --port 47900
 ```
 
-Do **not** run the GUI (or a monitor) on 47821 while the MCP server runs: it
-would replace the broker and the two would keep kicking each other. If you
-stop the MCP server, restart the GUI on its default port.
+Do **not** run the GUI (or a monitor) against the DLL's own port while the
+MCP server runs: it would replace the broker and the two would keep kicking
+each other. Start it against the broker with `--port 47900`; if you stop the
+MCP server, restart the GUI on its default port.
+
+The server polls `POS` twice a second for the real cell and the sit flag.
+`game_move` stands the character first if it is sitting and walks goals more
+than three cells away in A* legs (the server rejects a long MoveTo). Game
+packets (`u_s`, `rest`, `ncif`, `get`) are injected with the DLL's `SEND|`
+prefix; commands (`MOVE|`, `TARGET|`, `POS`) are sent bare.
 
 The broker forwards `SEND|…` and raw commands from every client to the DLL,
 but blocks `QUIT` so one observer cannot unhook the logger for everyone. It
@@ -61,7 +72,7 @@ Start the game and inject the DLL as usual first; the broker retries until
 | `game_portals` | `gp` list + learned crossings for a map | — |
 | `game_path` | 8-direction A* cell path | — |
 | `game_spells` | learned slots with Skill.dat range/cast/CD/MP | — |
-| `game_move` | `MOVE\|x y` (client MoveTo, animated) | own `walk` SEND / position |
+| `game_move` | `MOVE\|x y` (client MoveTo, animated); stands first if seated, >3-cell goals use A* legs | own `walk` SEND / position |
 | `game_travel` | A* + short MoveTo legs | per leg |
 | `game_attack` | `TARGET\|id` (client selects the monster and sends its own `ncif`) + `u_s <slot> 3 <id>` | DLL `TARGET` reply + server `su` |
 | `game_cast` | `TARGET\|id` for monsters (injected `ncif` for players) + `u_s <slot> <type> <id>` | server `su` |
@@ -102,7 +113,7 @@ swallowed.
 
 - The DLL listener and the broker bind `127.0.0.1` only; nothing is exposed to
   the network.
-- There is no authentication: any local process can connect to 47822. Treat
+- There is no authentication: any local process can connect to 47900. Treat
   the port as a local debugging surface.
 - `game_send` and the memory tools are raw game access. The project rules
   still apply: no detection evasion, and automation is against Gameforge's

@@ -32,7 +32,7 @@ the new window (or run `inject.sh` yourself).
 | `windows/` | Original MSVC/C# implementation, moved unchanged. Builds with Visual Studio; not exercised on this machine. |
 | `linux/` build | `make -C linux all test-host` is warning-free; all three outputs are PE32 i386. |
 | Linux host tests | 142/142 pass (`make -C linux host-test`). |
-| MCP (agent access) | `python3 -m ntpl mcp` speaks MCP JSON-RPC over stdio and exposes 21 tools (state, entities, drops, map, portals, time-spaces, A* path, spells, move/travel, attack/cast, raw send, rest, pickup, wait, memory). It owns the DLL's single host connection and rebroadcasts it on `127.0.0.1:47822`; run the GUI with `--port 47822`. `.mcp.json` is committed; docs in `docs/mcp.md`. |
+| MCP (agent access) | `python3 -m ntpl mcp` speaks MCP JSON-RPC over stdio and exposes 21 tools (state, entities, drops, map, portals, time-spaces, A* path, spells, move/travel, attack/cast, raw send, rest, pickup, wait, memory). It owns the DLL's single host connection and rebroadcasts it on `127.0.0.1:47900`; run the GUI with `--port 47900`. The DLL port is discovered from its `C:\ntpl-<pid>.port` file (the DLL may have fallen back from 47821 to 47822+). `.mcp.json` is committed; docs in `docs/mcp.md`. |
 | Map data | `NStcData.NOS` parsed (779 grids, one byte per cell). Live 2026-11-07: map **2** NosVille Meadows (150x150), then map 1 NosVille (160x180) via `c_map`; 2026-11-06: map **20** Mountain Cave 1 (230x260). Map names come from `NSlangData_UK.NOS` → `_code_uk_MapIDData.txt` (`zts<id>e<TAB><name>`, 374 entries). `astar()` is 8-direction with sqrt(2) diagonals and no corner cutting; the path is drawn as a continuous polyline. |
 | Monster names | Two-step join in `monsternames.py`: `NSgtdData.NOS` → `monster.dat` maps the template vnum to a language text key (`VNUM 419` → `NAME zts489e`), and `NSlangData_UK.NOS` → `_code_uk_monster.txt` maps that key to the localized name (2,679 entries; live map 103: vnum 419 = Violent Seedle, 420 = Crazy Dander, 421 = Violent Chicken). The text key is **not** the vnum (record `zts419e` is "Wheat"). Only `monster.dat` is decrypted from the 18 MB archive, so loading takes ~0.4 s. `spawnlog.py` backfills entities that spawned before the host attached from the DLL's `C:\NosTalePacketLog.txt` (`[RECV] in ...` lines). |
 | Spell catalog | `NSgtdData.NOS` → `Skill.dat` parsed by `spells.py`: 1,964 records, 791 active (`TYPE[0]==1`), with name from the `NAME` zts key, MP cost, range, cast time, cooldown and target type. Live examples: 866 Holy Attack (0 MP/0.9 s), 869 Mana Shield (self, 300 MP/60 s), 876 Holy Hammer (145 MP/90 s). The GUI **Add spell…** picker uses it; the bot enforces MP/range/cooldown/cast time. |
@@ -57,7 +57,7 @@ cd ~/games/gameforge/NostalePacketLogger
 make -C linux all test-host
 make -C linux check                 # file(1) on the three PE32 outputs
 make -C linux host-test             # 117 stdlib unittest cases
-PYTHONPATH=linux/host python3 -m ntpl mcp   # MCP stdio server + broker on 47822
+PYTHONPATH=linux/host python3 -m ntpl mcp   # MCP stdio server + broker on 47900 (DLL port auto-discovered)
 make -C linux gui-test              # headless GTK4 + map surface smoke
 make -C linux bot-test              # 20 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, ghost-target dropping, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting
 make -C linux clean
@@ -132,7 +132,7 @@ PYTHONPATH=linux/host python3 -m ntpl status
   save/load), `cli.py` (`walk` waits for the server's `tp`/`mv`; `cast` waits
   for `su`), `gui.py` (packet table + Map/Bot tab), `mcp_server.py` (MCP
   stdio server + `Broker`: the broker owns the DLL's one host connection and
-  fans out `RECV`/`SEND`/`STATUS` to the GUI/CLI on 47822; tools read
+  fans out `RECV`/`SEND`/`STATUS` to the GUI/CLI on 47900; tools read
   `WorldState` and act through the same commands). Standard library only
   outside the GUI (PyGObject + pycairo for the window).
 - **Sit/stand:** `rest 1 1 <charId>` toggles; the server answers

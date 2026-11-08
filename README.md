@@ -35,9 +35,9 @@ linux/scripts/host.sh status
 linux/scripts/host.sh monitor
 linux/scripts/gui.sh           # lists the running clients, picks/injects one
 
-# agent access (MCP over stdio; owns the DLL link, GUI joins on 47822)
+# agent access (MCP over stdio; owns the DLL link, GUI joins on 47900)
 PYTHONPATH=linux/host python3 -m ntpl mcp
-linux/scripts/gui.sh --port 47822
+linux/scripts/gui.sh --port 47900
 ```
 
 ## Quick start on Windows

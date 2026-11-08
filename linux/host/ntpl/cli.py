@@ -54,10 +54,19 @@ def _paint(text: str, code: str, enabled: bool) -> str:
     return f"{code}{text}{RESET}" if enabled else text
 
 
-def _add_connection(parser: argparse.ArgumentParser) -> None:
+def _add_connection(
+    parser: argparse.ArgumentParser, auto_port: bool = False
+) -> None:
     parser.add_argument("--host", default=DEFAULT_HOST, help="default: %(default)s")
     parser.add_argument(
-        "--port", type=int, default=default_port(), help="default: %(default)s"
+        "--port",
+        type=int,
+        default=None if auto_port else default_port(),
+        help=(
+            "default: the injected client's port file"
+            if auto_port
+            else "default: %(default)s"
+        ),
     )
     parser.add_argument(
         "--retries", type=int, default=30, help="connection attempts (default: %(default)s)"
@@ -818,7 +827,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="connect straight to --host/--port instead of listing the "
         "running clients (implied by a non-default --port, e.g. the MCP "
-        "broker on 47822)",
+        "broker on 47900)",
     )
     gui.set_defaults(handler=cmd_gui)
 
@@ -827,11 +836,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="MCP server over stdio for agents; owns the DLL link and "
         "rebroadcasts it to the GUI/CLI",
     )
-    _add_connection(mcp)
+    _add_connection(mcp, auto_port=True)
     mcp.add_argument(
         "--listen",
         type=int,
-        default=47822,
+        default=47900,
         help="local port for the GUI/CLI rebroadcast (0 = off; "
         "default: %(default)s)",
     )

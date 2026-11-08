@@ -14,7 +14,7 @@ Run it without installing anything::
 
 Then point the GUI at the broker::
 
-    linux/scripts/gui.sh --port 47822
+    linux/scripts/gui.sh --port 47900
 
 MCP is standard-library only here: newline-delimited JSON-RPC 2.0 on stdio.
 Logs go to stderr; stdout carries protocol messages only.
@@ -34,6 +34,7 @@ from typing import Any, Callable, TextIO
 
 from . import __version__
 from .client import PacketClient
+from .clients import discover_clients
 from .engine import Engine
 from .mapdata import (
     MapGrid,
@@ -59,9 +60,29 @@ from .spawnlog import load_portals as load_log_portals
 from .spells import SpellInfo, load_spells
 
 MCP_VERSION = "2024-11-05"
-BROKER_PORT = 47822
+#: GUI/CLI rebroadcast port. Outside the DLL's 47821..47830 fallback range,
+#: so the broker can never collide with the logger even after a port clash.
+BROKER_PORT = 47900
 MAX_TRACKED_PACKETS = 2000
 MAX_TRACKED_STATUSES = 200
+
+
+def _discover_dll_port() -> int | None:
+    """The port an injected client published in its ``C:\\ntpl-<pid>.port``.
+
+    The DLL falls back to the next free port when 47821 is taken, so the
+    broker must ask the running client where it listens instead of assuming
+    the default. Returns None when no injected client is found; the broker
+    then falls back to NTPL_PORT/47821 and keeps retrying.
+    """
+    try:
+        discovery = discover_clients()
+    except Exception:  # noqa: BLE001 - discovery must not stop the server
+        return None
+    for client in discovery.clients:
+        if client.port:
+            return client.port
+    return None
 
 
 class ToolError(RuntimeError):
@@ -335,8 +356,21 @@ class GameService:
         broker.on_packet = self._feed_packet
         broker.on_status = self._feed_status
         self._seed_from_log()
+        # The GUI polls POS; the MCP server must too, otherwise `resting` and
+        # the current real cell are unknown and MoveTo arrival cannot be
+        # checked (the client's `walk` reports the destination, not the cell).
+        self._pos_stop = threading.Event()
+        threading.Thread(
+            target=self._pos_loop, name="ntpl-pos", daemon=True
+        ).start()
 
     # -- feeds ----------------------------------------------------------
+
+    def _pos_loop(self) -> None:
+        while not self._pos_stop.is_set():
+            if self.broker.connected:
+                self.broker.send_upstream("POS")
+            self._pos_stop.wait(0.5)
 
     def _feed_packet(self, packet: Packet) -> None:
         with self.cond:
@@ -347,6 +381,23 @@ class GameService:
     def _feed_status(self, text: str) -> None:
         with self.cond:
             self.statuses.append((time.time(), text))
+            if text.startswith("POS "):
+                parts = text.split()
+                if len(parts) >= 4:
+                    try:
+                        x, y, char_id = (
+                            int(parts[1]),
+                            int(parts[2]),
+                            int(parts[3]),
+                        )
+                    except ValueError:
+                        pass
+                    else:
+                        world = self.engine.world
+                        world.x, world.y = x, y
+                        world.self_id = char_id
+                        if len(parts) >= 5 and parts[4] in ("0", "1"):
+                            world.resting = parts[4] == "1"
             self.cond.notify_all()
 
     def _seed_from_log(self) -> None:
@@ -427,6 +478,10 @@ class GameService:
         self._require_connection()
         if not self.broker.send_upstream(line):
             raise ToolError("the DLL connection dropped while sending")
+
+    def _send_packet(self, packet: str) -> None:
+        """Inject one game packet; the DLL requires the `SEND|` prefix."""
+        self._send(f"SEND|{packet}")
 
     def _wait(
         self, predicate: Callable[[], Any], timeout: float
@@ -624,6 +679,17 @@ class GameService:
     # -- action tools ---------------------------------------------------
 
     def game_move(self, x: int, y: int, timeout: float = 10.0) -> dict[str, Any]:
+        self._ensure_standing(min(max(timeout, 1.0), 3.0))
+        with self.lock:
+            here = self.engine.world.position
+        if here is not None:
+            distance = max(abs(x - here[0]), abs(y - here[1]))
+            if distance > 3:
+                # A far MoveTo is rejected by the server (the client stops
+                # without walking). Use the same <=3-cell legs as the GUI.
+                return self.game_travel(
+                    x, y, leg=3, timeout=max(timeout, distance * 1.5)
+                )
         self._send(f"MOVE|{x} {y}")
 
         def arrived():
@@ -635,6 +701,33 @@ class GameService:
                 f"(position {self._world().position})"
             )
         return {"ok": True, "position": [x, y]}
+
+    def _ensure_standing(self, timeout: float = 3.0) -> None:
+        """Stand before moving: a seated client ignores MoveTo."""
+        def known() -> bool:
+            with self.lock:
+                return self.engine.world.resting is not None
+
+        self._wait(known, 1.0)
+        with self.lock:
+            world = self.engine.world
+            resting = world.resting
+            char_id = world.self_id
+        if resting is not True:
+            return
+        if char_id is None:
+            raise ToolError("character is sitting and the char id is unknown")
+        self._send_packet(f"rest 1 1 {char_id}")
+
+        def stood() -> bool:
+            with self.lock:
+                return self.engine.world.resting is not True
+
+        if self._wait(stood, timeout) is None:
+            raise ToolError(
+                "the character is sitting and did not stand up; "
+                "`rest` is a toggle, check the game"
+            )
 
     def game_travel(
         self,
@@ -729,8 +822,8 @@ class GameService:
             # its own ncif); the server validates u_s against that.
             self._select_target(target_id)
         else:
-            self._send(f"ncif {target_type} {target_id}")
-        self._send(f"u_s {slot} {target_type} {target_id}")
+            self._send_packet(f"ncif {target_type} {target_id}")
+        self._send_packet(f"u_s {slot} {target_type} {target_id}")
 
         def confirmed():
             with self.lock:
@@ -771,7 +864,7 @@ class GameService:
         text = packet.strip()
         if not text:
             raise ToolError("packet is empty")
-        self._send(f"SEND|{text}")
+        self._send_packet(text)
         return {"ok": True, "sent": text}
 
     def game_select(self, target_id: int, target_type: int = 3) -> dict[str, Any]:
@@ -779,7 +872,7 @@ class GameService:
             result = self._select_target(target_id)
             result["target_type"] = target_type
             return result
-        self._send(f"ncif {target_type} {target_id}")
+        self._send_packet(f"ncif {target_type} {target_id}")
         return {"ok": True, "target_id": target_id, "target_type": target_type}
 
     def _select_target(
@@ -826,15 +919,16 @@ class GameService:
             raise ToolError("own char id unknown")
         if sit is not None and resting is sit:
             return {"ok": True, "resting": resting, "changed": False}
-        self._send(f"rest 1 1 {char_id}")
+        expected = (not bool(resting)) if sit is None else sit
+        self._send_packet(f"rest 1 1 {char_id}")
 
         def settled():
             with self.lock:
-                return self._world().resting
+                return self._world().resting is expected
 
         state = self._wait(settled, 3.0)
         return {
-            "ok": state is not None,
+            "ok": state is True,
             "resting": self._world().resting,
             "changed": True,
         }
@@ -845,7 +939,7 @@ class GameService:
         if char_id is None:
             raise ToolError("own char id unknown")
         start = time.time()
-        self._send(f"get 1 {char_id} {drop_id}")
+        self._send_packet(f"get 1 {char_id} {drop_id}")
 
         def confirmed():
             with self.lock:
@@ -1400,8 +1494,15 @@ def run_mcp(
     ``listen_port=0`` disables the GUI/CLI rebroadcast (the agent then owns
     the only DLL connection); any other value is the TCP port to listen on.
     """
+    if port is None:
+        port = _discover_dll_port()
     broker = Broker(
         host, port, listen_port=None if listen_port == 0 else listen_port
+    )
+    print(
+        f"ntpl mcp: DLL 127.0.0.1:{broker.port}; "
+        f"broker {broker.listen_port if broker.listen_port else 'off'}",
+        file=sys.stderr,
     )
     service = GameService(broker, map_file=map_file, log_file=log_file)
     broker.start()
