@@ -52,3 +52,5 @@ run gui_focus_smoke.py
 run gui_focus_retaliate_smoke.py
 run gui_cancel_pair_smoke.py
 run gui_refusal_keep_smoke.py
+run gui_defend_first_smoke.py
+run gui_start_sit_smoke.py

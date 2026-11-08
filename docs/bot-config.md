@@ -76,9 +76,10 @@ Retaliate, Pickup, Auto-recover HP/MP) are **green**, inactive ones are
 recovery check runs before targeting and spell rules. Recovery never abandons
 a fight: if the bot is already hitting a live target in range, it finishes
 that kill first, then sits until the resource that triggered recovery is
-full. If a monster hits the character while it is recovering (and is within
-attack reach), the bot stands up and fights back instead of sitting in the
-line of fire, then resumes recovery once the attacker is gone.
+full. **Being hit forbids resting**: a character that has been hit recently
+stands up and fights back even when the attacker is not in the entity list
+(dropped, out of sight, an unseen ranged hit), and loot walks/pickups wait
+until the attacks stop. Recovery resumes once the hits stop.
 
 ## Spells — scanned catalog, rules and execution order
 
@@ -253,7 +254,10 @@ old session), validates and clamps every value, and reports errors in the
 status bar. The drawn **route** is saved too — waypoints, the Draw path
 start point, its map id and the Draw path toggle — so loading the config
 redraws the same A* path on the map. Live entity state (monsters, drops,
-positions) is not saved.
+positions) is not saved. Start first walks to the route's start point; if
+the character is sitting it stands up and waits for the server's
+confirmation before the first `MOVE`, because a seated client ignores
+MoveTo and every leg would time out.
 
 Example:
 

@@ -2577,6 +2577,19 @@ class Application(Gtk.Application):
             and time.time() - when <= RETALIATE_WINDOW_S
         )
 
+    def _under_attack(self) -> bool:
+        """True while anything has hit the character recently.
+
+        Retaliate needs a resolvable entity to attack back; recovery must not
+        wait for one. Being hit is enough to forbid resting even when the
+        attacker is missing from the world state (dropped as a ghost, out of
+        sight, or an unseen ranged hit).
+        """
+        world = self.engine.world
+        if world.last_attacker_id is None:
+            return False
+        return time.time() - world.last_attacker_at <= RETALIATE_WINDOW_S
+
     def _live_points(self) -> list[tuple[int, int]]:
         world = self.engine.world
         # Every tracked entity is on the current map, so monsters and NPCs are
@@ -3122,6 +3135,22 @@ class Application(Gtk.Application):
         now = time.monotonic()
         self._travel_request_position(now)
         actual = self._player_cell()
+
+        if self.engine.world.resting is True:
+            # Sitting blocks the client's MoveTo: every leg would time out.
+            # The sit state can arrive after Start (a stale POS at the button
+            # press), so it is checked on every travel tick, not only once.
+            # `rest` is a toggle; rate-limit the stand request.
+            self.travel_pending = None
+            if now >= self.stand_sent_until:
+                char_id = self._char_id()
+                if char_id is not None:
+                    self._send(f"rest 1 1 {char_id}")
+                    self.stand_sent_until = now + 2.0
+                    self._set_status(
+                        "sitting; standing up before walking"
+                    )
+            return True
 
         if self.travel_pending is not None:
             target, sent_at = self.travel_pending
@@ -4841,14 +4870,16 @@ class Application(Gtk.Application):
             if not self.recovering and self.fight_target_id is not None:
                 if self.fight_target_id not in world.entities:
                     self.fight_target_id = None
-            # Sitting under fire gets the character killed. When a monster
-            # that is hitting us is within attack reach, fight it first and
-            # recover afterwards. Retaliation ignores the target filter.
-            if (
-                not self._combat_paused(now)
-                and self._retaliation_target(int(self._attack_reach()))
-                is not None
-            ):
+            # Sitting under fire gets the character killed. A recent hit
+            # forbids resting even when the attacker is not resolvable (it may
+            # have been dropped from the world state or be out of sight); a
+            # resolvable attacker within reach is fought back.
+            attacker = (
+                self._retaliation_target(int(self._attack_reach()))
+                if not self._combat_paused(now)
+                else None
+            )
+            if attacker is not None or self._under_attack():
                 if self.recovering:
                     self.recovering = False
                     self.recover_need_hp = False
@@ -4861,6 +4892,8 @@ class Application(Gtk.Application):
                         self._send(f"rest 1 1 {char_id}")
                     self._set_status(
                         "attacked while recovering; fighting back"
+                        if attacker is not None
+                        else "attacked while recovering; standing up"
                     )
                 elif hp_low or mp_low:
                     hp_low = mp_low = False
@@ -4916,6 +4949,15 @@ class Application(Gtk.Application):
                 return True
         elif self.recovering:
             self.recovering = False
+
+        # Defend first: being hit cancels a loot walk and skips pickups until
+        # the attacker is gone; the combat block runs this tick instead.
+        under_attack = self._under_attack()
+        if under_attack and self.pending_loot_id is not None:
+            self.pending_target = None
+            self.pending_loot_id = None
+            self.pending_is_path = False
+            self._set_status("attacked; defending instead of picking up")
 
         if self.pending_target is not None:
             # The client's own MoveTo sends a `walk` SEND packet; the engine
@@ -5014,10 +5056,15 @@ class Application(Gtk.Application):
                         abs(drop.x - position[0]), abs(drop.y - position[1])
                     )
                 if distance is not None and distance > PICKUP_RANGE_CELLS:
-                    # Walk to the drop first: `get` from far away is rejected.
-                    if self._walk_to_loot(drop, now):
+                    # Walking away to loot while being hit gives up the
+                    # defence; leave the drop for after the fight. A drop at
+                    # the feet is still collected (one `get`, no movement).
+                    if under_attack:
+                        drop = None
+                    elif self._walk_to_loot(drop, now):
                         return True
-                    self.pickup_ignored[drop.drop_id] = now + 5.0
+                    else:
+                        self.pickup_ignored[drop.drop_id] = now + 5.0
                 elif self._send(f"get 1 {char_id} {drop.drop_id}"):
                     attempts = self.pickup_attempts.get(drop.drop_id, 0) + 1
                     self.pickup_attempts[drop.drop_id] = attempts
@@ -5028,7 +5075,8 @@ class Application(Gtk.Application):
                         f"pickup {drop.item_vnum} x{drop.amount} "
                         f"({drop.drop_id})"
                     )
-                return True
+                if drop is not None:
+                    return True
 
         auto_attack = (
             self.auto_attack_toggle is not None

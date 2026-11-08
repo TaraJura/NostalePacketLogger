@@ -30,7 +30,7 @@ The MinGW compiler is `i686-w64-mingw32-g++`. Override with
 ```bash
 make -C linux host-test        # 142 stdlib unittest cases
 make -C linux gui-test         # headless GTK4, needs xvfb
-make -C linux bot-test         # 18 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, ghost-target dropping, target focus, focus+retaliate, cancel pairing, refusal keep
+make -C linux bot-test         # 20 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, ghost-target dropping, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting
 make -C linux all test-host
 linux/scripts/dev-test-wine.sh 25
 ```
@@ -64,7 +64,12 @@ cast with a delayed `cancel`, so a normal cast end is not counted as a
 refusal or used to drop the target. The refusal-keep smoke makes every cast
 after the first one fail while the first has already landed: the bot must
 keep that target and back off to the skill cooldown, while a never-hit
-target is still dropped as a ghost.
+target is still dropped as a ghost. The defend-first smoke hits the
+character from an entity the host never saw while HP/MP are below the
+recovery threshold: the bot must not sit, must keep attacking, and pickups
+wait. The start-sit smoke starts a route while the game is seated and the
+host's last POS is stale: the travel must stand first (the client ignores
+MoveTo while seated), then send a leg that is accepted.
 The combat smoke asserts the `get`/`TARGET`/`u_s`/`MOVE` sequence (Retaliate
 picks the monster that hit us) and that the fake client's own `walk` confirms
 the move. The rules smoke filters two monsters by vnum, checks that HP 40 %
