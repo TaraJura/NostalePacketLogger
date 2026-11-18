@@ -139,6 +139,10 @@ CANCEL_PAUSE_TRIGGER = 3
 PICKUP_RANGE_CELLS = 1
 #: Drops farther than this are ignored (usually leftovers from other fights).
 LOOT_APPROACH_CELLS = 20
+#: Pause after a `get` before the next pickup. The server confirms with
+#: `get 1 <charId> <dropId> 0` within a few ticks, so a pile of drops at the
+#: feet is collected at about three per second.
+PICKUP_COOLDOWN_S = 0.3
 DEFAULT_SKILL_TEMPLATE = "u_s {skill} {type} {target}"
 
 # A walk timed out this many times in a row: the server is rejecting the
@@ -2602,6 +2606,22 @@ class Application(Gtk.Application):
             return False
         return time.time() - world.last_attacker_at <= RETALIATE_WINDOW_S
 
+    def _defend_before_loot(self, under_attack: bool) -> bool:
+        """True when a pickup has to wait until the fight is over.
+
+        Drops are collected right away, also while monsters hit the
+        character: on a busy map the fight never ends, and drops left for
+        "after the fight" were never picked up. Only a character whose HP is
+        below the Recovery HP threshold defends first.
+        """
+        if not under_attack:
+            return False
+        stats = self.engine.world.stats
+        if stats.hp_max <= 0:
+            return False
+        hp_pct = 100.0 * stats.hp / stats.hp_max
+        return hp_pct < float(self.low_hp_pct.get_value())
+
     def _live_points(self) -> list[tuple[int, int]]:
         world = self.engine.world
         # Every tracked entity is on the current map, so monsters and NPCs are
@@ -5048,14 +5068,19 @@ class Application(Gtk.Application):
         elif self.recovering:
             self.recovering = False
 
-        # Defend first: being hit cancels a loot walk and skips pickups until
-        # the attacker is gone; the combat block runs this tick instead.
+        # Loot first: drops are picked up right away, also under attack. Only
+        # a low-HP character (below the Recovery HP threshold) cancels a loot
+        # walk and skips pickups until the attacker is gone; the combat block
+        # runs this tick instead.
         under_attack = self._under_attack()
-        if under_attack and self.pending_loot_id is not None:
+        defend_first = self._defend_before_loot(under_attack)
+        if defend_first and self.pending_loot_id is not None:
             self.pending_target = None
             self.pending_loot_id = None
             self.pending_is_path = False
-            self._set_status("attacked; defending instead of picking up")
+            self._set_status(
+                "attacked with low HP; defending instead of picking up"
+            )
 
         if self.pending_target is not None:
             # The client's own MoveTo sends a `walk` SEND packet; the engine
@@ -5154,10 +5179,10 @@ class Application(Gtk.Application):
                         abs(drop.x - position[0]), abs(drop.y - position[1])
                     )
                 if distance is not None and distance > PICKUP_RANGE_CELLS:
-                    # Walking away to loot while being hit gives up the
-                    # defence; leave the drop for after the fight. A drop at
-                    # the feet is still collected (one `get`, no movement).
-                    if under_attack:
+                    # Walk to the drop at once, fight or not. Only a low-HP
+                    # character leaves it for after the fight; a drop at the
+                    # feet is still collected (one `get`, no movement).
+                    if defend_first:
                         drop = None
                     elif self._walk_to_loot(drop, now):
                         return True
@@ -5168,7 +5193,7 @@ class Application(Gtk.Application):
                     self.pickup_attempts[drop.drop_id] = attempts
                     if attempts >= 3:
                         self.pickup_ignored[drop.drop_id] = now + 15.0
-                    self.pickup_cooldown_until = now + 0.6
+                    self.pickup_cooldown_until = now + PICKUP_COOLDOWN_S
                     self._set_status(
                         f"pickup {drop.item_vnum} x{drop.amount} "
                         f"({drop.drop_id})"

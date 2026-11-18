@@ -78,8 +78,18 @@ a fight: if the bot is already hitting a live target in range, it finishes
 that kill first, then sits until the resource that triggered recovery is
 full. **Being hit forbids resting**: a character that has been hit recently
 stands up and fights back even when the attacker is not in the entity list
-(dropped, out of sight, an unseen ranged hit), and loot walks/pickups wait
-until the attacks stop. Recovery resumes once the hits stop.
+(dropped, out of sight, an unseen ranged hit). Recovery resumes once the hits
+stop.
+
+**Loot is picked up right away**, also while monsters hit the character: the
+bot walks to the nearest drop it may take (up to 20 cells, in <=3-cell legs),
+sends `get 1 <charId> <dropId>` from the cell next to it, and goes on with the
+next drop 0.3 s later. Free drops (owner `-1` on the live 2026-11-18 server,
+`0` in older captures; party loot with "Priority: All party members" arrives
+as `-1`) and own drops are taken; another player's protected drop is skipped,
+and a drop refused three times is ignored. Only when HP is below the Recovery
+HP threshold does the bot defend first: it drops a running loot walk and
+leaves the drops for after the fight.
 
 ## Spells — scanned catalog, rules and execution order
 
