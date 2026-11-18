@@ -843,7 +843,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--log",
         default=None,
         help="DLL packet log for backfilling entity vnums/names "
-        "(default: NTPL_LOG or the Wine prefix's C:\\NosTalePacketLog.txt)",
+        "(default: NTPL_LOG, else the attached client's "
+        "C:\\NosTalePacketLog-<pid>.txt, else the newest per-client log)",
     )
     gui.add_argument(
         "--no-client-picker",

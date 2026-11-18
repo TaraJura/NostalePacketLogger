@@ -31,8 +31,12 @@ extern "C" void ntpl_client_target(void* controller, void* entity,
 
 namespace {
 
-constexpr std::uintptr_t kSelectionGlobal = 0x00795200;
-constexpr std::uintptr_t kSelector = 0x0056964C;
+// Client build 2026-11-18 (the FrosTale-patched client). The previous build's
+// values were 0x00795200 / 0x0056964C; the selector prologue signature below
+// still matches, so it can be re-found after a patch by scanning it.
+// The chain is unchanged: [0x798294] -> holder 0x7934D4 -> controller.
+constexpr std::uintptr_t kSelectionGlobal = 0x00798294;
+constexpr std::uintptr_t kSelector = 0x0057A0E4;
 
 // 53 56 57 8B F2 8B F8 85 F6 ... (SelectEntity prologue)
 const unsigned char kSelectorSignature[] = {

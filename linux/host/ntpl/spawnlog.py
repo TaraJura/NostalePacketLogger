@@ -9,9 +9,11 @@ current session, including those `in` spawn packets. Reading only the
     in 3 <vnum> <entityId> <x> <y> ...     monster/NPC
     in 1 <name> - <charId> <x> <y> ...     player
 
-Entity ids are per-session. The log is truncated on every DLL injection, so
-the mapping belongs to the live client session. Later entries override
-earlier ones, which handles a reused entity id.
+Entity ids are per-session. Each DLL writes its own log
+(``C:\\NosTalePacketLog-<pid>.txt``), truncated when that client is injected,
+so the mapping belongs to one live client session even when several clients
+run in the same Wine prefix. Later entries override earlier ones, which
+handles a reused entity id.
 """
 
 from __future__ import annotations
@@ -52,31 +54,66 @@ def _ints_after(line: str, marker: str, count: int) -> list[int]:
     return []
 
 
-def default_log_path() -> Path | None:
-    """Locate ``C:\\NosTalePacketLog.txt`` inside a Wine prefix.
+def client_log_path(prefix: str | os.PathLike[str], winpid: int) -> Path:
+    """The DLL log of one game process: ``C:\\NosTalePacketLog-<pid>.txt``.
 
-    ``NTPL_LOG`` wins. Otherwise ``WINEPREFIX`` is used, then the documented
-    dedicated prefix and the Gameforge prefix on this machine. Returns None
-    when no log exists.
+    Each injected DLL writes its own log under the prefix's ``drive_c``, named
+    by the Windows PID that the injector reports and that also names the
+    ``ntpl-<pid>.port`` file. Several clients in one prefix therefore never
+    share, truncate or interleave a log.
+    """
+    return Path(prefix) / "drive_c" / f"NosTalePacketLog-{winpid}.txt"
+
+
+def _newest_client_log(prefix: Path) -> Path | None:
+    """Newest ``NosTalePacketLog-<pid>.txt`` in a prefix, if any."""
+    try:
+        logs = [
+            entry
+            for entry in (prefix / "drive_c").glob("NosTalePacketLog-*.txt")
+            if entry.is_file()
+        ]
+    except OSError:
+        return None
+    if not logs:
+        return None
+    try:
+        return max(logs, key=lambda entry: entry.stat().st_mtime_ns)
+    except OSError:
+        return logs[0]
+
+
+def default_log_path() -> Path | None:
+    """Locate the best DLL packet log inside a Wine prefix.
+
+    ``NTPL_LOG`` wins. Otherwise the newest per-client log
+    (``C:\\NosTalePacketLog-<pid>.txt``) is preferred, with the legacy single
+    ``C:\\NosTalePacketLog.txt`` as a fallback. Prefixes are checked in this
+    order: ``WINEPREFIX``, the dedicated ``~/.wine-nostale`` prefix, then the
+    Gameforge prefix on this machine. Returns None when no log exists.
     """
     override = os.environ.get("NTPL_LOG")
     if override:
         return Path(override)
 
-    candidates: list[Path] = []
+    prefixes: list[Path] = []
     prefix = os.environ.get("WINEPREFIX")
     if prefix:
-        candidates.append(Path(prefix) / "drive_c" / "NosTalePacketLog.txt")
+        prefixes.append(Path(prefix))
     home = Path.home()
-    candidates.extend(
+    prefixes.extend(
         [
-            home / ".wine-nostale/drive_c/NosTalePacketLog.txt",
-            home / "games/gameforge/prefix/drive_c/NosTalePacketLog.txt",
+            home / ".wine-nostale",
+            home / "games/gameforge/prefix",
         ]
     )
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
+    for prefix in prefixes:
+        newest = _newest_client_log(prefix)
+        if newest is not None:
+            return newest
+        legacy = prefix / "drive_c" / "NosTalePacketLog.txt"
+        if legacy.is_file():
+            return legacy
     return None
 
 

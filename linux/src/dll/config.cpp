@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <cstdio>
 #include <cstdlib>
 
 namespace {
@@ -35,7 +36,18 @@ std::uint16_t config_port() {
 
 std::string config_log_path() {
     const std::string value = env("NTPL_LOG");
-    return value.empty() ? std::string(kDefaultLogPath) : value;
+    if (!value.empty()) {
+        return value;
+    }
+
+    // The Windows PID is what the injector reports and what names the port
+    // file, so the host can find this client's log without guessing.
+    char path[64] = {0};
+    std::snprintf(
+        path, sizeof(path), "%s%lu.txt", kDefaultLogPrefix,
+        static_cast<unsigned long>(GetCurrentProcessId())
+    );
+    return std::string(path);
 }
 
 bool config_quiet() {

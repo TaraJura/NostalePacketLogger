@@ -1,8 +1,8 @@
 """Headless smoke test for **Block portals**.
 
 Map 999 (a synthetic 6x6 grid) has one portal at (2,1), directly between the
-character at (1,1) and a clicked goal at (4,1). The test checks that, with the
-toggle on (the default):
+character at (1,1) and a clicked goal at (4,1). The toggle is **off by
+default**, so the test turns it on explicitly and checks that:
 
 * the portal is part of the blocked-cell set,
 * a direct MOVE onto it is refused and never reaches the DLL,
@@ -129,8 +129,9 @@ def main() -> int:
         try:
             app.map_grid = MapGrid(MAP_ID, 6, 6, bytes(36))
             app.map_source = "test"
-            # With the toggle on (default): the portal is blocked, a drop on
+            # Opt in to portal blocking: the portal is then blocked, a drop on
             # it is approached next to it, and a MOVE onto it is refused.
+            app.block_portal_toggle.set_active(True)
             result["cells"] = sorted(app._portal_cells())
             result["approach"] = app._walkable_cell(2, 1)
             result["refused"] = app._client_move(2, 1) is False
@@ -169,6 +170,8 @@ def main() -> int:
     def phase3() -> bool:
         try:
             lines = list(server.received)
+            portal_lines = [line for line in lines if line.startswith("PORTALS|")]
+            result["portal_cmds"] = portal_lines
             result["ok"] = bool(
                 result.get("cells") == [(2, 1)]
                 and result.get("approach") not in (None, (2, 1))
@@ -179,9 +182,8 @@ def main() -> int:
                 and result.get("off_cells") == []
                 and result.get("allowed") is True
                 and "MOVE|2 1" in lines
-                and "PORTALS|1" in lines
-                and "PORTALS|0" in lines
-                and lines.index("PORTALS|1") < lines.index("PORTALS|0")
+                and "PORTALS|1" in portal_lines
+                and portal_lines[-1] == "PORTALS|0"
             )
             result["detail"] = (
                 f"cells={result.get('cells')} "
@@ -192,6 +194,7 @@ def main() -> int:
                 f"arrived={result.get('arrived')} "
                 f"off_cells={result.get('off_cells')} "
                 f"allowed_after_off={result.get('allowed')} "
+                f"portals={result.get('portal_cmds')} "
                 f"last={lines[-8:]}"
             )
         except Exception as exc:  # noqa: BLE001

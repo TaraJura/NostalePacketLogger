@@ -241,6 +241,34 @@ def wait_for_port(
         time.sleep(0.2)
 
 
+def port_is_listening(port: int) -> bool:
+    """True when ``port`` has a TCP LISTEN socket on this machine.
+
+    A port file can outlive its game process (a killed client never runs the
+    DLL's shutdown), and Wine may later give the same Windows PID to a new
+    client. The GUI would then think the new client is already injected and
+    dial a dead port. ``/proc/net/tcp*`` is free to read and never connects, so
+    checking it cannot steal the DLL's single host slot.
+    """
+    for name in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(name, "r", encoding="ascii", errors="replace") as handle:
+                next(handle, None)
+                for line in handle:
+                    fields = line.split()
+                    if len(fields) < 4:
+                        continue
+                    try:
+                        local_port = int(fields[1].rsplit(":", 1)[1], 16)
+                    except (IndexError, ValueError):
+                        continue
+                    if local_port == port and fields[3] == "0A":
+                        return True
+        except OSError:
+            continue
+    return False
+
+
 # --------------------------------------------------------------- injector
 
 def parse_injector_list(text: str) -> list[tuple[int, str, str]]:
@@ -281,12 +309,17 @@ def list_clients(
         # no visible window; they cannot be injected usefully.
         if not title or title.startswith("(no window"):
             continue
+        port = read_port(context.prefix, winpid)
+        if port is not None and not port_is_listening(port):
+            # A leftover file from a previous session with the same Windows
+            # PID: there is no logger behind it, so offer Inject & connect.
+            port = None
         clients.append(
             ClientInfo(
                 context=context,
                 winpid=winpid,
                 title=title,
-                port=read_port(context.prefix, winpid),
+                port=port,
             )
         )
     return clients

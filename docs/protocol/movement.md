@@ -41,7 +41,8 @@ walk 20 139 0 10    (20 + 139 = 159; 159 % 3 == 0 -> checksum 0)
 
 ### Client-side walking (what the bot uses)
 
-The client's own pathfinding entry point is at VA `0x565E88` in this build:
+The client's own pathfinding entry point is at VA `0x00576920` in the
+2026-11-18 build (`0x565E88` in 2026-11-03):
 
 ```
 __fastcall bool MoveTo(PlayerObject *this /*EAX*/,
@@ -50,7 +51,8 @@ __fastcall bool MoveTo(PlayerObject *this /*EAX*/,
                        int run /*stack*/)
 ```
 
-`packedXY` is `x | (y << 16)`. The player object is `[[0x792468]]`; its int16
+`packedXY` is `x | (y << 16)`. The player object is `[[0x007954B4]]` in the
+2026-11-18 build (`[[0x792468]]` before); its int16
 x is at +4, y at +6, and char id at +0x24. `MOVE|x y` in the DLL calls this
 function, so the client computes a path, animates the movement and sends its
 own `walk` packet with the correct checksum. `POS` reads the local position.

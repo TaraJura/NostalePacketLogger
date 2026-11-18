@@ -109,7 +109,7 @@ linux/scripts/gui.sh                     # GTK4 UI + startup client picker
 linux/scripts/host.sh gui                # same, via the host wrapper
 ```
 
-The sidebar's **Block portals** toggle (on by default) drops the client's `preq` portal request in the DLL and keeps paths off warp tiles, so a farming loop cannot change maps.
+The sidebar's **Block portals** toggle (off by default, so portals stay usable; enable it for farming) drops the client's `preq` portal request in the DLL and keeps paths off warp tiles, so a farming loop cannot change maps.
 
 The GUI's **Map / Bot** tab loads the client's own map archive, draws the
 whole walkable grid and the live entities with name tooltips, switches the map
@@ -123,11 +123,14 @@ has green/red toggles, a red recovery banner and JSON save/load. See
 on `127.0.0.1:47821`; set `NTPL_PORT` in the environment of **both** the game
 and the host to change it.
 
-The DLL writes `C:\NosTalePacketLog.txt`, which is
-`<prefix>/drive_c/NosTalePacketLog.txt` on Linux:
+Each injected DLL writes its own session log, `C:\NosTalePacketLog-<pid>.txt`
+(`<prefix>/drive_c/NosTalePacketLog-<pid>.txt` on Linux; the PID is the one the
+injector reports and the `ntpl-<pid>.port` file uses). Several clients in one
+prefix therefore never share or truncate one file. The GUI reads the attached
+client's log; a run without an attached client uses the newest one.
 
 ```bash
-tail -f "$WINEPREFIX/drive_c/NosTalePacketLog.txt"
+tail -f "$WINEPREFIX"/drive_c/NosTalePacketLog-*.txt
 ```
 
 ## Environment variables
@@ -135,7 +138,7 @@ tail -f "$WINEPREFIX/drive_c/NosTalePacketLog.txt"
 | Variable | Read by | Meaning |
 |---|---|---|
 | `NTPL_PORT` | DLL + host | TCP port, default `47821` |
-| `NTPL_LOG` | DLL + GUI | log path, default `C:\NosTalePacketLog.txt`; the GUI backfills spawns from it |
+| `NTPL_LOG` | DLL + GUI | log path; default is one per client, `C:\NosTalePacketLog-<pid>.txt`, and an explicit value overrides the per-client file (single-client runs) |
 | `NTPL_QUIET` | DLL | `1` disables the file log |
 | `NTPL_NSTC` | host | `NStcData.NOS` path |
 | `NTPL_NSLANG` | host | `NSlangData_*.NOS` language archive |

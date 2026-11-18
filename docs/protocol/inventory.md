@@ -59,8 +59,11 @@ drop 5193 13979116 49 169 1 0 14881134
 drop 1046 13961541 29 180 635 0 14881134
 drop 2072 13965766 19 102 1 0 0            — unowned
 ```
-`ownerCharId` 0 means unowned; otherwise only that character can loot it.
-The bot picks up only your own or unowned drops.
+
+The 2026-11-18 server sends free drops with **-1** instead of 0, for example
+`drop 1303 513032 39 26 1 1 -1`; a `get 1 <charId> <dropId>` on it was
+accepted. `ownerCharId` 0 or -1 means unowned; otherwise only that character
+can loot it. The bot picks up only your own or unowned drops.
 
 ---
 

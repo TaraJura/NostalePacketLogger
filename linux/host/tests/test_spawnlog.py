@@ -1,8 +1,12 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ntpl.spawnlog import (
+    client_log_path,
+    default_log_path,
     load_gates,
     load_last_position,
     load_portals,
@@ -125,6 +129,46 @@ class SpawnLogTests(unittest.TestCase):
         self.assertEqual(
             load_portals("/nonexistent/NosTalePacketLog.txt"), {}
         )
+
+
+class ClientLogPathTests(unittest.TestCase):
+    def test_path_is_named_by_the_windows_pid(self):
+        self.assertEqual(
+            client_log_path(Path("/prefix"), 1612),
+            Path("/prefix/drive_c/NosTalePacketLog-1612.txt"),
+        )
+
+    def test_default_log_path_prefers_the_newest_client_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            drive = Path(tmp) / "drive_c"
+            drive.mkdir()
+            older = drive / "NosTalePacketLog-100.txt"
+            newer = drive / "NosTalePacketLog-200.txt"
+            older.write_text("1 [RECV] at 1 2 3 4 0 0 0 0\r\n", encoding="latin1")
+            newer.write_text("1 [RECV] at 5 6 7 8 0 0 0 0\r\n", encoding="latin1")
+            os.utime(older, (1_000_000, 1_000_000))
+            os.utime(newer, (2_000_000, 2_000_000))
+            with patch.dict(os.environ, {"WINEPREFIX": tmp}):
+                os.environ.pop("NTPL_LOG", None)
+                self.assertEqual(default_log_path(), newer)
+
+    def test_default_log_path_falls_back_to_the_legacy_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            drive = Path(tmp) / "drive_c"
+            drive.mkdir()
+            legacy = drive / "NosTalePacketLog.txt"
+            legacy.write_text("legacy\r\n", encoding="latin1")
+            with patch.dict(os.environ, {"WINEPREFIX": tmp}):
+                os.environ.pop("NTPL_LOG", None)
+                self.assertEqual(default_log_path(), legacy)
+
+    def test_ntpl_log_override_wins(self):
+        with patch.dict(
+            os.environ, {"NTPL_LOG": "/somewhere/NosTalePacketLog.txt"}
+        ):
+            self.assertEqual(
+                default_log_path(), Path("/somewhere/NosTalePacketLog.txt")
+            )
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ from ntpl.clients import (
     client_lock_path,
     parse_injector_list,
     port_file,
+    port_is_listening,
     read_port,
     release_client_lock,
     running_wine_contexts,
@@ -62,6 +63,19 @@ class PortFileTest(unittest.TestCase):
             (prefix / "drive_c").mkdir()
             port_file(prefix, 624).write_text("47822\r\n", encoding="ascii")
             self.assertEqual(read_port(prefix, 624), 47822)
+
+    def test_port_is_listening_only_for_a_live_listener(self) -> None:
+        import socket
+
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+        try:
+            self.assertTrue(port_is_listening(port))
+        finally:
+            listener.close()
+        self.assertFalse(port_is_listening(port))
 
     def test_read_port_rejects_garbage_and_missing_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

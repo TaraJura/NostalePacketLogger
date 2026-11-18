@@ -221,7 +221,8 @@ Saved as `revive_on_death`.
 NosTale portals are warp tiles: as soon as the character stands on one, the
 client sends its own `preq` (portal request) and the server moves it to the
 other map. There is no packet to decline, so **Block portals** (Path section,
-on by default) blocks the request itself:
+**off by default** so portals stay usable; turn it on for farming) blocks the
+request itself:
 
 - The DLL drops the client's `preq` before it reaches the socket while the
   toggle is on (the packet still appears in the stream and the log as
@@ -239,10 +240,12 @@ on by default) blocks the request itself:
 - A drop or monster lying **on** a portal is approached from a neighbouring
   cell (pickup and melee both work from there).
 
-The GUI tells the DLL `PORTALS|1` on every connect and when the toggle
-changes, so the protection also covers a character that is already standing on
-a portal. Turning the toggle off sends `PORTALS|0` and restores normal
-crossing, for example when you actually want to travel to the next map. The
+The GUI sends the toggle's current state to the DLL on every connect and when
+it changes (`PORTALS|1` on, `PORTALS|0` off), so the protection also covers a
+character that is already standing on a portal. With the default off,
+`PORTALS|0` is sent on connect and crossing stays normal. Turning the toggle
+back off also sends `PORTALS|0` and restores normal crossing, for example when
+you actually want to travel to the next map. The
 setting is saved as `block_portals`; the live state is in the DLL's status line
 (`portalblock=off|BLOCKED`).
 
@@ -278,7 +281,7 @@ Example:
   "low_mp_pct": 70.0,
   "revive_on_death": false,
   "loop": true,
-  "block_portals": true,
+  "block_portals": false,
   "draw_path": false,
   "map_id": 20,
   "waypoints": [[25, 118], [30, 120]],

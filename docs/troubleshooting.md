@@ -30,7 +30,7 @@
 | `MOVE` sent, but the character does not move | character is sitting, or the target is blocked | `POS` now reports the rest flag (1 sitting) and `MOVE` returns `character is sitting (stand up first)`; the GUI stands up automatically, for the CLI send `rest 1 1 <charId>` once; then try another adjacent tile |
 | Character teleports instead of walking | a raw `walk` packet was injected; the client did not animate it | use `MOVE` / `ntpl walk`, which calls the client's own MoveTo |
 | `MOVE` returns `client build mismatch` | the client build moved the MoveTo function | re-derive the address (see `docs/protocol/movement.md`); raw packets still work |
-| `POS` returns "not readable" | the client build moved the player object | re-derive `0x792468` and the +4/+6/+0x24 layout |
+| `POS` returns "not readable" | the client build moved the player object | re-derive the player global (2026-11-18: `0x007954B4`, chain `[[0x007954B4]]`) and the +4/+6/+0x24 layout |
 | `cast` sent, but no `su` | character sitting, target out of range, or the `u_s` field order is wrong | stand, move into range, and use `--packet "u_s …"` with a layout captured from the live client |
 | `rest` toggles twice | two identical packets were sent | send `rest 1 1 <charId>` once per state change |
 | Client looks stuck after many injected walks | injected walks can desync the client | use `MOVE`; if already desynced, relog/restart the client |
@@ -69,15 +69,17 @@
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `No NosTale client found` | game not running, different prefix, or executable name changed | check `--list`; confirm `WINEPREFIX` |
+| Picker offers **Connect** but the host gets connection refused | stale `C:\ntpl-<pid>.port` from an earlier session with the same Wine PID | the current host ignores ports with no LISTEN socket; on an older build, delete `<prefix>/drive_c/ntpl-*.port` and pick the client again |
+| Injection fails with “a packet logger is already loaded” | a `PacketLogger*.dll` is already mapped (a second injection would hook the same functions twice and crash the client) | restart the game client; the module cannot be unloaded, and `QUIT` only removes its hooks |
 | `LoadLibraryA returned NULL` | wrong DLL path, 32/64-bit mismatch, missing dependency | pass an absolute DLL path; confirm `file` says PE32 i386; check the client's loader error |
 | `OpenProcess: Access is denied` | injector not elevated (Windows) or wrong prefix (Wine) | run as administrator on Windows; use the game's prefix under Wine |
-| Injected but no TCP server | bind failed (port in use) or the DLL exited early | read `<prefix>/drive_c/NosTalePacketLog.txt`; change `NTPL_PORT` |
+| Injected but no TCP server | bind failed (port in use) or the DLL exited early | read `<prefix>/drive_c/NosTalePacketLog-<pid>.txt` (the client's Windows PID); change `NTPL_PORT` |
 
 ## Logs
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| No `C:\NosTalePacketLog.txt` | `C:\` not writable | the DLL falls back to `%LOCALAPPDATA%\NosTalePacketLogger\dll.log`, then `%TEMP%`; set `NTPL_LOG` explicitly |
+| No `C:\NosTalePacketLog-<pid>.txt` | `C:\` not writable | the DLL falls back to `%LOCALAPPDATA%\NosTalePacketLogger\dll.log`, then `%TEMP%`; set `NTPL_LOG` explicitly |
 | Log is empty | `NTPL_QUIET=1`, or hooks never installed | unset `NTPL_QUIET`; check `ntpl status` |
 | Log has packets but the host does not | host filter, or the host attached later | clear the filter; the host only sees packets after it connects (the file log has everything) |
 

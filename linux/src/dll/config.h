@@ -15,10 +15,12 @@ constexpr const char* kVersion = "0.2.3";
 // connects with a retry loop, so nothing has to be started in a fixed order.
 constexpr std::uint16_t kDefaultPort = 47821;
 
-// Same path the Windows build uses, so the "tail -f" workflow keeps working:
-//   Windows          C:\NosTalePacketLog.txt
-//   Wine on Linux    <prefix>/drive_c/NosTalePacketLog.txt
-constexpr const char* kDefaultLogPath = "C:\\NosTalePacketLog.txt";
+// One log per game process, so several clients in one prefix do not truncate
+// and interleave each other's session:
+//   Windows          C:\NosTalePacketLog-<pid>.txt
+//   Wine on Linux    <prefix>/drive_c/NosTalePacketLog-<pid>.txt
+// NTPL_LOG still overrides it for a single-client run.
+constexpr const char* kDefaultLogPrefix = "C:\\NosTalePacketLog-";
 
 std::uint16_t config_port();
 std::string   config_log_path();

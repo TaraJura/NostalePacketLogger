@@ -63,6 +63,7 @@ from .mapdata import (
 )
 from .monsternames import load_monster_names, load_skill_descriptions
 from .spawnlog import (
+    client_log_path,
     load_gates,
     load_last_position,
     load_portals as load_log_portals,
@@ -287,7 +288,10 @@ class Application(Gtk.Application):
         self.spells_loaded = False
         self.spells_loading = False
         self.monster_names_loaded = False
-        self.log_file = log_file or os.environ.get("NTPL_LOG")
+        # An explicit --log / NTPL_LOG wins; otherwise the per-client log is
+        # chosen when a client is attached (each DLL writes its own file).
+        self.log_file_override = log_file or os.environ.get("NTPL_LOG")
+        self.log_file = self.log_file_override
         self.log_vnums: dict[int, int] = {}
         self.log_names: dict[int, str] = {}
         self.log_skill_list: list[int] = []
@@ -825,7 +829,9 @@ class Application(Gtk.Application):
         self._bind_toggle_color(self.draw_path_toggle)
         path_box.append(self.draw_path_toggle)
         self.block_portal_toggle = Gtk.ToggleButton(label="Block portals")
-        self.block_portal_toggle.set_active(True)
+        # Off by default: the character must be able to use portals normally
+        # unless the user opts in for farming.
+        self.block_portal_toggle.set_active(False)
         self.block_portal_toggle.set_tooltip_text(
             "Keep the character off map portals while farming: A* paths "
             "route around warp tiles, a map click on one is refused, and "
@@ -3295,7 +3301,7 @@ class Application(Gtk.Application):
         if own is not None:
             distance = max(abs(drop.x - own[0]), abs(drop.y - own[1]))
             lines.append(f"distance {distance}")
-        if drop.owner_id:
+        if drop.owner_id > 0:
             owner = "you" if drop.owner_id == self._char_id() else str(drop.owner_id)
             lines.append(f"owner {owner}")
         else:
@@ -3934,6 +3940,14 @@ class Application(Gtk.Application):
         self.char_id = None
         self.last_move = None
         self.status_received = False
+        # Backfill from this client's own log, named by its Windows PID. The
+        # startup load may have read another client's file when several run.
+        if self.log_file_override is None:
+            self.log_file = str(
+                client_log_path(client.context.prefix, client.winpid)
+            )
+        self.spawns_loaded = False
+        self._ensure_spawns_loaded()
         self.client_label = f"{client.title} · PID {client.winpid}"
         if self.window is not None:
             self.window.set_title(
@@ -4717,7 +4731,11 @@ class Application(Gtk.Application):
         best: GroundItem | None = None
         best_distance = radius + 1
         for drop in self.engine.world.drops.values():
-            if drop.owner_id not in (0, char_id):
+            # Unowned drops are free to take. The 2026-11-18 server marks
+            # them -1 (`drop 1303 513032 39 26 1 1 -1`; a `get` by char 7125
+            # was accepted), older captures used 0. Other players' protected
+            # drops stay out of reach.
+            if drop.owner_id not in (-1, 0, char_id):
                 continue
             if self.pickup_attempts.get(drop.drop_id, 0) >= 3:
                 continue

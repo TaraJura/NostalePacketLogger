@@ -20,8 +20,11 @@ extern "C" void ntpl_client_move(void* player, std::uint32_t packed,
 
 namespace {
 
-constexpr std::uintptr_t kPlayerGlobal = 0x00792468;
-constexpr std::uintptr_t kMoveFunction = 0x00565E88;
+// Client build 2026-11-18 (the FrosTale-patched client). The previous build's
+// values were 0x00792468 / 0x00565E88; the prologue signature below still
+// matches, so MOVE can be re-found after a patch by scanning it.
+constexpr std::uintptr_t kPlayerGlobal = 0x007954B4;
+constexpr std::uintptr_t kMoveFunction = 0x00576920;
 
 // 55 8B EC 83 C4 EC 53 56 57 66 89 4D FA ...  (MoveTo prologue)
 const unsigned char kMoveSignature[] = {

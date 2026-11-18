@@ -66,7 +66,7 @@ See [ipc.md](ipc.md) for the transport and message grammar.
 | `x`, `y` | own position from `walk`/`at`; `position` property |
 | `facing` | last movement direction `(dx, dy)`, each -1/0/1; drives the GUI arrow; `None` until the first walk |
 | `entities` | `dict[int, Entity]` keyed by **entityId** (never vnum) |
-| `drops` | `dict[int, GroundItem]` keyed by drop id: item vnum, x, y, amount, owner char id |
+| `drops` | `dict[int, GroundItem]` keyed by drop id: item vnum, x, y, amount, owner char id (0 or -1 = unowned; the 2026-11-18 server uses -1) |
 | `gates` | `(mapId, x, y) → destination mapId` from the server's `gp` portal list, sent on map entry; authoritative and complete per visited map |
 | `timespaces` | `(mapId, x, y) → TimeSpace(ts_id, min_level, max_level)` from the server's `wp` list, sent with `gp` on entry |
 | `portals` | `(mapId, x, y) → destination mapId` learned from real crossings (departure cell + the following `at` arrival); fallback when `gp` was missed |

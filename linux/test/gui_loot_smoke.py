@@ -1,8 +1,10 @@
 """Headless loot-approach smoke test.
 
-A drop owned by the player lies 5 cells away. The bot must walk to it (the
-server rejects `get` from far away), pick it up, and then resume the drawn
-path. Run through scripts/dev-test-bot.sh (Xvfb).
+An unowned drop (owner -1, as the live 2026-11-18 server sends it) lies 5
+cells away, and another player's protected drop sits next to the character.
+The bot must ignore the protected one, walk to the free one (the server
+rejects `get` from far away), pick it up, and then resume the drawn path.
+Run through scripts/dev-test-bot.sh (Xvfb).
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ class LootServer:
         self.received: list[str] = []
         self.x, self.y = 25, 117
         self.got = False
+        self.foreign_get = False
         self.connection = None
         self.stop = threading.Event()
         threading.Thread(target=self._run, daemon=True).start()
@@ -42,7 +45,11 @@ class LootServer:
             b"STATUS|ready\n"
             b"RECV|at 14881134 20 25 117 0 0 0 0 0 0 0\n"
             b"RECV|stat 100 100 100 100 0 0\n"
-            b"RECV|drop 1046 999 30 117 1 0 14881134\n"
+            # Free drop (live marker -1) 5 cells away.
+            b"RECV|drop 1046 999 30 117 1 0 -1\n"
+            # Another player's protected drop at the character's feet; it
+            # must never be taken.
+            b"RECV|drop 1046 998 25 118 1 0 333333\n"
         )
         buffer = b""
         while not self.stop.is_set():
@@ -82,6 +89,8 @@ class LootServer:
                     # SEND|get 1 <charId> <dropId>
                     parts = text.split()
                     if len(parts) >= 4:
+                        if parts[3] == "998":
+                            self.foreign_get = True
                         try:
                             self.connection.sendall(
                                 f"RECV|get 1 14881134 {parts[3]} 0\n".encode()
@@ -141,17 +150,22 @@ def main() -> int:
                 and any(index > gets[0] for index in moves)
             )
             drop_gone = 999 not in app.engine.world.drops
+            foreign_kept = 998 in app.engine.world.drops
             result["ok"] = (
                 server.got
+                and not server.foreign_get
                 and move_before
                 and move_after
                 and drop_gone
+                and foreign_kept
             )
             result["detail"] = (
-                f"got={server.got} moves={[(lines[i]) for i in moves]} "
+                f"got={server.got} foreign_get={server.foreign_get} "
+                f"moves={[(lines[i]) for i in moves]} "
                 f"gets={[lines[i] for i in gets]} "
                 f"move_before={move_before} move_after={move_after} "
-                f"drop_gone={drop_gone} status={app.status.get_text()!r}"
+                f"drop_gone={drop_gone} foreign_kept={foreign_kept} "
+                f"status={app.status.get_text()!r}"
             )
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"check exception: {exc!r}"

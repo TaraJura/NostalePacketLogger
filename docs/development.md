@@ -105,7 +105,8 @@ and Start the loop with auto-attack enabled. The bot stands first if needed,
 then walks one cell at a time through the client's own MoveTo (`MOVE|x y`).
 See [map.md](map.md).
 
-The file log is `<prefix>/drive_c/NosTalePacketLog.txt`. Confirm each action
+The file log is per client, `<prefix>/drive_c/NosTalePacketLog-<pid>.txt`
+(the Windows PID the injector reports). Confirm each action
 from the server (`tp`/`mv`, `su`, `rest`); the client does not reliably echo its
 own actions. A `QUIT` removes the hooks but leaves the module and trampoline
 mapped until the game exits, so re-injection after `QUIT` needs a new DLL

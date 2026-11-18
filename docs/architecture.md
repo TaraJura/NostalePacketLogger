@@ -30,7 +30,7 @@ more fragile than a DLL inside the process.
 |    send path   --[6-byte prologue]--> ntpl_hook_send -+                       |                         |
 |                                                       |--> PacketQueue<send> --+                         |
 |                                                                               |                         |
-|    worker thread:  drain queues --> file log  C:\NosTalePacketLog.txt         |                         |
+|    worker thread:  drain queues --> file log  C:\NosTalePacketLog-<pid>.txt   |                         |
 |                    drain queues --> TCP server 127.0.0.1:47821  <-------------+                         |
 +----------------------------------------------|----------------------------------------------------------+
                                                |
@@ -75,7 +75,7 @@ The trade-off is that the DLL must listen on a local port. It binds
 | Transport | two named pipes | one TCP connection |
 | GUI | C# WinForms (.NET 8, x86) | Python + GTK4 |
 | Automation | GUI + command file `NosTalePacketCmd.txt` | CLI + Python library + engine seed |
-| File log | `C:\NosTalePacketLog.txt` | same (falls back to `%LOCALAPPDATA%`) |
+| File log | `C:\NosTalePacketLog.txt` | one per client, `C:\NosTalePacketLog-<pid>.txt` (falls back to `%LOCALAPPDATA%`) |
 | Console | `AllocConsole()` window inside the game (closing it kills the game) | no console; file log + TCP status |
 | Injector | C++ console, interactive or `--pid` | C++ console, `--all` by process name |
 | Status | GUI status line | `ntpl status`, `STATUS|` lines |

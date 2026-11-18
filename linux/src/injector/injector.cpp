@@ -3,8 +3,46 @@
 #include <tlhelp32.h>
 
 #include <cstdio>
+#include <cwctype>
+#include <string>
+
+#include "processes.h"
 
 namespace {
+
+// A logger module stays mapped after QUIT (Windows cannot unload our DLL), and
+// two DLLs hooking the same send function corrupt each other. Refuse to inject
+// into a process that already has one; the game has to be restarted instead.
+std::wstring find_logger_module(DWORD pid) {
+    HANDLE snapshot =
+        CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+    if (snapshot == INVALID_HANDLE_VALUE) {
+        return std::wstring();
+    }
+
+    MODULEENTRY32W entry = {};
+    entry.dwSize = sizeof(entry);
+    std::wstring found;
+    if (Module32FirstW(snapshot, &entry)) {
+        do {
+            std::wstring name(entry.szModule);
+            if (name.size() < 12) {
+                continue;
+            }
+            std::wstring prefix = name.substr(0, 12);
+            for (wchar_t& c : prefix) {
+                c = static_cast<wchar_t>(std::towlower(c));
+            }
+            if (prefix == L"packetlogger") {
+                found = name;
+                break;
+            }
+        } while (Module32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return found;
+}
+
 
 std::string last_error_text(DWORD code) {
     char buffer[512] = {0};
@@ -28,6 +66,14 @@ std::string last_error_text(DWORD code) {
 bool InjectDll(DWORD pid, const std::string& dll_path, std::string& error) {
     if (pid == 0 || dll_path.empty()) {
         error = "invalid pid or DLL path";
+        return false;
+    }
+
+    const std::wstring loaded = find_logger_module(pid);
+    if (!loaded.empty()) {
+        error = "a packet logger is already loaded in this process (" +
+                narrow(loaded) +
+                "); restart the game client before injecting again";
         return false;
     }
 

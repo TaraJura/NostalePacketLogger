@@ -76,21 +76,21 @@ class BotConfigTests(unittest.TestCase):
         self.assertEqual(rule.cooldown, 0.0)
         self.assertEqual(rule.target, "monster")
 
-    def test_block_portals_defaults_on_and_round_trips(self):
-        self.assertTrue(BotConfig().block_portals)
-        self.assertTrue(
-            BotConfig.from_dict({}).block_portals,
-            "old configs must not lose portal protection",
-        )
+    def test_block_portals_defaults_off_and_round_trips(self):
+        self.assertFalse(BotConfig().block_portals)
         self.assertFalse(
-            BotConfig.from_dict({"block_portals": False}).block_portals
+            BotConfig.from_dict({}).block_portals,
+            "portals must stay usable unless the user opts in",
+        )
+        self.assertTrue(
+            BotConfig.from_dict({"block_portals": True}).block_portals
         )
         self.assertTrue(
             BotConfig.from_dict({"block_portals": "yes"}).block_portals
         )
-        config = BotConfig(block_portals=False)
+        config = BotConfig(block_portals=True)
         loaded = BotConfig.from_dict(config.to_dict())
-        self.assertFalse(loaded.block_portals)
+        self.assertTrue(loaded.block_portals)
 
     def test_revive_on_death_defaults_off_and_round_trips(self):
         self.assertFalse(BotConfig().revive_on_death)

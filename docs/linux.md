@@ -130,6 +130,12 @@ windows through `Injector.exe --list`, pairs them with those port files and
 lets the user pick one at startup; a client whose logger is not running yet is
 injected from the same dialog. The **Client…** header button reopens the
 picker. A single client that is already injected is attached without a dialog.
+A port file is ignored when nothing is listening on that port (a killed client
+leaves the file behind, and Wine can reuse its Windows PID), so such a client
+is offered **Inject & connect** again. The injector also refuses to inject a
+second `PacketLogger*.dll` into a process that already has one — two DLLs
+hooking the same recv/send functions crashed a live client on 2026-11-18 — and
+asks for a game restart instead.
 
 The GUI is **non-unique**: start `linux/scripts/gui.sh` once per game
 client. Each window takes an attach lock for its game window
@@ -226,10 +232,13 @@ pip; on Ubuntu use the apt package.
 
 ## Logs
 
-The DLL writes `C:\NosTalePacketLog.txt`:
+Each injected DLL writes its own session log, `C:\NosTalePacketLog-<pid>.txt`
+(one per game process, so several clients in one prefix do not truncate and
+interleave each other's session). The GUI and the MCP server read the attached
+client's file; without a client they use the newest per-client log:
 
 ```bash
-tail -f "$WINEPREFIX/drive_c/NosTalePacketLog.txt"
+tail -f "$WINEPREFIX"/drive_c/NosTalePacketLog-*.txt
 ```
 
 Format:
@@ -249,7 +258,7 @@ If `C:\` is not writable, the DLL falls back to
 | Variable | Read by | Default |
 |---|---|---|
 | `NTPL_PORT` | DLL and host | `47821` |
-| `NTPL_LOG` | DLL and GUI (spawn-log backfill) | `C:\NosTalePacketLog.txt` |
+| `NTPL_LOG` | DLL and GUI (spawn-log backfill) | `C:\NosTalePacketLog-<pid>.txt`, one per client; an explicit value overrides it |
 | `NTPL_QUIET` | DLL | unset; `1` disables the file log |
 | `NTPL_NSTC` | host | `~/Desktop/nostake/Nostale/NostaleData/NStcData.NOS` |
 | `NTPL_NSLANG` | host | `NSlangData_UK.NOS` next to `NStcData.NOS` (then any `NSlangData_*.NOS`) |
@@ -309,13 +318,16 @@ there); the injector targeted only `NostaleClientX.exe`, never `gfclient.exe`.
 The recommended setup is still a dedicated prefix.
 
 - Injected into the live client (PID 1216, Wine 11): both hooks `ACTIVE`,
-  `recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`, `drops recv=0`.
+  `recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`, `drops recv=0` (2026-11-06
+  build; the 2026-11-18 build resolves to `recv=0x004DBEC9
+  send=0x007369B4 tnt=0x0078265C`).
 - The character was sitting. `rest 1 1 14881134` toggled it; the server
   answered `rest 1 14881134 0` (standing).
 - The early injected walks only moved the server: the client did not animate
   them and snapped when a `tp` correction arrived. Raw injected walks need the
   checksum `1 if (x + y) % 3 == 1 else 0`, but that still does not animate.
-- The DLL now calls the client's own MoveTo (`0x565E88`) for `MOVE|x y`; the
+- The DLL now calls the client's own MoveTo (`0x00576920` in the 2026-11-18
+  build; `0x565E88` before) for `MOVE|x y`; the
   client pathfinds, animates and sends its own `walk`. `POS` reads the local
   position, char id and sit flag. The live GUI bot walked `(26,133)→(23,130)` as six client
   `[SEND] walk` packets, with no injected walks, probes or teleports.

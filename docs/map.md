@@ -142,10 +142,15 @@ session (it is truncated when the DLL is injected), so `spawnlog.py` scans its
 names. Later log entries override earlier ones, which handles a reused entity
 id.
 
-`spawnlog.py` looks for `C:\NosTalePacketLog.txt` inside `$WINEPREFIX`, then
-the dedicated prefix and the Gameforge prefix on this machine. Override it
-with `NTPL_LOG=<path>` or `ntpl gui --log <path>`. Missing logs are harmless:
-the GUI simply keeps the activity from the live packet stream.
+`spawnlog.py` reads the attached client's own log,
+`C:\NosTalePacketLog-<pid>.txt` (one file per injected DLL, named by the
+Windows PID), so several clients in one prefix backfill only their own
+session. Without an attached client it uses the newest per-client log; the
+legacy single `C:\NosTalePacketLog.txt` is still accepted as a fallback.
+Prefixes are checked in this order: `$WINEPREFIX`, the dedicated
+`~/.wine-nostale`, then the Gameforge prefix on this machine. Override with
+`NTPL_LOG=<path>` or `ntpl gui --log <path>`. Missing logs are harmless: the
+GUI simply keeps the activity from the live packet stream.
 
 ## CLI
 
@@ -157,7 +162,7 @@ linux/scripts/host.sh map info 20 --at 25,117
 linux/scripts/host.sh map render 20 /tmp/map20.png --scale 3
 
 # rank maps against a live packet log (mv positions)
-linux/scripts/host.sh map best --log "$WINEPREFIX/drive_c/NosTalePacketLog.txt"
+linux/scripts/host.sh map best --log "$WINEPREFIX/drive_c/NosTalePacketLog-<pid>.txt"
 ```
 
 ## UI map tab
@@ -179,7 +184,7 @@ grouped by function:
   from the DLL log's last `at`. On entry the server sends the map's whole
   portal list as `gp <x> <y> <toMap> …`; those are drawn as rings with a
   "Portal → map N" tooltip and persisted in `~/.config/ntpl/portals.json`.
-  **Block portals** (Path section, on by default) treats those cells as
+  **Block portals** (Path section, off by default; enable it when farming) treats those cells as
   obstacles — A* routes around them, a click on one is refused and every
   `MOVE` is checked against them — and the DLL drops the client's own `preq`
   portal request, so a farming loop cannot change maps even from a tile it is
@@ -359,10 +364,12 @@ never sees the `at` packet.
 - Leg size and pacing are constants in `gui.py` (three cells; `walk_confirm_
   delay = 0.45 s/cell`). A very long `MOVE` makes the client jump to the
   destination rather than animate, so keep legs short.
-- `MOVE` calls a client-build-specific function (`0x565E88`). The DLL validates
-  its prologue and reports `MOVE: client build mismatch` after a client patch
-  instead of crashing. `POS` reads the client's local player object
-  (`[[0x792468]]`): int16 x at +4, y at +6, char id at +0x24.
+- `MOVE` calls a client-build-specific function (`0x00576920` in the
+  2026-11-18 build; re-derive it from its prologue signature after a patch).
+  The DLL validates its prologue and reports `MOVE: client build mismatch`
+  after a client patch instead of crashing. `POS` reads the client's local
+  player object (`[[0x007954B4]]` in the 2026-11-18 build): int16 x at +4,
+  y at +6, char id at +0x24.
 - Packet-only walking is still possible (`SEND|walk` with
   `walk_checksum(x, y)`), and the checksum is `1 if (x + y) % 3 == 1`; but the
   client does not animate such a walk, and the server's correction teleports
@@ -371,7 +378,8 @@ never sees the `at` packet.
   turning character. The live protocol exposes no own-facing field; `in` spawn
   directions are constant per character. If the game turns in place, the arrow
   does not change until the next move.
-- Pickup only considers drops owned by your char id or unowned (`owner_id` 0);
+- Pickup only considers drops owned by your char id or unowned (`owner_id` 0,
+  or -1 as the live 2026-11-18 server sends; both `get` calls were accepted);
   another player's drops are skipped. The bot walks to drops up to 20 cells
   away, picks them up when adjacent, and then resumes its path.
 - The verified `u_s` prefix is `<skill> <targetType> <targetId>`; later

@@ -22,7 +22,7 @@ Schema (version 1)::
       "low_mp_pct": 70,
       "revive_on_death": false,     # accept dlgi #revival (10 Seeds of Power)
       "loop": true,
-      "block_portals": true,
+      "block_portals": false,    # off: portals stay usable by default
       "draw_path": false,
       "map_id": 20,                 # map the route belongs to
       "waypoints": [[25, 118], [30, 120]],
@@ -125,7 +125,7 @@ class BotConfig:
     low_mp_pct: float = 70.0
     revive_on_death: bool = False
     loop: bool = True
-    block_portals: bool = True
+    block_portals: bool = False
     draw_path: bool = False
     map_id: int | None = None
     waypoints: list[tuple[int, int]] = field(default_factory=list)
@@ -223,7 +223,7 @@ class BotConfig:
             low_mp_pct=_as_float(data.get("low_mp_pct"), 70.0, 5.0, 90.0),
             revive_on_death=_as_bool(data.get("revive_on_death"), False),
             loop=_as_bool(data.get("loop"), True),
-            block_portals=_as_bool(data.get("block_portals"), True),
+            block_portals=_as_bool(data.get("block_portals"), False),
             draw_path=_as_bool(data.get("draw_path"), False),
             map_id=map_id,
             waypoints=waypoints,
