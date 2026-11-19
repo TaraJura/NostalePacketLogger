@@ -63,7 +63,7 @@ the host differ, the game's packets do not.
   range, cast time, cooldown); the whole configuration can be saved/loaded as
   JSON. The fourth **NosBazar** tab monitors the player auction house and can
   relist with a floor, ported from Nostale-NB. `make gui-test` and `make
-  bot-test` pass (35 bot smokes, including the spell rotation, HP/MP recovery,
+  bot-test` pass (36 bot smokes, including the spell rotation, HP/MP recovery,
   finish-kill-before-recovery, loot approach, the NosBazar monitor and relist,
   and cross-client Follow packet mirroring). See
   [map.md](map.md),

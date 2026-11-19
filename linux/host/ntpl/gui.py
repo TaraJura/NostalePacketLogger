@@ -204,6 +204,10 @@ MIRROR_BUS_GRACE_S = 1.5
 MIRROR_DEDUPE_S = 1.0
 #: Pending mirrored casts kept at once (a splash rotation can burst).
 MIRROR_CAST_QUEUE_MAX = 32
+#: Minimum gap between mirrored casts. The leader's own cooldowns pace the
+#: real rotation; this only keeps one bot tick from firing several queued
+#: spells back to back.
+MIRROR_CAST_MIN_INTERVAL_S = 0.25
 #: A waypoint counts as reached within this Chebyshev distance; standing on
 #: the route's last waypoint also means "the next leg is the first one".
 ROUTE_ARRIVE_CELLS = 1
@@ -435,6 +439,12 @@ class Application(Gtk.Application):
         self.mirror_bus_seen_at = 0.0
         self.mirror_poll_at = 0.0
         self.mirror_warn_at = 0.0
+        # Slot -> vnum learned from the followed client's published spells.
+        # The follower's own `ski` list is often missing (the GUI attached
+        # after login); with the same SP card the leader's slot is valid.
+        self.mirror_slot_vnums: dict[int, int] = {}
+        self.mirror_slot_owner: int | None = None
+        self.mirror_slot_warn_at = 0.0
         # Throttle for the "player not in sight" status: the follow tick runs
         # many times per second and used to write the same line every tick,
         # flooding the Bot log and its file.
@@ -6799,6 +6809,9 @@ class Application(Gtk.Application):
         self.mirror_casts.clear()
         self.mirror_recent_casts.clear()
         self.mirror_bus_seen_at = 0.0
+        self.mirror_slot_vnums.clear()
+        self.mirror_slot_owner = None
+        self.mirror_slot_warn_at = 0.0
 
     def _mirror_poll(self, follow_name: str, now: float) -> None:
         """Refresh the followed id and read recent actions from the bus.
@@ -6824,6 +6837,13 @@ class Application(Gtk.Application):
                 else None
             )
         )
+        if (
+            player is not None
+            and self.mirror_slot_owner != player.entity_id
+        ):
+            # A new followed character has its own skill slots.
+            self.mirror_slot_owner = player.entity_id
+            self.mirror_slot_vnums.clear()
         try:
             events = self.mirror_reader.poll()
         except OSError:
@@ -6846,6 +6866,11 @@ class Application(Gtk.Application):
                 self.mirror_move = (event.x, event.y)
                 self.mirror_move_at = now
             elif event.kind == KIND_SPELL:
+                if event.skill > 0 and event.slot >= 0:
+                    # The followed client resolved this slot; with the same
+                    # SP card the follower can use the same slot even when
+                    # its own `ski` list was never captured.
+                    self.mirror_slot_vnums[event.slot] = event.skill
                 self._mirror_queue_cast(
                     event.skill,
                     event.slot,
@@ -6933,21 +6958,40 @@ class Application(Gtk.Application):
         world = self.engine.world
         vnum = skill
         if vnum <= 0 and slot >= 0:
-            vnum = world.skill_vnum(slot) or 0
-        if vnum <= 0:
-            self._mirror_warn(
-                now, "mirror: a followed spell has no known vnum"
+            vnum = (
+                world.skill_vnum(slot)
+                or self.mirror_slot_vnums.get(slot)
+                or 0
             )
-            return None
-        own_slot = self._skill_slot(vnum)
+        own_slot = self._skill_slot(vnum) if vnum > 0 else None
+        if (
+            own_slot is None
+            and 0 <= slot < 32
+            and not self._known_skills()
+        ):
+            # The follower attached after login and never saw `ski`. With the
+            # same SP card the followed client's `u_s` slot is valid here too.
+            own_slot = slot
+            if now >= self.mirror_slot_warn_at:
+                self.mirror_slot_warn_at = now + 30.0
+                self._log_line(
+                    "mirror: own skill list unknown; using the followed "
+                    f"client's u_s slot {slot}"
+                    + (f" for spell {vnum}" if vnum > 0 else "")
+                )
         if own_slot is None:
-            self._mirror_warn(
-                now,
-                f"mirror: spell {vnum} has no u_s slot here (not learned, "
-                "or use it once with the logger attached)",
-            )
+            if vnum <= 0:
+                self._mirror_warn(
+                    now, "mirror: a followed spell has no known vnum/slot"
+                )
+            else:
+                self._mirror_warn(
+                    now,
+                    f"mirror: spell {vnum} has no u_s slot here (not "
+                    "learned, or use it once with the logger attached)",
+                )
             return None
-        info = self.spells.get(vnum)
+        info = self.spells.get(vnum) if vnum > 0 else None
         stats = world.stats
         if (
             info is not None
@@ -6990,14 +7034,16 @@ class Application(Gtk.Application):
             target_id if monster is not None else None, now
         )
         cast_time = info.cast_time if info is not None else 0.0
-        cooldown = (
-            max(info.cooldown, cast_time) if info is not None else 1.0
-        )
-        self.attack_cooldown_until = now + cooldown
+        # Mirror the leader's cadence, not the spell's full cooldown: the
+        # server enforces each skill's cooldown, and the leader already
+        # respected it. A full cooldown here would block the *next* mirrored
+        # spell (a different skill has its own cooldown).
+        self.attack_cooldown_until = now + MIRROR_CAST_MIN_INTERVAL_S
         self.walk_not_before = now + max(self.attack_walk_delay, cast_time)
         target_text = "self" if monster is None else str(target_id)
+        spell_text = str(vnum) if vnum > 0 else f"slot {own_slot}"
         self._set_status(
-            f"mirror spell {vnum} → {target_text}: {packet}"
+            f"mirror spell {spell_text} → {target_text}: {packet}"
         )
         return True
 

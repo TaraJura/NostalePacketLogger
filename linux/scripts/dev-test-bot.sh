@@ -55,6 +55,7 @@ run gui_follow_smoke.py
 run gui_follow_attack_smoke.py
 run gui_follow_loot_smoke.py
 run gui_follow_mirror_smoke.py
+run gui_follow_mirror_slot_smoke.py
 run gui_follow_nameless_smoke.py
 run gui_portal_block_smoke.py
 run gui_retaliate_smoke.py

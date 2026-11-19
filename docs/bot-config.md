@@ -315,7 +315,12 @@ and replays them with its own char id. A self/ally cast whose target is the
 followed player (or the follower) is retargeted to the follower's own id, so
 a buff is applied to the right character; a third-party target is skipped.
 Only skills the follower has learned are cast, and a mirrored monster spell
-still requires range and a clear line. When no publisher is present, the
+still requires range and a clear line. If the follower attached after login
+and never saw its own `ski` skill list, it uses the followed client's own
+`u_s` slot instead (same SP card assumption); this also covers a leader event
+where only the slot is known (`skill = 0`). Mirrored casts are paced by the
+leader's own rotation, not by the spell's full cooldown, so different skills
+are not blocked behind each other. When no publisher is present, the
 server's `mv`/`su` broadcasts drive the same behavior (the two copies are
 deduplicated). Movement mirrors the followed client's commanded destination,
 chopped into the usual ≤3-cell client-MoveTo legs. Saved as `follow_mirror`.
