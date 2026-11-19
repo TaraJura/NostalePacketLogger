@@ -36,6 +36,13 @@ _MV_MARKER = "[RECV] mv "
 _TP_MARKER = "[RECV] tp "
 _GP_MARKER = "[RECV] gp "
 _WP_MARKER = "[RECV] wp "
+_NPCREQ_MARKER = "[SEND] npc_req "
+_NRUN_MARKER = "[SEND] n_run "
+_CBLIST_MARKER = "[SEND] c_blist "
+_CSLIST_MARKER = "[SEND] c_slist "
+_INV_MARKER = "[RECV] inv "
+_IVN_MARKER = "[RECV] ivn "
+_GOLD_MARKER = "[RECV] gold "
 _ENTITY = re.compile(r"^([23]) (\d+) (\d+) ")
 _PLAYER = re.compile(r"^1 (.+) - (\d+) ")
 
@@ -534,3 +541,137 @@ def load_skill_slots(
                 pending = None
 
     return slots, self_id
+
+
+def load_bazaar_open(
+    path: str | Path | None = None,
+) -> tuple[int | None, int | None, int | None]:
+    """Return ``(npcId, option, page)`` from the client's last bazaar opening.
+
+    The user opens the bazaar by hand once; the client's own
+    ``npc_req 2 <npcId>`` + ``n_run <option> <page> 2 <npcId>`` followed by
+    ``c_blist``/``c_slist`` is the exact sequence the bot replays later. The
+    entity id is per map/session, so a GUI that attaches afterwards must learn
+    it from this client's log instead of Nostale-NB's hardcoded 10188.
+    """
+    source = Path(path) if path is not None else default_log_path()
+    npc_id: int | None = None
+    option: int | None = None
+    page: int | None = None
+    if source is None:
+        return npc_id, option, page
+    try:
+        log = _open_log_tail(source)
+    except OSError:
+        return npc_id, option, page
+
+    request: int | None = None
+    run: tuple[int, int] | None = None
+    with log:
+        for line in log:
+            values = _ints_after(line, _NPCREQ_MARKER, 2)
+            if values:
+                if values[0] == 2:
+                    request = values[1]
+                    run = None
+                continue
+            values = _ints_after(line, _NRUN_MARKER, 4)
+            if values:
+                if request is not None and values[3] == request:
+                    run = (values[0], values[1])
+                continue
+            opened = False
+            if _CBLIST_MARKER in line:
+                start = line.find(_CBLIST_MARKER) + len(_CBLIST_MARKER)
+                tokens = line[start:].split()
+                # The no-filter initial listing has count 0 at index 8
+                # (eight filter slots, then the vnum count).  A search has a
+                # positive count and must not be mistaken for an opening.
+                opened = len(tokens) >= 9 and tokens[8] == "0"
+            elif _CSLIST_MARKER in line:
+                opened = True
+            if opened and request is not None and run is not None:
+                npc_id, (option, page) = request, run
+    return npc_id, option, page
+
+
+def load_inventory(
+    path: str | Path | None = None,
+) -> tuple[dict[int, dict[int, tuple[int, int]]], int | None]:
+    """Replay the log's ``inv``/``ivn``/``gold`` lines.
+
+    A host that attaches after login misses the login inventory dump.  The
+    DLL's log still has it, so a relist can find item slots without another
+    relog.  Returns ``({bag: {slot: (vnum, quantity)}}, gold)``; a bag that
+    was never sent is absent rather than empty.
+    """
+    source = Path(path) if path is not None else default_log_path()
+    bags: dict[int, dict[int, tuple[int, int]]] = {}
+    gold: int | None = None
+    if source is None:
+        return bags, gold
+    try:
+        log = _open_log_tail(source)
+    except OSError:
+        return bags, gold
+
+    with log:
+        for line in log:
+            if _INV_MARKER in line:
+                start = line.find(_INV_MARKER) + len(_INV_MARKER)
+                tokens = line[start:].split()
+                if not tokens:
+                    continue
+                try:
+                    bag = int(tokens[0])
+                except ValueError:
+                    continue
+                slots: dict[int, tuple[int, int]] = {}
+                for token in tokens[1:]:
+                    fields = token.split(".")
+                    if len(fields) < 3:
+                        continue
+                    try:
+                        index, vnum, quantity = (
+                            int(fields[0]),
+                            int(fields[1]),
+                            int(fields[2]),
+                        )
+                    except ValueError:
+                        continue
+                    if index >= 0 and vnum > 0 and quantity > 0:
+                        slots[index] = (vnum, quantity)
+                bags[bag] = slots
+                continue
+            if _IVN_MARKER in line:
+                start = line.find(_IVN_MARKER) + len(_IVN_MARKER)
+                tokens = line[start:].split()
+                if len(tokens) < 2:
+                    continue
+                try:
+                    bag = int(tokens[0])
+                except ValueError:
+                    continue
+                fields = tokens[1].split(".")
+                if len(fields) < 3:
+                    continue
+                try:
+                    index, vnum, quantity = (
+                        int(fields[0]),
+                        int(fields[1]),
+                        int(fields[2]),
+                    )
+                except ValueError:
+                    continue
+                slots = bags.setdefault(bag, {})
+                if index < 0:
+                    continue
+                if vnum > 0 and quantity > 0:
+                    slots[index] = (vnum, quantity)
+                else:
+                    slots.pop(index, None)
+                continue
+            values = _ints_after(line, _GOLD_MARKER, 1)
+            if values and values[0] >= 0:
+                gold = values[0]
+    return bags, gold

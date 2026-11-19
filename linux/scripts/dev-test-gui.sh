@@ -18,13 +18,17 @@ fi
 
 PORTALS="$(mktemp)"
 BOTLOG="$(mktemp)"
-trap 'rm -f "$PORTALS" "$BOTLOG"' EXIT
+BAZAR="$(mktemp)"
+MIRROR="$(mktemp -d)"
+trap 'rm -f "$PORTALS" "$BOTLOG" "$BAZAR"; rm -rf "$MIRROR"' EXIT
 
 run_smoke() {
     xvfb-run -a env GDK_BACKEND=x11 \
         PYTHONPATH="$ROOT/host" \
         NTPL_PORTALS="$PORTALS" \
         NTPL_BOT_LOG="$BOTLOG" \
+        NTPL_BAZAR_CONFIG="$BAZAR" \
+        NTPL_MIRROR_DIR="$MIRROR" \
         python3 "$ROOT/test/$1"
 }
 

@@ -15,7 +15,7 @@ the TCP transport; the legacy mapping is at the end.
 | Discovery | each DLL writes `C:\ntpl-<pid>.port` with the port it bound |
 | Framing | one UTF-8 line per message, `\n` terminated, `\r` tolerated |
 | Maximum line | 64 KiB (a longer line without a newline disconnects the host) |
-| Encoding | UTF-8; invalid bytes are replaced, not rejected |
+| Encoding | UTF-8 when valid; otherwise Windows-1252, then Latin-1 (the game's ANSI names/chat), never rejected |
 
 The host connects with a retry loop (the DLL may not have started listening
 yet). The DLL accepts one connection; when the host disconnects, the DLL goes

@@ -8,8 +8,27 @@ from ntpl.protocol import (
     Message,
     Packet,
     ProtocolError,
+    decode_line,
     default_port,
 )
+
+
+class LineDecodingTests(unittest.TestCase):
+    def test_valid_utf8_stays_utf8(self):
+        self.assertEqual(decode_line("Café".encode("utf-8")), "Café")
+
+    def test_windows_ansi_name_falls_back_to_cp1252(self):
+        # Live `rc_blist` seller names are not required to be valid UTF-8.
+        self.assertEqual(decode_line(b"S\xe9rox"), "Sérox")
+        self.assertEqual(decode_line(b"Chopper\x93"), "Chopper“")
+
+    def test_undefined_cp1252_byte_falls_back_to_latin1(self):
+        # 0x81 is undefined in cp1252 but valid latin-1.
+        self.assertEqual(decode_line(b"\x81"), "\x81")
+
+    def test_message_parse_uses_the_same_decoder(self):
+        message = Message.parse(b"RECV|say 1 2 Caf\xe9")
+        self.assertEqual(message.payload, "say 1 2 Café")
 
 
 class MessageParseTests(unittest.TestCase):

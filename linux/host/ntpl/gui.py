@@ -23,6 +23,16 @@ gi.require_version("Gdk", "4.0")
 
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango
 
+from .bazar import (
+    BazarController,
+    BazarError,
+    BazarItem,
+    build_search_packet,
+    default_config_path as default_bazar_config_path,
+    load_config as load_bazar_config,
+    normalize_search_packet,
+    save_config as save_bazar_config,
+)
 from .botconfig import (
     COMPARATORS,
     MONSTER_MODES,
@@ -45,7 +55,7 @@ from .clients import (
     release_client_lock,
     wait_for_port,
 )
-from .engine import Engine, Entity, GroundItem
+from .engine import Engine, Entity, GroundItem, InventorySlot
 from .mapdata import (
     DEFAULT_NSTC,
     MapDataError,
@@ -62,9 +72,17 @@ from .mapdata import (
     terrain_rgb,
 )
 from .monsternames import load_monster_names, load_skill_descriptions
+from .mirror import (
+    KIND_MOVE,
+    KIND_SPELL,
+    MirrorReader,
+    MirrorWriter,
+)
 from .spawnlog import (
     client_log_path,
+    load_bazaar_open,
     load_gates,
+    load_inventory as load_log_inventory,
     load_last_position,
     load_player_spawns,
     load_portals as load_log_portals,
@@ -171,6 +189,21 @@ FOLLOW_TARGET_TTL_S = 5.0
 #: While following, only drops this close to the followed player are taken,
 #: so the follower never wanders away from the player for loot.
 FOLLOW_LOOT_RADIUS = 10
+#: Mirror mode: a movement the followed player made is worth replaying while
+#: it is fresh; a stale cell would walk the bot backwards.
+MIRROR_MOVE_TTL_S = 4.0
+#: A mirrored spell is a reaction to the followed player's cast, not a queued
+#: rotation: older entries are dropped instead of cast late.
+MIRROR_CAST_TTL_S = 5.0
+#: The followed player's own host publishes its packets to the mirror bus.
+#: While those events arrive, the server's broadcast `mv`/`su` fallback is
+#: ignored to avoid doing the same action twice.
+MIRROR_BUS_GRACE_S = 1.5
+#: A publisher and the server broadcast describe the same cast; the second
+#: copy within this window is dropped.
+MIRROR_DEDUPE_S = 1.0
+#: Pending mirrored casts kept at once (a splash rotation can burst).
+MIRROR_CAST_QUEUE_MAX = 32
 #: A waypoint counts as reached within this Chebyshev distance; standing on
 #: the route's last waypoint also means "the next leg is the first one".
 ROUTE_ARRIVE_CELLS = 1
@@ -386,6 +419,22 @@ class Application(Gtk.Application):
         self.follow_player_toggle = None
         self.follow_player_entry = None
         self.follow_attack_check = None
+        self.follow_mirror_check = None
+        # -- cross-client packet mirroring (Follow frame) ------------------
+        # Every attached host publishes its own `walk`/`u_s` to the mirror
+        # bus; a follower replays the followed character's actions with its
+        # own char id substituted. The server's `mv`/`su` broadcasts are the
+        # fallback when the followed host does not publish.
+        self.mirror_writer: MirrorWriter | None = None
+        self.mirror_reader = MirrorReader()
+        self.mirror_player_id: int | None = None
+        self.mirror_move: tuple[int, int] | None = None
+        self.mirror_move_at = 0.0
+        self.mirror_casts: list[tuple[int, int, int, int, float]] = []
+        self.mirror_recent_casts: dict[tuple[int, int, int], float] = {}
+        self.mirror_bus_seen_at = 0.0
+        self.mirror_poll_at = 0.0
+        self.mirror_warn_at = 0.0
         # Throttle for the "player not in sight" status: the follow tick runs
         # many times per second and used to write the same line every tick,
         # flooding the Bot log and its file.
@@ -490,6 +539,43 @@ class Application(Gtk.Application):
         self._bot_log_file = None
         self.bot_log_path = BOT_LOG_PATH
 
+        # NosBazar tab: a pure controller lives here, the tab is only a view.
+        # The controller drives the packet flow from a dedicated 100 ms timer
+        # and reads bazaar/inventory state from the engine's world.
+        self.bazar = BazarController(self._bazar_send, self._bazar_log)
+        self.bazar_timer = None
+        self.bazar_page = None
+        self.bazar_config_path = default_bazar_config_path()
+        self.bazar_config_label = None
+        self.bazar_info = None
+        self.bazar_status = None
+        self.bazar_results_box = None
+        self.bazar_items_list = None
+        self.bazar_items_info = None
+        self.bazar_only_priced = None
+        self.bazar_results_info = None
+        self.bazar_form: dict[str, Gtk.Widget] = {}
+        self.bazar_selected_name: str | None = None
+        self.nosmall_window = None
+        self._nosmall_groups: list = []
+        self._nosmall_status = None
+        self._nosmall_list = None
+        self._nosmall_matches: list = []
+        self._nosmall_add_all_button = None
+        self._nosmall_search = None
+        # Two-step confirmation for the destructive cleanup button.
+        self._nosmall_prune_armed_at = 0.0
+        self._nosmall_prune_count = 0
+        self.bazar_live_relist = None
+        self.bazar_refresh_spin = None
+        self.bazar_npc_entry = None
+        self.bazar_character_entry = None
+        self._bazar_render_version = -1
+        self._bazar_character_autofilled = False
+        self._bazar_npc_autofilled = False
+        self._bazar_npc_autofill_value = ""
+        self._bazar_config_loaded = False
+
     # -- UI -------------------------------------------------------------
 
     def do_activate(self) -> None:
@@ -507,6 +593,10 @@ class Application(Gtk.Application):
         if self.select_client:
             self._begin_client_selection(auto_single=True)
         else:
+            # No per-client key without the picker; still honour an explicit
+            # NTPL_BAZAR_CONFIG / bazar.json so the tab can be prepared before
+            # attaching.
+            self._bazar_load_default_config()
             self._start_client()
 
     def _build_ui(self) -> None:
@@ -533,11 +623,15 @@ class Application(Gtk.Application):
         packet_page = self._build_packet_page()
         map_page = self._build_map_page()
         log_page = self._build_log_page()
+        bazar_page = self._build_bazar_page()
 
         self.notebook = Gtk.Notebook()
         self.notebook.append_page(packet_page, Gtk.Label(label="Packets"))
         self.notebook.append_page(map_page, Gtk.Label(label="Map / Bot"))
         self.notebook.append_page(log_page, Gtk.Label(label="Bot log"))
+        # Appended last: the GUI smokes and the README shots assume Map / Bot
+        # is page 1 (Packets is 0).
+        self.notebook.append_page(bazar_page, Gtk.Label(label="NosBazar"))
         self.notebook.set_vexpand(True)
         self.notebook.connect("switch-page", self._on_page_switch)
 
@@ -795,6 +889,1450 @@ class Application(Gtk.Application):
             self.bot_log_buffer.set_text("")
             self._bot_log_lines = 0
 
+    # -- NosBazar -------------------------------------------------------
+
+    def _bazar_send(self, packet: str) -> bool:
+        """Controller send callback: one game packet through the client."""
+        if self.client is None or not self.client.connected:
+            self._bazar_log("not connected")
+            return False
+        try:
+            self.client.send_packet(packet)
+        except (ConnectionLost, ValueError) as exc:
+            self._bazar_log(f"send failed: {exc}")
+            return False
+        return True
+
+    def _bazar_log(self, text: str) -> None:
+        self._log_line(text)
+        if self.bazar_status is not None:
+            self.bazar_status.set_text(text.strip())
+
+    @staticmethod
+    def _bazar_path_for(winpid: int) -> Path:
+        override = os.environ.get("NTPL_BAZAR_CONFIG")
+        if override:
+            return Path(override)
+        # Honour XDG_CONFIG_HOME via the shared default (bazar.json lives in
+        # the same directory); only the file name changes per client.
+        return default_bazar_config_path().with_name(
+            f"bazar-{winpid}.json"
+        )
+
+    def _bazar_load_default_config(self) -> None:
+        path = default_bazar_config_path()
+        try:
+            if not path.is_file() or path.stat().st_size <= 2:
+                return
+        except OSError:
+            return
+        self.bazar_config_path = path
+        self._bazar_load_config(path, fallback=False)
+
+    def _bazar_load_config(
+        self, path: str | Path | None = None, fallback: bool = True
+    ) -> bool:
+        """Load the per-client config, optionally seeding from bazar.json."""
+        target = Path(path) if path is not None else self.bazar_config_path
+        candidates = [target]
+        default = default_bazar_config_path()
+        if fallback and default != target:
+            candidates.append(default)
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            try:
+                config = load_bazar_config(candidate)
+            except BazarError as exc:
+                self._bazar_log(f"config: {exc}")
+                return False
+            self._bazar_stop()
+            self.bazar.config = config
+            self.bazar.set_items(
+                config.items,
+                character=config.character,
+                refresh=config.refresh,
+            )
+            self.bazar.config.npc_id = config.npc_id
+            self.bazar.config.open_option = config.open_option
+            self.bazar.config.open_page = config.open_page
+            if self.bazar_character_entry is not None:
+                self.bazar_character_entry.set_text(config.character)
+            if self.bazar_npc_entry is not None:
+                self.bazar_npc_entry.set_text(
+                    "" if config.npc_id is None else str(config.npc_id)
+                )
+            self._bazar_npc_autofilled = False
+            self._bazar_npc_autofill_value = ""
+            if self.bazar_refresh_spin is not None:
+                self.bazar_refresh_spin.set_value(config.refresh)
+            self.bazar_config_path = target
+            self._bazar_config_loaded = True
+            if self.bazar_config_label is not None:
+                self.bazar_config_label.set_text(str(target))
+            self._bazar_render_items()
+            self._bazar_render_results()
+            self._bazar_update_info()
+            self._bazar_log(
+                f"loaded {len(config.items)} NosBazar item(s) from "
+                f"{candidate.name}"
+            )
+            return True
+
+        self._bazar_stop()
+        self.bazar.set_items([])
+        self.bazar_selected_name = None
+        if self.bazar_config_label is not None:
+            self.bazar_config_label.set_text(str(target))
+        self._bazar_render_items()
+        self._bazar_render_results()
+        return False
+
+    def _bazar_apply_settings(self) -> None:
+        """Copy the character / NPC / refresh widgets into the config."""
+        if self.bazar_character_entry is not None:
+            text = self.bazar_character_entry.get_text().strip()
+            if not text and self.engine.world.self_name:
+                text = self.engine.world.self_name
+                self.bazar_character_entry.set_text(text)
+            self.bazar.config.character = text
+        if self.bazar_refresh_spin is not None:
+            self.bazar.config.refresh = float(
+                self.bazar_refresh_spin.get_value()
+            )
+        if self.bazar_npc_entry is not None:
+            text = self.bazar_npc_entry.get_text().strip()
+            if text.isdigit() and int(text) > 0:
+                self.bazar.config.npc_id = int(text)
+            else:
+                self.bazar.config.npc_id = None
+
+    def _bazar_save_config(self, quiet: bool = False) -> bool:
+        self._bazar_apply_settings()
+        state = self.engine.world.bazar
+        if state.option_learned:
+            # Persist the dialog option actually used on this server; the
+            # entity id itself is per map, so only the option/page go in.
+            self.bazar.config.open_option = state.open_option
+            self.bazar.config.open_page = state.open_page
+        try:
+            save_bazar_config(self.bazar_config_path, self.bazar.config)
+        except BazarError as exc:
+            self._bazar_log(f"config: {exc}")
+            return False
+        self._bazar_config_loaded = True
+        if self.bazar_config_label is not None:
+            self.bazar_config_label.set_text(str(self.bazar_config_path))
+        if not quiet:
+            self._bazar_log(f"saved {self.bazar_config_path}")
+        return True
+
+    def _bazar_start_timer(self) -> None:
+        if self.bazar_timer is None:
+            self.bazar_timer = GLib.timeout_add(100, self._bazar_tick)
+
+    def _bazar_stop(self, reason: str = "") -> None:
+        if self.bazar_timer is not None:
+            GLib.source_remove(self.bazar_timer)
+            self.bazar_timer = None
+        if self.bazar.running:
+            self.bazar.stop(reason)
+        # Never leave the live-relist gate armed after a stop.
+        if self.bazar_live_relist is not None:
+            self.bazar_live_relist.set_active(False)
+        self._bazar_update_info()
+
+    def _bazar_open(self) -> None:
+        if self.client is None or not self.client.connected:
+            self._bazar_log("not connected")
+            return
+        self._bazar_apply_settings()
+        if not self.bazar.open_bazaar(self.engine.world):
+            self._bazar_log(self.bazar.last_error or "cannot open NosBazar")
+            return
+        self._bazar_start_timer()
+        self._bazar_update_info()
+
+    def _bazar_start_monitor(self) -> None:
+        if self.client is None or not self.client.connected:
+            self._bazar_log("not connected")
+            return
+        self._bazar_apply_settings()
+        if not self.bazar.start_monitor(self.engine.world):
+            self._bazar_log(self.bazar.last_error or "cannot start monitor")
+            return
+        self._bazar_start_timer()
+        self._bazar_render_results()
+        self._bazar_update_info()
+
+    def _bazar_start_relist(self) -> None:
+        if self.bazar_live_relist is None or not self.bazar_live_relist.get_active():
+            self._bazar_log(
+                "relisting is disabled; tick 'Allow live re-listing' first"
+            )
+            return
+        if self.client is None or not self.client.connected:
+            self._bazar_log("not connected")
+            return
+        self._bazar_apply_settings()
+        if not self.bazar.start_relist(self.engine.world):
+            self._bazar_log(self.bazar.last_error or "cannot start relist")
+            return
+        self._bazar_start_timer()
+        self._bazar_render_results()
+        self._bazar_update_info()
+
+    def _bazar_tick(self) -> bool:
+        if self._closing:
+            self.bazar_timer = None
+            return False
+        if not self.bazar.running:
+            self.bazar_timer = None
+            self._bazar_update_info()
+            return False
+        if self.client is None or not self.client.connected:
+            self.bazar.stop("disconnected")
+            self.bazar_timer = None
+            self._bazar_update_info()
+            return False
+        self.bazar.tick(self.engine.world)
+        if self.bazar.version != self._bazar_render_version:
+            self._bazar_render_results()
+        self._bazar_update_info()
+        if not self.bazar.running:
+            # "Open bazaar" stops by itself once the window answers.
+            self.bazar_timer = None
+            return False
+        return True
+
+    def _bazar_update_info(self) -> None:
+        if self.bazar_info is None:
+            return
+        if not self.bazar.running:
+            state = "bazaar open" if self.engine.world.bazar.open else "idle"
+            self.bazar_info.set_text(f"NosBazar {state}")
+            return
+        phase = {
+            "open": "opening",
+            "waiting": "waiting for Bibi Basar",
+            "pass": "searching",
+            "cooldown": "refresh wait",
+            "idle": "idle",
+        }.get(self.bazar.phase, self.bazar.phase)
+        summary = self.bazar.summary
+        suffix = f" · {summary}" if summary else ""
+        self.bazar_info.set_text(
+            f"{self.bazar.mode} · {phase}{suffix} · "
+            f"refresh {self.bazar.config.refresh:g}s"
+        )
+
+    def _bazar_on_packet(self, packet: Packet) -> None:
+        if packet.opcode in ("c_map", "mapout"):
+            # Entity ids belong to a map instance. Drop an auto-filled id so
+            # the controller uses the new map's Bibi (or the user reopens).
+            if (
+                self._bazar_npc_autofilled
+                and self.bazar_npc_entry is not None
+            ):
+                self.bazar_npc_entry.set_text("")
+                self._bazar_npc_autofilled = False
+                self._bazar_npc_autofill_value = ""
+            return
+        if packet.opcode in (
+            "rc_blist", "c_blist", "c_slist", "npc_req", "n_run", "in",
+            "wopen",
+        ):
+            self._bazar_sync_from_world()
+
+    def _bazar_sync_from_world(self) -> None:
+        world = self.engine.world
+        if (
+            self.bazar_character_entry is not None
+            and not self._bazar_character_autofilled
+            and not self.bazar_character_entry.get_text().strip()
+            and world.self_name
+        ):
+            self.bazar_character_entry.set_text(world.self_name)
+            self._bazar_character_autofilled = True
+        if (
+            self.bazar_npc_entry is not None
+            and world.bazar.npc_id is not None
+        ):
+            current = self.bazar_npc_entry.get_text().strip()
+            if not current or (
+                self._bazar_npc_autofilled
+                and current == self._bazar_npc_autofill_value
+            ):
+                value = str(world.bazar.npc_id)
+                self.bazar_npc_entry.set_text(value)
+                self._bazar_npc_autofilled = True
+                self._bazar_npc_autofill_value = value
+
+    def _bazar_render_items(self) -> None:
+        if self.bazar_items_list is None:
+            return
+        child = self.bazar_items_list.get_first_child()
+        while child is not None:
+            self.bazar_items_list.remove(child)
+            child = self.bazar_items_list.get_first_child()
+        items = self.bazar.config.items
+        enabled = sum(1 for item in items if item.enabled and item.search_packet)
+        if self.bazar_items_info is not None:
+            self.bazar_items_info.set_text(
+                f"{len(items)} item(s) · {enabled} with a search"
+            )
+        for item in items:
+            row = Gtk.ListBoxRow()
+            row.item_name = item.name  # type: ignore[attr-defined]
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            name = Gtk.Label(label=item.name)
+            name.set_xalign(0)
+            name.set_hexpand(True)
+            name.set_ellipsize(Pango.EllipsizeMode.END)
+            name.set_max_width_chars(18)
+            detail = Gtk.Label(
+                label=(
+                    f"{' '.join(str(v) for v in item.vnums) or 'no search'}"
+                    f" · {item.cost_text()}"
+                    f" · min {item.min_price:,}"
+                )
+            )
+            detail.set_xalign(1)
+            detail.add_css_class("dim-label")
+            detail.set_ellipsize(Pango.EllipsizeMode.END)
+            detail.set_max_width_chars(26)
+            box.append(name)
+            box.append(detail)
+            row.set_child(box)
+            self.bazar_items_list.append(row)
+        selected = None
+        child = self.bazar_items_list.get_first_child()
+        while child is not None:
+            if getattr(child, "item_name", None) == self.bazar_selected_name:
+                selected = child
+                break
+            child = child.get_next_sibling()
+        if selected is not None:
+            self.bazar_items_list.select_row(selected)
+        else:
+            self.bazar_items_list.unselect_all()
+
+    def _bazar_item_selected(
+        self, _listbox: Gtk.ListBox, row: Gtk.ListBoxRow | None
+    ) -> None:
+        if row is None:
+            return
+        name = getattr(row, "item_name", None)
+        if not name:
+            return
+        for item in self.bazar.config.items:
+            if item.name == name:
+                self.bazar_selected_name = item.name
+                self._bazar_form_from_item(item)
+                return
+
+    @staticmethod
+    def _bazar_standard_search(packet: str | None) -> bool:
+        if not packet:
+            return True
+        parts = packet.split()
+        return (
+            len(parts) >= 10
+            and parts[0] == "c_blist"
+            and all(part == "0" for part in parts[1:9])
+        )
+
+    def _bazar_form_from_item(self, item: BazarItem) -> None:
+        form = self.bazar_form
+        if not form:
+            return
+        self.bazar_selected_name = item.name
+        form["name"].set_text(item.name)
+        if self._bazar_standard_search(item.search_packet):
+            form["vnums"].set_text(
+                " ".join(str(vnum) for vnum in item.vnums)
+            )
+            form["raw"].set_text("")
+        else:
+            form["vnums"].set_text("")
+            form["raw"].set_text(item.search_packet or "")
+        form["vnum"].set_text("" if item.vnum is None else str(item.vnum))
+        form["tab"].set_selected(
+            0 if item.inv_tab is None else item.inv_tab + 1
+        )
+        form["amount"].set_value(item.amount)
+        form["min"].set_value(item.min_price)
+        value, unit = item.cost()
+        if unit == "ND":
+            form["cost_type"].set_selected(1)
+            form["cost"].set_value(value or 0)
+        elif unit == "g":
+            form["cost_type"].set_selected(2)
+            form["cost"].set_value(value or 0)
+        else:
+            form["cost_type"].set_selected(0)
+            form["cost"].set_value(0)
+        form["unk1"].set_value(item.unk1)
+        form["unk2"].set_value(item.unk2)
+        form["durability"].set_value(item.durability)
+        form["medal"].set_value(item.medal)
+
+    def _bazar_new_item(self) -> None:
+        self.bazar_selected_name = None
+        if self.bazar_items_list is not None:
+            self.bazar_items_list.unselect_all()
+        form = self.bazar_form
+        if not form:
+            return
+        form["name"].set_text("")
+        form["vnums"].set_text("")
+        form["raw"].set_text("")
+        form["vnum"].set_text("")
+        form["tab"].set_selected(0)
+        form["amount"].set_value(5)
+        form["min"].set_value(0)
+        form["cost_type"].set_selected(0)
+        form["cost"].set_value(0)
+        form["unk1"].set_value(9)
+        form["unk2"].set_value(4)
+        form["durability"].set_value(1)
+        form["medal"].set_value(2)
+        form["name"].grab_focus()
+
+    def _bazar_delete_item(self) -> None:
+        if not self.bazar_selected_name:
+            self._bazar_log("select an item to delete")
+            return
+        items = [
+            item
+            for item in self.bazar.config.items
+            if item.name != self.bazar_selected_name
+        ]
+        self._bazar_log(f"deleted {self.bazar_selected_name}")
+        self.bazar_selected_name = None
+        self._bazar_set_items(items)
+        self._bazar_new_item()
+        self._bazar_save_config(quiet=True)
+
+    def _bazar_item_from_form(self) -> BazarItem | None:
+        form = self.bazar_form
+        if not form:
+            return None
+        name = form["name"].get_text().strip()
+        if not name:
+            self._bazar_log("item name is required")
+            return None
+        raw = form["raw"].get_text().strip()
+        try:
+            if raw:
+                search_packet = normalize_search_packet(raw)
+            else:
+                vnums: list[int] = []
+                for text in form["vnums"].get_text().replace(",", " ").split():
+                    value = int(text)
+                    if value <= 0:
+                        raise ValueError(text)
+                    vnums.append(value)
+                search_packet = build_search_packet(vnums) if vnums else None
+        except (ValueError, BazarError) as exc:
+            self._bazar_log(f"search packet: {exc}")
+            return None
+        vnum_text = form["vnum"].get_text().strip()
+        vnum = None
+        if vnum_text:
+            if not vnum_text.isdigit() or int(vnum_text) <= 0:
+                self._bazar_log("item vnum must be a positive number")
+                return None
+            vnum = int(vnum_text)
+        if search_packet is None and vnum is None:
+            self._bazar_log("an item needs a search and/or an item vnum")
+            return None
+        tab_index = form["tab"].get_selected()
+        inv_tab = None if tab_index == 0 else tab_index - 1
+        cost_index = form["cost_type"].get_selected()
+        cost = float(form["cost"].get_value())
+        return BazarItem(
+            name=name,
+            search_packet=search_packet,
+            vnum=vnum,
+            inv_tab=inv_tab,
+            amount=int(form["amount"].get_value()),
+            min_price=int(form["min"].get_value()),
+            nos_cost=cost if cost_index == 1 and cost > 0 else None,
+            npc_cost=cost if cost_index == 2 and cost > 0 else None,
+            unk1=int(form["unk1"].get_value()),
+            unk2=int(form["unk2"].get_value()),
+            durability=int(form["durability"].get_value()),
+            medal=int(form["medal"].get_value()),
+        )
+
+    def _bazar_save_item(self) -> None:
+        item = self._bazar_item_from_form()
+        if item is None:
+            return
+        items = list(self.bazar.config.items)
+        old_name = self.bazar_selected_name
+        if old_name is not None:
+            index = next(
+                (
+                    index
+                    for index, existing in enumerate(items)
+                    if existing.name == old_name
+                ),
+                None,
+            )
+        else:
+            index = None
+        for position, existing in enumerate(items):
+            if existing.name == item.name and position != index:
+                self._bazar_log(f"an item named '{item.name}' already exists")
+                return
+        if index is None:
+            items.append(item)
+        else:
+            items[index] = item
+        self._bazar_apply_settings()
+        self.bazar_selected_name = item.name
+        self._bazar_set_items(items)
+        self._bazar_save_config(quiet=True)
+
+    def _bazar_set_items(self, items: list[BazarItem]) -> None:
+        # A running pass holds the old item objects; stop rather than mix the
+        # old pending search with a new item list.
+        if self.bazar.running:
+            self._bazar_stop("items changed")
+        self.bazar.set_items(
+            items,
+            character=self.bazar.config.character,
+            refresh=self.bazar.config.refresh,
+        )
+        self._bazar_render_items()
+        self._bazar_render_results()
+
+    def _load_nosmall_groups(self) -> list:
+        """Read groups from the SQLite DB, or parse the client data."""
+        try:
+            from . import database
+            if database.DEFAULT_DB_PATH.is_file():
+                connection = database.connect()
+                try:
+                    groups = database.nosmall_groups(connection, limit=5000)
+                finally:
+                    connection.close()
+                if groups:
+                    return groups
+        except Exception:  # noqa: BLE001 - fall back to the archive parser
+            pass
+        from .nosmall import load_catalog
+        return load_catalog()
+
+    def _nosmall_costs(self) -> dict[int, float]:
+        """ND costs known for catalog groups.
+
+        The curated reference map is the base; an item already in this
+        window's list (for example one added by hand with its Cost edited)
+        contributes its own vnums, so the importer can learn new prices.
+        """
+        try:
+            from .nosmall import known_reference_costs
+            costs = dict(known_reference_costs())
+        except Exception:  # noqa: BLE001
+            costs = {}
+        for item in self.bazar.config.items:
+            if item.nos_cost is None or item.nos_cost <= 0:
+                continue
+            vnums = item.vnums or (
+                [item.vnum] if item.vnum is not None else []
+            )
+            for vnum in vnums:
+                costs.setdefault(int(vnum), float(item.nos_cost))
+        return costs
+
+    @staticmethod
+    def _nosmall_group_cost(group, costs: dict[int, float]) -> float | None:
+        from .nosmall import group_cost
+        return group_cost(group, costs)
+
+    def _nosmall_importable(self) -> list:
+        """Catalog groups worth importing: priced, non-pet items only.
+
+        A group without an ND cost cannot produce a profit figure, so it is
+        left out entirely; pets, fairies and partner supplies are companion
+        items and are always excluded.
+        """
+        from .nosmall import importable_groups
+
+        return importable_groups(self._nosmall_groups, self._nosmall_costs())
+
+    def _open_nosmall_picker(self) -> None:
+        if self.nosmall_window is not None:
+            self.nosmall_window.present()
+            return
+        groups = self._load_nosmall_groups()
+        self._nosmall_groups = groups
+        importable = len(self._nosmall_importable())
+        window = Gtk.Window(title="NosMall catalog")
+        window.set_application(self)
+        window.set_transient_for(self.window)
+        window.set_modal(True)
+        window.set_default_size(780, 620)
+        window.connect("close-request", self._close_nosmall_picker)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_top(8)
+        box.set_margin_bottom(8)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+        search = Gtk.SearchEntry()
+        search.set_placeholder_text(
+            "search catalog by item name, vnum or base vnum"
+        )
+        search.connect(
+            "search-changed",
+            lambda entry: self._nosmall_render(entry.get_text()),
+        )
+        self._nosmall_search = search
+        box.append(search)
+        hint = Gtk.Label(
+            label=(
+                f"{importable} importable NosMall item(s) with a known ND "
+                "cost. Items without an ND cost cannot show a profit and are "
+                "not listed; pets, fairies and partner supplies are excluded. "
+                "To offer another item, add it with New and set its Cost "
+                "first — or maintain the curated price map — then reopen this "
+                "window."
+            )
+        )
+        hint.set_xalign(0)
+        hint.set_wrap(True)
+        hint.add_css_class("dim-label")
+        box.append(hint)
+        self._nosmall_status = Gtk.Label(label="")
+        self._nosmall_status.set_xalign(0)
+        self._nosmall_status.add_css_class("dim-label")
+        box.append(self._nosmall_status)
+        self._nosmall_list = Gtk.ListBox()
+        self._nosmall_list.set_activate_on_single_click(True)
+        self._nosmall_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_child(self._nosmall_list)
+        scrolled.set_policy(
+            Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
+        )
+        scrolled.set_vexpand(True)
+        box.append(scrolled)
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._nosmall_add_all_button = Gtk.Button(
+            label="Add all matching"
+        )
+        self._nosmall_add_all_button.set_tooltip_text(
+            "Add every group matching the current search in one go. A full "
+            "catalog pass is long: each group is searched with 2.5 s pacing."
+        )
+        self._nosmall_add_all_button.connect(
+            "clicked", lambda *_: self._nosmall_add_all()
+        )
+        buttons.append(self._nosmall_add_all_button)
+        prune = Gtk.Button(label="Remove unpriced & pets")
+        prune.set_tooltip_text(
+            "Remove every item from this window's item list that has no ND "
+            "cost, plus every pet, fairy and partner item. Priced ordinary "
+            "items are kept. Click twice to confirm; a running monitor is "
+            "stopped because the item list changes."
+        )
+        prune.connect("clicked", lambda *_: self._nosmall_prune())
+        buttons.append(prune)
+        close = Gtk.Button(label="Close")
+        close.connect("clicked", lambda *_: window.close())
+        buttons.append(close)
+        box.append(buttons)
+        window.set_child(box)
+        self.nosmall_window = window
+        self._nosmall_render("")
+        window.present()
+
+    def _nosmall_render(self, query: str) -> None:
+        if self._nosmall_list is None:
+            return
+        child = self._nosmall_list.get_first_child()
+        while child is not None:
+            self._nosmall_list.remove(child)
+            child = self._nosmall_list.get_first_child()
+
+        needle = query.strip().casefold()
+        importable = self._nosmall_importable()
+        costs = self._nosmall_costs()
+        matches = []
+        for group in importable:
+            if not needle:
+                matches.append(group)
+                continue
+            if needle in group.name.casefold():
+                matches.append(group)
+                continue
+            if any(needle in str(vnum) for vnum in group.vnums):
+                matches.append(group)
+                continue
+            if needle == str(group.base_vnum):
+                matches.append(group)
+        self._nosmall_matches = matches
+        shown = matches[:300]
+        if self._nosmall_add_all_button is not None:
+            self._nosmall_add_all_button.set_label(
+                f"Add all matching ({len(matches)})"
+            )
+            self._nosmall_add_all_button.set_sensitive(bool(matches))
+        if self._nosmall_status is not None:
+            extra = (
+                f" · showing first {len(shown)}"
+                if len(matches) > len(shown)
+                else ""
+            )
+            self._nosmall_status.set_text(
+                f"{len(matches)} matching priced, non-pet group(s){extra}"
+            )
+        for group in shown:
+            cost = self._nosmall_group_cost(group, costs)
+            row = Gtk.ListBoxRow()
+            content = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=8
+            )
+            name = Gtk.Label(label=group.name)
+            name.set_xalign(0)
+            name.set_hexpand(True)
+            name.set_ellipsize(Pango.EllipsizeMode.END)
+            name.set_max_width_chars(46)
+            detail = Gtk.Label(
+                label=(
+                    " ".join(str(vnum) for vnum in group.vnums)
+                    + (f" · {cost:g} ND" if cost is not None else "")
+                )
+            )
+            detail.set_xalign(1)
+            detail.add_css_class("dim-label")
+            detail.set_ellipsize(Pango.EllipsizeMode.END)
+            detail.set_max_width_chars(32)
+            content.append(name)
+            content.append(detail)
+            row.set_child(content)
+            row.connect(
+                "activate", lambda _row, group=group: self._nosmall_add(group)
+            )
+            self._nosmall_list.append(row)
+
+    def _nosmall_item_for(self, group, items: list) -> BazarItem | None:
+        """Build a Bazar item for a catalog group, or None if not eligible."""
+        from .nosmall import is_pet_group
+
+        if is_pet_group(group):
+            if self._nosmall_status is not None:
+                self._nosmall_status.set_text(
+                    f"{group.name} is a pet/partner item and is excluded"
+                )
+            return None
+        cost = self._nosmall_group_cost(group, self._nosmall_costs())
+        if cost is None:
+            if self._nosmall_status is not None:
+                self._nosmall_status.set_text(
+                    f"{group.name} has no ND cost; profit cannot be "
+                    "calculated, so it is excluded"
+                )
+            return None
+        try:
+            packet = group.search_packet()
+        except Exception as exc:  # noqa: BLE001
+            if self._nosmall_status is not None:
+                self._nosmall_status.set_text(f"cannot build packet: {exc}")
+            return None
+        if any(item.search_packet == packet for item in items):
+            if self._nosmall_status is not None:
+                self._nosmall_status.set_text(
+                    f"{group.name} is already in the item list"
+                )
+            return None
+        name = group.name[:80]
+        used = {item.name for item in items}
+        if name in used:
+            name = f"{group.name[:70]} [{group.base_vnum}]"
+        counter = 2
+        while name in used:
+            name = f"{group.name[:66]} [{group.base_vnum}/{counter}]"
+            counter += 1
+        return BazarItem(
+            name=name,
+            search_packet=packet,
+            vnum=group.vnums[0] if group.vnums else group.base_vnum,
+            inv_tab=None,
+            amount=5,
+            min_price=0,
+            nos_cost=cost,
+        )
+
+    def _nosmall_add(self, group) -> None:
+        items = list(self.bazar.config.items)
+        item = self._nosmall_item_for(group, items)
+        if item is None:
+            return
+        self._bazar_set_items(items + [item])
+        self._bazar_save_config(quiet=True)
+        if self._nosmall_status is not None:
+            cost = item.cost()[0]
+            self._nosmall_status.set_text(
+                f"Added {item.name}"
+                + (f" ({cost:g} ND)" if cost is not None else "")
+                + f" · {len(items) + 1} item(s) configured"
+            )
+
+    def _nosmall_add_all(self) -> None:
+        groups = list(self._nosmall_matches)
+        if not groups:
+            return
+        items = list(self.bazar.config.items)
+        added = 0
+        for group in groups:
+            item = self._nosmall_item_for(group, items)
+            if item is not None:
+                items.append(item)
+                added += 1
+        if not added:
+            if self._nosmall_status is not None:
+                self._nosmall_status.set_text(
+                    "All matching groups are already in the item list"
+                )
+            return
+        self._bazar_set_items(items)
+        self._bazar_save_config(quiet=True)
+        if self._nosmall_status is not None:
+            self._nosmall_status.set_text(
+                f"Added {added} group(s) · {len(items)} item(s) configured"
+            )
+
+    def _nosmall_prune(self) -> None:
+        """Remove unpriced and pet rows from the configured item list.
+
+        Destructive, so it takes two clicks: the first arms the action and
+        reports the count, the second within five seconds applies it. Only
+        rows with an ND cost that are not pets survive.
+        """
+        from .nosmall import is_pet_group, split_priced_non_pet
+
+        pet_vnums: set[int] = set()
+        for group in self._nosmall_groups:
+            if is_pet_group(group):
+                pet_vnums.update(group.vnums)
+                pet_vnums.add(group.base_vnum)
+        keep, removed = split_priced_non_pet(
+            list(self.bazar.config.items), pet_vnums
+        )
+        if not removed:
+            if self._nosmall_status is not None:
+                self._nosmall_status.set_text(
+                    "Nothing to remove: every configured item has an ND "
+                    "cost and none is a pet"
+                )
+            return
+        now = time.monotonic()
+        armed = (
+            self._nosmall_prune_armed_at > 0.0
+            and now - self._nosmall_prune_armed_at <= 5.0
+        )
+        if not armed:
+            self._nosmall_prune_armed_at = now
+            self._nosmall_prune_count = len(removed)
+            if self._nosmall_status is not None:
+                self._nosmall_status.set_text(
+                    f"Click 'Remove unpriced & pets' again to delete "
+                    f"{len(removed)} item(s) and keep {len(keep)}"
+                )
+            return
+        self._nosmall_prune_armed_at = 0.0
+        self._nosmall_prune_count = 0
+        self._bazar_set_items(keep)
+        self._bazar_save_config(quiet=True)
+        if self._nosmall_status is not None:
+            self._nosmall_status.set_text(
+                f"Removed {len(removed)} unpriced/pet item(s) · "
+                f"{len(keep)} priced item(s) kept"
+            )
+        # The picker list itself is unaffected by the item list, but the
+        # price map now includes only the kept items' costs.
+        self._nosmall_render(
+            self._nosmall_search.get_text()
+            if getattr(self, "_nosmall_search", None) is not None
+            else ""
+        )
+
+    def _close_nosmall_picker(self, _window=None) -> bool:
+        self.nosmall_window = None
+        self._nosmall_list = None
+        self._nosmall_status = None
+        self._nosmall_matches = []
+        self._nosmall_add_all_button = None
+        self._nosmall_search = None
+        self._nosmall_prune_armed_at = 0.0
+        self._nosmall_prune_count = 0
+        return False
+
+    def _bazar_render_results(self) -> None:
+        if self.bazar_results_box is None:
+            return
+        child = self.bazar_results_box.get_first_child()
+        while child is not None:
+            self.bazar_results_box.remove(child)
+            child = self.bazar_results_box.get_first_child()
+        self._bazar_render_version = self.bazar.version
+
+        items = self.bazar.config.items
+        if not items:
+            if self.bazar_results_info is not None:
+                self.bazar_results_info.set_text(
+                    "Cheapest listing per item, most profitable first."
+                )
+            empty = Gtk.Label(
+                label=(
+                    "No items yet — add one with the editor on the right. "
+                    "The search uses item vnums, not the display name."
+                )
+            )
+            empty.set_xalign(0)
+            empty.set_wrap(True)
+            empty.add_css_class("dim-label")
+            self.bazar_results_box.append(empty)
+            return
+
+        quotes = self.bazar.sorted_quotes()
+        only_priced = (
+            self.bazar_only_priced is not None
+            and self.bazar_only_priced.get_active()
+        )
+        if only_priced:
+            visible = [quote for quote in quotes if quote.price is not None]
+        else:
+            visible = list(quotes)
+        hidden = len(quotes) - len(visible)
+        if self.bazar_results_info is not None:
+            text = "Most profitable first"
+            if only_priced:
+                text += f" · {len(visible)} priced"
+            if hidden:
+                text += f" · {hidden} hidden"
+            self.bazar_results_info.set_text(text)
+
+        if not visible:
+            empty = Gtk.Label(
+                label=(
+                    "No priced items yet — wait for the pass or untick "
+                    "'Only priced' to see timeouts and pending items."
+                )
+            )
+            empty.set_xalign(0)
+            empty.set_wrap(True)
+            empty.add_css_class("dim-label")
+            self.bazar_results_box.append(empty)
+            return
+
+        grid = Gtk.Grid()
+        grid.set_column_spacing(14)
+        grid.set_row_spacing(3)
+        grid.set_margin_top(2)
+        headers = ("Item", "Cost", "NB Price", "Profit", "Seller", "Status")
+        aligns = (0.0, 0.0, 1.0, 1.0, 0.0, 0.0)
+        for column, (title, align) in enumerate(zip(headers, aligns)):
+            label = Gtk.Label()
+            label.set_markup(f"<b>{title}</b>")
+            label.set_xalign(align)
+            grid.attach(label, column, 0, 1, 1)
+        for row_index, quote in enumerate(visible, start=1):
+            price = "n/a" if quote.price is None else f"{quote.price:,}"
+            seller = quote.seller.replace("�", "").strip()
+            cells = (
+                quote.item.name,
+                quote.item.cost_text(),
+                price,
+                quote.profit_text(),
+                seller or "-",
+                quote.status_text(),
+            )
+            for column, (text, align) in enumerate(zip(cells, aligns)):
+                label = Gtk.Label(label=text)
+                label.set_xalign(align)
+                label.set_ellipsize(Pango.EllipsizeMode.END)
+                if column == 0:
+                    label.set_max_width_chars(22)
+                elif column == 4:
+                    label.set_max_width_chars(18)
+                elif column == 5:
+                    label.set_max_width_chars(26)
+                if column == 5:
+                    if quote.status == "ok":
+                        label.add_css_class("bazar-ok")
+                    elif quote.status in (
+                        "timeout", "bad", "error", "quantity"
+                    ):
+                        label.add_css_class("bazar-bad")
+                    elif quote.status in (
+                        "floor", "own", "no-slot", "no-vnum", "register-sent"
+                    ):
+                        label.add_css_class("bazar-warn")
+                    else:
+                        label.add_css_class("dim-label")
+                if quote.listing is not None:
+                    label.set_tooltip_text(
+                        " | ".join(quote.listing.raw_fields)
+                    )
+                grid.attach(label, column, row_index, 1, 1)
+        self.bazar_results_box.append(grid)
+
+    def _bazar_seed_from_log(self) -> None:
+        """Learn the Bibi id/option and inventory from this client's DLL log.
+
+        A GUI attaches after login: the client's earlier manual bazaar opening
+        and the login inventory dump are still in the log, not in the live
+        packet stream.  The entity id and the inventory slots are needed
+        before the first search/relist.
+        """
+        path = self.log_file
+        if not path:
+            return
+        world = self.engine.world
+        npc_id, option, page = load_bazaar_open(path)
+        if npc_id is not None:
+            state = world.bazar
+            state.npc_id = npc_id
+            state.open_option = option if option is not None else state.open_option
+            state.open_page = page if page is not None else state.open_page
+            state.option_learned = option is not None
+            self._bazar_sync_from_world()
+            self._bazar_log(
+                f"bazaar NPC {npc_id} learned from the client log"
+                + (
+                    f" (option {option}/{page})"
+                    if option is not None
+                    else ""
+                )
+            )
+        bags, gold = load_log_inventory(path)
+        if bags:
+            for bag, slots in bags.items():
+                world.inventory[bag] = {
+                    index: InventorySlot(bag, index, vnum, quantity)
+                    for index, (vnum, quantity) in slots.items()
+                }
+            count = sum(len(slots) for slots in bags.values())
+            if count:
+                self._bazar_log(
+                    f"inventory: {count} slot(s) in {len(bags)} bag(s) "
+                    f"seeded from the log"
+                )
+        if gold is not None:
+            world.gold = gold
+        self._bazar_sync_from_world()
+
+    def _bazar_reset_for_attach(self, winpid: int) -> None:
+        """Reset the tab together with the engine when another client attaches."""
+        self._bazar_stop("client changed")
+        self.bazar_selected_name = None
+        self._bazar_config_loaded = False
+        self._bazar_character_autofilled = False
+        self._bazar_npc_autofilled = False
+        self._bazar_npc_autofill_value = ""
+        self.bazar_config_path = self._bazar_path_for(winpid)
+        if self.bazar_config_label is not None:
+            self.bazar_config_label.set_text(str(self.bazar_config_path))
+        if self.bazar_character_entry is not None:
+            self.bazar_character_entry.set_text("")
+        if self.bazar_npc_entry is not None:
+            self.bazar_npc_entry.set_text("")
+        self._bazar_load_config(fallback=True)
+
+    def _build_bazar_page(self):
+        """NosBazar market monitor and relisting controls.
+
+        The page is a thin view over :class:`ntpl.bazar.BazarController`:
+        buttons start/stop it, the item list edits its config, and the left
+        side renders the controller's latest quotes.
+        """
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        page.set_margin_top(6)
+        page.set_margin_start(8)
+        page.set_margin_end(8)
+        page.set_margin_bottom(6)
+
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        open_button = Gtk.Button(label="Open bazaar")
+        open_button.set_tooltip_text(
+            "Replay the Bibi Basar interaction through the client's own send "
+            "path. The NPC entity id and dialog option are learned when you "
+            "open the bazaar by hand once."
+        )
+        open_button.connect("clicked", lambda *_: self._bazar_open())
+        toolbar.append(open_button)
+
+        monitor_start = Gtk.Button(label="Monitor Start")
+        monitor_start.add_css_class("suggested-action")
+        monitor_start.set_tooltip_text(
+            "Search every configured item and show the cheapest listing and "
+            "its gold-per-ND / NPC markup. Sends only search packets."
+        )
+        monitor_start.connect("clicked", lambda *_: self._bazar_start_monitor())
+        toolbar.append(monitor_start)
+        monitor_stop = Gtk.Button(label="Monitor Stop")
+        monitor_stop.connect("clicked", lambda *_: self._bazar_stop())
+        toolbar.append(monitor_stop)
+
+        relist_start = Gtk.Button(label="Relist Start")
+        relist_start.add_css_class("destructive-action")
+        relist_start.set_tooltip_text(
+            "Search each item, then re-register your inventory stack one gold "
+            "below the cheapest other seller, never below min_price. Requires "
+            "the live-relist checkbox and your character name."
+        )
+        relist_start.connect("clicked", lambda *_: self._bazar_start_relist())
+        toolbar.append(relist_start)
+        relist_stop = Gtk.Button(label="Relist Stop")
+        relist_stop.connect("clicked", lambda *_: self._bazar_stop())
+        toolbar.append(relist_stop)
+
+        self.bazar_info = Gtk.Label(label="NosBazar idle")
+        self.bazar_info.set_xalign(0)
+        self.bazar_info.set_hexpand(True)
+        toolbar.append(self.bazar_info)
+        page.append(toolbar)
+
+        body = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
+        body.set_vexpand(True)
+        body.set_wide_handle(True)
+
+        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        result_tools = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6
+        )
+        self.bazar_results_info = Gtk.Label(
+            label="Cheapest listing per item, most profitable first."
+        )
+        self.bazar_results_info.set_xalign(0)
+        self.bazar_results_info.set_hexpand(True)
+        self.bazar_results_info.add_css_class("dim-label")
+        result_tools.append(self.bazar_results_info)
+        self.bazar_only_priced = Gtk.CheckButton(label="Only priced")
+        self.bazar_only_priced.set_active(True)
+        self.bazar_only_priced.set_tooltip_text(
+            "Hide items with no listing, a timeout or no answer yet, so only "
+            "items with a current price remain (most profitable first)"
+        )
+        self.bazar_only_priced.connect(
+            "toggled", lambda *_: self._bazar_render_results()
+        )
+        result_tools.append(self.bazar_only_priced)
+        left.append(result_tools)
+        self.bazar_results_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=2
+        )
+        results_scroll = Gtk.ScrolledWindow()
+        results_scroll.set_policy(
+            Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC
+        )
+        results_scroll.set_child(self.bazar_results_box)
+        results_scroll.set_vexpand(True)
+        left.append(results_scroll)
+        body.set_start_child(left)
+        body.set_resize_start_child(True)
+
+        right_scroll = Gtk.ScrolledWindow()
+        right_scroll.set_policy(
+            Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
+        )
+        right_scroll.set_size_request(410, -1)
+        right_scroll.set_vexpand(True)
+        right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        right.set_margin_top(2)
+        right.set_margin_bottom(2)
+        right.set_margin_start(2)
+        right.set_margin_end(2)
+
+        monitor_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.bazar_live_relist = Gtk.CheckButton(
+            label="Allow live re-listing (changes your listings)"
+        )
+        self.bazar_live_relist.set_active(False)
+        self.bazar_live_relist.set_tooltip_text(
+            "Safety gate: Relist Start does nothing unless this is ticked. "
+            "Re-listing spends the listing fee and changes your prices."
+        )
+        monitor_box.append(self.bazar_live_relist)
+        self.bazar_character_entry = Gtk.Entry()
+        self.bazar_character_entry.set_placeholder_text("your character")
+        self.bazar_character_entry.set_max_length(40)
+        self.bazar_character_entry.set_width_chars(18)
+        self.bazar_character_entry.set_tooltip_text(
+            "Used to recognise your own listing so the bot never undercuts "
+            "itself. Filled automatically when you open the bazaar."
+        )
+        self.bazar_npc_entry = Gtk.Entry()
+        self.bazar_npc_entry.set_placeholder_text("Bibi entity id")
+        self.bazar_npc_entry.set_input_purpose(Gtk.InputPurpose.DIGITS)
+        self.bazar_npc_entry.set_max_length(10)
+        self.bazar_npc_entry.set_width_chars(10)
+        self.bazar_npc_entry.set_tooltip_text(
+            "Entity id of the Bibi Basar NPC ('in 2 793 <id>' or the client's "
+            "own npc_req). Learned automatically when you open the bazaar; "
+            "enter it manually only if you know it."
+        )
+        monitor_box.append(
+            self._field_row(
+                Gtk.Label(label="Character"),
+                self.bazar_character_entry,
+                Gtk.Label(label="Bibi id"),
+                self.bazar_npc_entry,
+            )
+        )
+        self.bazar_refresh_spin = Gtk.SpinButton.new_with_range(5, 3600, 5)
+        self.bazar_refresh_spin.set_value(30)
+        self.bazar_refresh_spin.set_digits(0)
+        monitor_box.append(
+            self._field_row(
+                Gtk.Label(label="Refresh (s)"), self.bazar_refresh_spin
+            )
+        )
+        monitor_hint = Gtk.Label(
+            label=(
+                "Open the bazaar once by hand (talk to Bibi Basar → NosBazar) "
+                "so the client id and dialog option can be learned. Searches "
+                "are paced at 2.5 s; all-timeout passes back off and retry "
+                "after the refresh interval."
+            )
+        )
+        monitor_hint.set_xalign(0)
+        monitor_hint.set_wrap(True)
+        monitor_hint.set_max_width_chars(40)
+        monitor_hint.add_css_class("dim-label")
+        monitor_box.append(monitor_hint)
+        right.append(self._frame("Monitor", monitor_box))
+
+        items_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.bazar_items_info = Gtk.Label(label="0 items")
+        self.bazar_items_info.set_xalign(0)
+        self.bazar_items_info.add_css_class("dim-label")
+        items_box.append(self.bazar_items_info)
+        self.bazar_items_list = Gtk.ListBox()
+        self.bazar_items_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.bazar_items_list.set_activate_on_single_click(True)
+        self.bazar_items_list.connect(
+            "row-selected", self._bazar_item_selected
+        )
+        items_scroll = Gtk.ScrolledWindow()
+        items_scroll.set_child(self.bazar_items_list)
+        items_scroll.set_policy(
+            Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
+        )
+        items_scroll.set_min_content_height(140)
+        items_scroll.set_max_content_height(220)
+        items_box.append(items_scroll)
+        item_buttons = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6
+        )
+        import_item = Gtk.Button(label="Import NosMall…")
+        import_item.set_tooltip_text(
+            "Browse the client's full NosMall catalog (name + item vnums) "
+            "and add a group with its c_blist search packet"
+        )
+        import_item.connect("clicked", lambda *_: self._open_nosmall_picker())
+        new_item = Gtk.Button(label="New")
+        new_item.set_tooltip_text("Clear the editor for a new item")
+        new_item.connect("clicked", lambda *_: self._bazar_new_item())
+        delete_item = Gtk.Button(label="Delete")
+        delete_item.set_tooltip_text("Delete the selected item")
+        delete_item.connect("clicked", lambda *_: self._bazar_delete_item())
+        item_buttons.append(import_item)
+        item_buttons.append(new_item)
+        item_buttons.append(delete_item)
+        items_box.append(item_buttons)
+        right.append(self._frame("Items", items_box))
+
+        right.append(self._frame("Item editor", self._build_bazar_editor()))
+
+        config_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=6
+        )
+        self.bazar_config_label = Gtk.Label(
+            label=str(self.bazar_config_path)
+        )
+        self.bazar_config_label.set_xalign(0)
+        self.bazar_config_label.set_wrap(True)
+        self.bazar_config_label.set_max_width_chars(40)
+        self.bazar_config_label.add_css_class("dim-label")
+        config_box.append(self.bazar_config_label)
+        config_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6
+        )
+        save_button = Gtk.Button(label="Save config")
+        save_button.connect("clicked", lambda *_: self._bazar_save_config())
+        reload_button = Gtk.Button(label="Reload")
+        reload_button.set_tooltip_text(
+            "Discard the in-memory items and read the JSON file again"
+        )
+        reload_button.connect("clicked", lambda *_: self._bazar_load_config())
+        config_row.append(save_button)
+        config_row.append(reload_button)
+        config_box.append(config_row)
+        config_hint = Gtk.Label(
+            label=(
+                "Saved automatically per game client as bazar-<pid>.json. "
+                "Copy it to bazar.json to use the same items in another "
+                "client."
+            )
+        )
+        config_hint.set_xalign(0)
+        config_hint.set_wrap(True)
+        config_hint.set_max_width_chars(40)
+        config_hint.add_css_class("dim-label")
+        config_box.append(config_hint)
+        right.append(self._frame("Configuration", config_box))
+
+        right_scroll.set_child(right)
+        body.set_end_child(right_scroll)
+        body.set_resize_end_child(False)
+        page.append(body)
+
+        self.bazar_status = Gtk.Label(label="NosBazar idle")
+        self.bazar_status.set_xalign(0)
+        self.bazar_status.set_wrap(True)
+        self.bazar_status.add_css_class("dim-label")
+        page.append(self.bazar_status)
+
+        self.bazar_page = page
+        self._bazar_render_items()
+        self._bazar_render_results()
+        self._bazar_update_info()
+        return page
+
+    def _build_bazar_editor(self) -> Gtk.Widget:
+        """The add/edit form for one item; values live in ``bazar_form``."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        form = self.bazar_form
+
+        def entry(key: str, placeholder: str, width: int = 14) -> Gtk.Entry:
+            widget = Gtk.Entry()
+            widget.set_placeholder_text(placeholder)
+            widget.set_max_length(200)
+            widget.set_width_chars(width)
+            form[key] = widget
+            return widget
+
+        box.append(
+            self._field_row(
+                Gtk.Label(label="Name"), entry("name", "display name", 18)
+            )
+        )
+        box.append(
+            self._field_row(
+                Gtk.Label(label="Search vnums"),
+                entry("vnums", "e.g. 1261 2174", 18),
+            )
+        )
+        raw = entry("raw", "optional full c_blist …", 18)
+        raw.set_tooltip_text(
+            "Advanced: a captured c_blist packet wins over Search vnums. "
+            "Leave it empty for the normal vnum search."
+        )
+        box.append(
+            self._field_row(Gtk.Label(label="Raw packet"), raw)
+        )
+        vnum = entry("vnum", "item vnum", 8)
+        vnum.set_input_purpose(Gtk.InputPurpose.DIGITS)
+        tab = Gtk.DropDown.new_from_strings(
+            ["Tab none", "Equip (0)", "Main (1)", "Etc (2)"]
+        )
+        tab.set_selected(0)
+        form["tab"] = tab
+        box.append(
+            self._field_row(
+                Gtk.Label(label="Item vnum"), vnum, tab
+            )
+        )
+        amount = Gtk.SpinButton.new_with_range(1, 1000, 1)
+        amount.set_value(5)
+        amount.set_digits(0)
+        form["amount"] = amount
+        minimum = Gtk.SpinButton.new_with_range(0, 2_000_000_000, 1000)
+        minimum.set_value(0)
+        minimum.set_digits(0)
+        minimum.set_width_chars(12)
+        form["min"] = minimum
+        box.append(
+            self._field_row(
+                Gtk.Label(label="Amount"), amount,
+                Gtk.Label(label="Min price"), minimum,
+            )
+        )
+        cost_type = Gtk.DropDown.new_from_strings(
+            ["No cost", "NosMall ND", "NPC gold"]
+        )
+        cost_type.set_selected(0)
+        form["cost_type"] = cost_type
+        cost = Gtk.SpinButton.new_with_range(0, 1_000_000_000, 0.5)
+        cost.set_digits(2)
+        cost.set_value(0)
+        form["cost"] = cost
+        box.append(
+            self._field_row(
+                Gtk.Label(label="Cost"), cost_type, cost
+            )
+        )
+
+        advanced = Gtk.Expander(label="Advanced c_reg fields")
+        advanced_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=6
+        )
+        adv_widgets: dict[str, Gtk.SpinButton] = {}
+        for key, value in (
+            ("unk1", 9),
+            ("unk2", 4),
+            ("durability", 1),
+            ("medal", 2),
+        ):
+            spin = Gtk.SpinButton.new_with_range(0, 1000, 1)
+            spin.set_value(value)
+            spin.set_digits(0)
+            form[key] = spin
+            adv_widgets[key] = spin
+        advanced_box.append(
+            self._field_row(
+                Gtk.Label(label="unk1"), adv_widgets["unk1"],
+                Gtk.Label(label="unk2"), adv_widgets["unk2"],
+            )
+        )
+        advanced_box.append(
+            self._field_row(
+                Gtk.Label(label="durability"), adv_widgets["durability"],
+                Gtk.Label(label="medal"), adv_widgets["medal"],
+            )
+        )
+        advanced.set_child(advanced_box)
+        box.append(advanced)
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        save = Gtk.Button(label="Save item")
+        save.add_css_class("suggested-action")
+        save.connect("clicked", lambda *_: self._bazar_save_item())
+        clear = Gtk.Button(label="Clear")
+        clear.connect("clicked", lambda *_: self._bazar_new_item())
+        buttons.append(save)
+        buttons.append(clear)
+        box.append(buttons)
+        editor_hint = Gtk.Label(
+            label=(
+                "Relist needs Item vnum + Tab + a Min price floor. Items "
+                "without those still work in Monitor."
+            )
+        )
+        editor_hint.set_xalign(0)
+        editor_hint.set_wrap(True)
+        editor_hint.set_max_width_chars(40)
+        editor_hint.add_css_class("dim-label")
+        box.append(editor_hint)
+        return box
+
     def _build_map_page(self):
         page = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         page.set_margin_top(6)
@@ -946,10 +2484,25 @@ class Application(Gtk.Application):
             "the player; following resumes between casts. Nothing else is "
             "attacked; combat, pickup and recovery stay off."
         )
+        self.follow_mirror_check = Gtk.CheckButton(
+            label="Mirror movement & spells"
+        )
+        self.follow_mirror_check.set_active(False)
+        self.follow_mirror_check.set_tooltip_text(
+            "Replay the followed character's own walk and skill packets. "
+            "Every attached client publishes its outgoing movement and "
+            "spells to the shared mirror bus (~/.cache/ntpl/mirror), so a "
+            "second client can shadow it exactly across separate GUI "
+            "processes; the server's `mv`/`su` broadcasts are the fallback. "
+            "Self-target spells are retargeted from the player's char id to "
+            "the follower's own id. Only skills the follower has learned are "
+            "cast. Use together with Follow player."
+        )
         follow_box.append(
             self._field_row(self.follow_player_toggle, self.follow_player_entry)
         )
         follow_box.append(self.follow_attack_check)
+        follow_box.append(self.follow_mirror_check)
         sidebar.append(self._frame("Follow", follow_box))
 
         # Combat.
@@ -1186,6 +2739,9 @@ class Application(Gtk.Application):
             b"button.ntpl-off:hover { background-color: #d32f2f; }"
             b".recover-banner { background-color: #b71c1c; color: #ffffff;"
             b" padding: 4px 6px; border-radius: 4px; }"
+            b".bazar-ok { color: #33b34d; }"
+            b".bazar-bad { color: #d93025; }"
+            b".bazar-warn { color: #b8860b; }"
         )
         display = Gdk.Display.get_default()
         if display is not None and hasattr(Gtk.StyleContext, "add_provider_for_display"):
@@ -1260,6 +2816,12 @@ class Application(Gtk.Application):
             self.log_file
         ).items():
             if player_id == world.self_id:
+                # The bazar relist needs the owner name to recognise its own
+                # listing; the log's `in 1 <name> - <charId>` has it even when
+                # the GUI attached after login.
+                if name:
+                    world.player_names[player_id] = name
+                self._bazar_sync_from_world()
                 continue
             entity = world.entities.get(player_id)
             if entity is None:
@@ -2275,6 +3837,10 @@ class Application(Gtk.Application):
                 self.follow_attack_check is not None
                 and self.follow_attack_check.get_active()
             ),
+            follow_mirror=bool(
+                self.follow_mirror_check is not None
+                and self.follow_mirror_check.get_active()
+            ),
             draw_path=bool(
                 self.draw_path_toggle is not None
                 and self.draw_path_toggle.get_active()
@@ -2317,6 +3883,8 @@ class Application(Gtk.Application):
             self.follow_player_entry.set_text(config.follow_player)
         if self.follow_attack_check is not None:
             self.follow_attack_check.set_active(config.follow_attack)
+        if self.follow_mirror_check is not None:
+            self.follow_mirror_check.set_active(config.follow_mirror)
         if self.draw_path_toggle is not None:
             self.draw_path_toggle.set_active(config.draw_path)
 
@@ -3863,6 +5431,39 @@ class Application(Gtk.Application):
 
     # -- connection -----------------------------------------------------
 
+    def _mirror_writer_path(self) -> Path:
+        """This host's publisher file, unique per client/port."""
+        owner = (
+            self.attached_client.winpid
+            if self.attached_client is not None
+            else os.getpid()
+        )
+        return (
+            self.mirror_reader.directory
+            / f"client-{owner}-{self.port or 0}.jsonl"
+        )
+
+    def _open_mirror_writer(self) -> None:
+        self._close_mirror_writer()
+        if self.port is None:
+            return
+        try:
+            self.mirror_writer = MirrorWriter(path=self._mirror_writer_path())
+        except OSError:
+            self.mirror_writer = None
+
+    def _close_mirror_writer(self, remove: bool = False) -> None:
+        writer, self.mirror_writer = self.mirror_writer, None
+        if writer is None:
+            return
+        path = writer.path
+        writer.close()
+        if remove:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
     def _start_client(self, port: int | None = None) -> None:
         """(Re)start the reader thread against the selected client.
 
@@ -3872,6 +5473,9 @@ class Application(Gtk.Application):
         """
         if port is not None:
             self.port = port
+        # Publish this client's own movement/spells for another bot that
+        # follows this character (mirror bus). A reconnect restarts the file.
+        self._open_mirror_writer()
         self._client_generation += 1
         generation = self._client_generation
         old, self.client = self.client, PacketClient(self.host, self.port)
@@ -4272,6 +5876,7 @@ class Application(Gtk.Application):
         # parsed for the previous one must not leak into the new session.
         self.engine = Engine()
         self.player_targets.clear()
+        self._mirror_reset()
         self.char_id = None
         self.last_move = None
         self.status_received = False
@@ -4285,6 +5890,10 @@ class Application(Gtk.Application):
         self._ensure_spawns_loaded()
         if BOT_LOG_OVERRIDE is None:
             self._switch_bot_log(client.winpid)
+        # The bazar tab is per character too: its controller, results and
+        # config file are reset together with the world.
+        self._bazar_reset_for_attach(client.winpid)
+        self._bazar_seed_from_log()
         self.client_label = f"{client.title} · PID {client.winpid}"
         if self.window is not None:
             self.window.set_title(
@@ -4421,6 +6030,7 @@ class Application(Gtk.Application):
                 packet = Packet.from_message(message)
                 self.engine.feed(packet)
                 self._track_packet(packet)
+                self._bazar_on_packet(packet)
                 self._learn_char_id(self.engine.world.self_id)
                 # Switch the map as soon as the server announces it instead of
                 # waiting for the next 2 s auto-map tick.
@@ -4453,7 +6063,10 @@ class Application(Gtk.Application):
         return True
 
     def _track_packet(self, packet: Packet) -> None:
+        now = time.monotonic()
         if packet.direction is not Kind.RECV:
+            # The client's own outgoing action is what another host mirrors.
+            self._mirror_publish(packet)
             # Client sends are deliberately not used for interruption
             # detection: the client's own `walk` for a MoveTo need not carry
             # the exact commanded cell (it walks its internal path), so
@@ -4491,6 +6104,17 @@ class Application(Gtk.Application):
                     and (values[2], values[3]) == self.pending_target
                 ):
                     self._learn_char_id(values[1])
+                if (
+                    packet.opcode == "mv"
+                    and self.mirror_player_id is not None
+                    and values[1] == self.mirror_player_id
+                    and self._mirror_follow_active()
+                    and now - self.mirror_bus_seen_at > MIRROR_BUS_GRACE_S
+                ):
+                    # Another client's host did not publish its walk: use the
+                    # server's broadcast of the followed player's movement.
+                    self.mirror_move = (values[2], values[3])
+                    self.mirror_move_at = now
         elif packet.opcode == "at":
             values = packet.ints(1)
             if values:
@@ -4501,8 +6125,9 @@ class Application(Gtk.Application):
             # same target as the player" can follow it. Only players (type 1)
             # hitting monsters (type 3); our own hits are irrelevant here.
             values = packet.ints(4)
-            if len(values) >= 4 and values[0] == 1 and values[2] == 3:
-                now = time.monotonic()
+            if values is None:
+                return
+            if values[0] == 1 and values[2] == 3:
                 self.player_targets[values[1]] = (values[3], now)
                 if len(self.player_targets) > 32:
                     cutoff = now - FOLLOW_TARGET_TTL_S
@@ -4511,6 +6136,70 @@ class Application(Gtk.Application):
                         for char_id, entry in self.player_targets.items()
                         if entry[1] >= cutoff
                     }
+            # The fifth field is the skill vnum (mirror mode only; `u_s`
+            # carries a slot, so the broadcast is the vnum source).
+            skill = None
+            if len(packet.args) >= 5:
+                try:
+                    skill = int(packet.args[4])
+                except ValueError:
+                    skill = None
+            if (
+                skill is not None
+                and skill > 0
+                and values[0] == 1
+                and self.mirror_player_id is not None
+                and values[1] == self.mirror_player_id
+                and self._mirror_follow_active()
+                and now - self.mirror_bus_seen_at > MIRROR_BUS_GRACE_S
+            ):
+                self._mirror_queue_cast(
+                    skill, -1, values[2], values[3], now
+                )
+
+    def _mirror_publish(self, packet: Packet) -> None:
+        """Publish this client's own walk/skill for a follower to mirror."""
+        writer = self.mirror_writer
+        if writer is None or not writer.available:
+            return
+        world = self.engine.world
+        name = self._mirror_self_name()
+        if packet.opcode == "walk":
+            values = packet.ints(4)
+            if values is not None and len(values) >= 2 and (
+                values[0] >= 0 and values[1] >= 0
+            ):
+                writer.move(
+                    values[0],
+                    values[1],
+                    values[3] if len(values) >= 4 else 0,
+                    char_id=self._char_id() or 0,
+                    name=name,
+                    map_id=world.map_id,
+                )
+        elif packet.opcode == "u_s":
+            values = packet.ints(3)
+            if values is not None and len(values) >= 3:
+                slot = values[0]
+                writer.spell(
+                    skill=world.skill_vnum(slot) or 0,
+                    slot=slot,
+                    target_type=values[1],
+                    target_id=values[2],
+                    char_id=self._char_id() or 0,
+                    name=name,
+                    map_id=world.map_id,
+                )
+
+    def _mirror_self_name(self) -> str:
+        """Our own name for the bus, also for a client seen before attach."""
+        world = self.engine.world
+        if world.self_name:
+            return world.self_name
+        char_id = self._char_id()
+        if char_id is not None:
+            return self.log_names.get(char_id, "")
+        return ""
 
     # -- callbacks ------------------------------------------------------
 
@@ -4906,6 +6595,7 @@ class Application(Gtk.Application):
         self.recover_need_mp = False
         self.fight_target_id = None
         self.pending_casts.clear()
+        self._mirror_reset()
         self._set_status("bot stopped")
         self._set_path_info("stopped")
 
@@ -5001,6 +6691,303 @@ class Application(Gtk.Application):
     ) -> tuple[int, int] | None:
         """A walkable cell to path toward for a monster outside range."""
         return self._walkable_cell(monster.x, monster.y)
+
+    def _mirror_follow_active(self) -> bool:
+        """Mirror mode is only meaningful while Follow player is on."""
+        return bool(
+            self.follow_player_toggle is not None
+            and self.follow_player_toggle.get_active()
+            and self.follow_mirror_check is not None
+            and self.follow_mirror_check.get_active()
+        )
+
+    def _mirror_reset(self) -> None:
+        self.mirror_player_id = None
+        self.mirror_move = None
+        self.mirror_move_at = 0.0
+        self.mirror_casts.clear()
+        self.mirror_recent_casts.clear()
+        self.mirror_bus_seen_at = 0.0
+
+    def _mirror_poll(self, follow_name: str, now: float) -> None:
+        """Refresh the followed id and read recent actions from the bus.
+
+        Runs in the bot tick even while a walk is pending, so the latest
+        followed-player cell/spell is ready as soon as the leg completes.
+        """
+        if now - self.mirror_poll_at < 0.05:
+            return
+        self.mirror_poll_at = now
+        player = self._find_player(follow_name)
+        follower_id = self._char_id()
+        if player is not None and player.entity_id == follower_id:
+            # Following ourselves would replay our own casts forever.
+            player = None
+        self.mirror_player_id = (
+            player.entity_id
+            if player is not None
+            else (
+                int(follow_name)
+                if follow_name.isdigit()
+                and int(follow_name) != follower_id
+                else None
+            )
+        )
+        try:
+            events = self.mirror_reader.poll()
+        except OSError:
+            events = []
+        world = self.engine.world
+        for event in events:
+            if follower_id is not None and event.char_id == follower_id:
+                # Our own publisher file; never mirror ourselves.
+                continue
+            if not event.matches(follow_name, self.mirror_player_id):
+                continue
+            if (
+                event.map_id is not None
+                and world.map_id is not None
+                and event.map_id != world.map_id
+            ):
+                continue
+            self.mirror_bus_seen_at = now
+            if event.kind == KIND_MOVE:
+                self.mirror_move = (event.x, event.y)
+                self.mirror_move_at = now
+            elif event.kind == KIND_SPELL:
+                self._mirror_queue_cast(
+                    event.skill,
+                    event.slot,
+                    event.target_type,
+                    event.target_id,
+                    now,
+                )
+
+    def _mirror_queue_cast(
+        self,
+        skill: int,
+        slot: int,
+        target_type: int,
+        target_id: int,
+        now: float,
+    ) -> None:
+        """Queue one spell to replay, dropping the bus/broadcast duplicate."""
+        if skill <= 0 and slot < 0:
+            return
+        key = (
+            skill if skill > 0 else -slot,
+            target_type,
+            target_id if target_type == 3 else 0,
+        )
+        last = self.mirror_recent_casts.get(key)
+        if last is not None and now - last < MIRROR_DEDUPE_S:
+            return
+        self.mirror_recent_casts[key] = now
+        if len(self.mirror_recent_casts) > 64:
+            cutoff = now - MIRROR_CAST_TTL_S
+            self.mirror_recent_casts = {
+                cast_key: when
+                for cast_key, when in self.mirror_recent_casts.items()
+                if when >= cutoff
+            }
+        self.mirror_casts.append((skill, slot, target_type, target_id, now))
+        if len(self.mirror_casts) > MIRROR_CAST_QUEUE_MAX:
+            del self.mirror_casts[:-MIRROR_CAST_QUEUE_MAX]
+
+    def _mirror_warn(self, now: float, text: str) -> None:
+        if now >= self.mirror_warn_at:
+            self.mirror_warn_at = now + 10.0
+            self._set_status(text)
+
+    def _mirror_cast_step(self, now: float) -> bool:
+        """Cast the oldest fresh mirrored spell, if it is possible now.
+
+        A cast that fails for a temporary reason (cooldown, MP, range, a
+        lost line) stays at the head of the queue and is retried on a later
+        tick; movement still runs meanwhile. A cast that can never work
+        here (unknown vnum/slot, a third-party target, a despawned monster)
+        is dropped so it cannot block the ones behind it.
+        """
+        while self.mirror_casts:
+            skill, slot, target_type, target_id, at = self.mirror_casts[0]
+            if now - at > MIRROR_CAST_TTL_S:
+                # A reaction to an old cast is worse than no reaction.
+                self.mirror_casts.pop(0)
+                continue
+            result = self._mirror_cast(
+                skill, slot, target_type, target_id, now
+            )
+            if result is True:
+                self.mirror_casts.pop(0)
+                return True
+            if result is None:
+                self.mirror_casts.pop(0)
+                continue
+            return False
+        return False
+
+    def _mirror_cast(
+        self,
+        skill: int,
+        slot: int,
+        target_type: int,
+        target_id: int,
+        now: float,
+    ) -> bool | None:
+        """Replay the followed player's spell with our own slot and ids.
+
+        Returns True when sent, False when it may work on a later tick, and
+        None when the cast can never be mirrored here.
+        """
+        world = self.engine.world
+        vnum = skill
+        if vnum <= 0 and slot >= 0:
+            vnum = world.skill_vnum(slot) or 0
+        if vnum <= 0:
+            self._mirror_warn(
+                now, "mirror: a followed spell has no known vnum"
+            )
+            return None
+        own_slot = self._skill_slot(vnum)
+        if own_slot is None:
+            self._mirror_warn(
+                now,
+                f"mirror: spell {vnum} has no u_s slot here (not learned, "
+                "or use it once with the logger attached)",
+            )
+            return None
+        info = self.spells.get(vnum)
+        stats = world.stats
+        if (
+            info is not None
+            and info.mp_cost > 0
+            and stats.mp < info.mp_cost
+        ):
+            return False
+        if now < self.attack_cooldown_until:
+            return False
+        char_id = self._char_id()
+        monster: Entity | None = None
+        if target_type == 1:
+            # A self/ally cast in the followed client. The packet carries
+            # their char id, so replaying it verbatim would target the other
+            # character; retarget to us. A third-party ally is skipped.
+            if char_id is None:
+                return False
+            if target_id not in (0, self.mirror_player_id, char_id):
+                return None
+            target_type, target_id = 1, char_id
+        else:
+            monster = world.entities.get(target_id)
+            if monster is None or monster.kind != 3:
+                return None
+            if self._target_blocked(target_id):
+                return False
+            if not self._has_line_of_sight(monster):
+                return False
+            if not self._spell_in_range(info, monster):
+                return False
+            if not self._ensure_target(target_id, now):
+                return False
+            target_type = 3
+        packet = self._skill_packet(
+            target_id, skill=own_slot, target_type=target_type
+        )
+        if not self._send(packet):
+            return False
+        self._note_attack(
+            target_id if monster is not None else None, now
+        )
+        cast_time = info.cast_time if info is not None else 0.0
+        cooldown = (
+            max(info.cooldown, cast_time) if info is not None else 1.0
+        )
+        self.attack_cooldown_until = now + cooldown
+        self.walk_not_before = now + max(self.attack_walk_delay, cast_time)
+        target_text = "self" if monster is None else str(target_id)
+        self._set_status(
+            f"mirror spell {vnum} → {target_text}: {packet}"
+        )
+        return True
+
+    def _mirror_move_step(self, player: Entity, now: float) -> bool:
+        """Replay the followed player's latest walk destination.
+
+        The destination is the one their client commanded, so the follower
+        trails the same route instead of re-planning from the map each tick.
+        A far cell is chopped into the usual <=3-cell client MoveTo legs.
+        """
+        target = self.mirror_move
+        if target is None:
+            return False
+        if now - self.mirror_move_at > MIRROR_MOVE_TTL_S:
+            self.mirror_move = None
+            return False
+        position = self._player_cell()
+        if position is None:
+            return False
+        if target == position:
+            self.mirror_move = None
+            return False
+        if now < self.walk_not_before:
+            # A mirrored cast just played; walking resumes right after it,
+            # and the follow tick must not fall back to the normal trail.
+            return True
+        if self.map_grid is not None:
+            if not self.map_grid.is_walkable(*target):
+                nearest = self._walkable_cell(*target)
+                if nearest is None:
+                    self.mirror_move = None
+                    return False
+                target = nearest
+            distance = max(
+                abs(target[0] - position[0]),
+                abs(target[1] - position[1]),
+            )
+            if distance > MAX_MOVE_LEG_CELLS:
+                path = astar(
+                    self.map_grid, position, target, self._portal_cells()
+                )
+                if path is None or len(path) < 2:
+                    self.mirror_move = None
+                    return False
+                target = path[min(MAX_MOVE_LEG_CELLS, len(path) - 1)]
+        if target == position:
+            return False
+        if not self._client_move(target[0], target[1]):
+            return False
+        self.pending_target = target
+        self.pending_is_path = False
+        self.pending_loot_id = None
+        self.pending_since = now
+        self.pending_distance = max(
+            abs(target[0] - position[0]),
+            abs(target[1] - position[1]),
+        )
+        self.pending_until = now + min(
+            60.0,
+            max(
+                self.walk_timeout,
+                self.pending_distance * self.walk_timeout_per_cell,
+            ),
+        )
+        self._set_status(
+            f"mirror move to {target} "
+            f"(following {player.name or 'player'})"
+        )
+        return True
+
+    def _mirror_apply(self, player: Entity, now: float) -> bool:
+        """Spells first, then the latest movement, in mirror mode."""
+        own_id = self._char_id()
+        if own_id is not None and player.entity_id == own_id:
+            return False
+        self.mirror_player_id = player.entity_id
+        if not self._mirror_follow_active():
+            return False
+        if self._mirror_cast_step(now):
+            return True
+        return self._mirror_move_step(player, now)
 
     def _follow_attack_step(self, player: Entity, now: float) -> bool:
         """Attack the monster the followed player last hit, if it is in reach.
@@ -5129,6 +7116,11 @@ class Application(Gtk.Application):
             return True
         position = self._player_cell()
         if position is None:
+            return True
+        # Mirror mode replays the followed character's own walk/skill
+        # packets; it owns movement and casts before loot and follow-attack.
+        # Without fresh mirrored actions the normal trail below still runs.
+        if self._mirror_apply(player, now):
             return True
         # Loot near the player comes first; following resumes right after.
         if self._follow_loot_step(player, now):
@@ -5473,6 +7465,11 @@ class Application(Gtk.Application):
             return True
         self.dead_warned = False
         self.revive_sent_at = 0.0
+
+        # Mirror mode keeps reading the followed character's publisher file
+        # even while a walk is pending, so the next action is never stale.
+        if follow_enabled and follow_name and self._mirror_follow_active():
+            self._mirror_poll(follow_name, now)
 
         # A manual walk or a server correction moved the character while the
         # bot was driving: adopt the new cell and re-plan right away instead
@@ -6217,6 +8214,16 @@ class Application(Gtk.Application):
         self._closing = True
         self._client_generation += 1
         self._stop_bot()
+        self._close_mirror_writer(remove=True)
+        self.mirror_reader.close()
+        if self.bazar.running:
+            self.bazar.stop("shutdown")
+        if self.bazar_timer is not None:
+            GLib.source_remove(self.bazar_timer)
+            self.bazar_timer = None
+        # Do not create a stray bazar.json in a window that never used it.
+        if self._bazar_config_loaded or self.bazar.config.items:
+            self._bazar_save_config(quiet=True)
         if self.attached_client is not None:
             release_client_lock(self.attached_client.winpid)
             self.attached_client = None

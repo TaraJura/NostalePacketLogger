@@ -26,6 +26,7 @@ Schema (version 1)::
       "follow": false,           # follow a player instead of fighting
       "follow_player": "Name",    # player name, or char id as text
       "follow_attack": false,     # attack the monster the player hits
+      "follow_mirror": false,     # replay the player's walks and spells
       "draw_path": false,
       "map_id": 20,                 # map the route belongs to
       "waypoints": [[25, 118], [30, 120]],
@@ -132,6 +133,7 @@ class BotConfig:
     follow: bool = False
     follow_player: str = ""
     follow_attack: bool = False
+    follow_mirror: bool = False
     draw_path: bool = False
     map_id: int | None = None
     waypoints: list[tuple[int, int]] = field(default_factory=list)
@@ -162,6 +164,7 @@ class BotConfig:
             "follow": self.follow,
             "follow_player": self.follow_player,
             "follow_attack": self.follow_attack,
+            "follow_mirror": self.follow_mirror,
             "draw_path": self.draw_path,
             "map_id": self.map_id,
             "waypoints": [[x, y] for x, y in self.waypoints],
@@ -236,6 +239,7 @@ class BotConfig:
             follow=_as_bool(data.get("follow"), False),
             follow_player=_as_text(data.get("follow_player"), "")[:40],
             follow_attack=_as_bool(data.get("follow_attack"), False),
+            follow_mirror=_as_bool(data.get("follow_mirror"), False),
             draw_path=_as_bool(data.get("draw_path"), False),
             map_id=map_id,
             waypoints=waypoints,

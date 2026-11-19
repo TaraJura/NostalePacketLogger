@@ -61,16 +61,27 @@ See [../ipc.md](../ipc.md).
 ### NPC & Shops
 | Opcode | Dir | Description | Doc |
 |--------|-----|-------------|-----|
-| `npc_req` | SEND | Talk to NPC | [npc.md](npc.md) |
+| `npc_req` | SEND/RECV | Talk to NPC / dialog id | [npc.md](npc.md) |
 | `n_run` | SEND | NPC dialog action | [npc.md](npc.md) |
-| `shop` | RECV | Shop opened | [npc.md](npc.md) |
+| `wopen` | RECV | A window opened (also warehouses; not bazaar-specific) | [bazaar.md](bazaar.md) |
+| `shop` | RECV | Shop descriptor pushed with a merchant NPC spawn | [npc.md](npc.md) |
+
+### NosBazar (player auction house)
+| Opcode | Dir | Description | Doc |
+|--------|-----|-------------|-----|
+| `c_blist` | SEND | Bazaar listing search; count 0 = initial open | [bazaar.md](bazaar.md) |
+| `rc_blist` | RECV | Search answer; cheapest visible listing(s), may be truncated | [bazaar.md](bazaar.md) |
+| `c_slist` | SEND | Initialise the seller list | [bazaar.md](bazaar.md) |
+| `rc_slist` | RECV | Seller list answer | [bazaar.md](bazaar.md) |
+| `c_reg` | SEND | Register/relist an inventory item | [bazaar.md](bazaar.md) |
 
 ### Inventory
 | Opcode | Dir | Description | Doc |
 |--------|-----|-------------|-----|
-| `inv` | RECV | Inventory contents | [inventory.md](inventory.md) |
-| `ivn` | RECV | Inventory slot update | [inventory.md](inventory.md) |
+| `inv` | RECV | Inventory contents (`bag slot.vnum.qty …`) | [inventory.md](inventory.md) |
+| `ivn` | RECV | Inventory slot update/removal | [inventory.md](inventory.md) |
 | `mvi` | SEND | Move item in inventory | [inventory.md](inventory.md) |
+| `gold` | RECV | Own gold amount | [inventory.md](inventory.md) |
 
 ### Unknown / To Investigate
 See [unknown.md](unknown.md) for packets we've seen but haven't fully documented yet.

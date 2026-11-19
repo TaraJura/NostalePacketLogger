@@ -1,18 +1,44 @@
 # Inventory Packets
 
+Live captures are in [bazaar.md](bazaar.md#inventory-needed-for-relisting);
+the short version:
+
 ## `inv` (RECV)
 
-Full inventory contents for a bag type.
+Full inventory contents for a bag type, one token per occupied slot:
 
-*TODO: Capture by opening inventory*
+```
+inv 1 0.5119.4 1.1324.1 2.1007.1
+inv 2 0.2115.5 1.2282.11
+inv 0 27.-4962.5.7.1.0.0 30.885.0.0.0.0.0
+inv 3
+```
+
+`bag` is `0` Equip, `1` Main, `2` Etc. A token is
+`slot.vnum.quantity[.<…>]`; Equip entries carry extra fields. A bag line with no
+tokens clears that bag. The engine stores `slot index → (vnum, quantity)` for
+the NosBazar relist.
 
 ---
 
 ## `ivn` (RECV)
 
-Single inventory slot update.
+Single inventory slot update or removal:
 
-*TODO: Capture by picking up or moving items*
+```
+ivn 2 1.2282.10.0     # slot 1, vnum 2282, quantity 10
+ivn 2 1.2282.0.0      # quantity 0 removes the slot
+```
+
+---
+
+## `gold` (RECV)
+
+Own gold:
+
+```
+gold 34661 0
+```
 
 ---
 

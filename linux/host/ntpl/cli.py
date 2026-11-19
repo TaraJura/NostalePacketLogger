@@ -4,6 +4,8 @@
     ntpl send walk 19 146 0 10   inject one packet
     ntpl status                  hook addresses and state
     ntpl replay capture.log      resend the SEND packets from a log
+    ntpl db build                client data + public packet sources → SQLite
+    ntpl db packets --opcode x   search indexed packet definitions
     ntpl gui                     GTK4 window
 
 Run it without installing anything:
@@ -666,6 +668,109 @@ def cmd_map(args: argparse.Namespace) -> int:
     return 2
 
 
+def cmd_db(args: argparse.Namespace) -> int:
+    """Build/query the local game and packet database."""
+    import json
+
+    from . import database as dbmod
+
+    if args.db_command == "build":
+        result = dbmod.build(
+            args.db,
+            args.game_dir,
+            online=not args.local_only,
+            cache_dir=args.cache,
+            only=args.only_source or None,
+        )
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0
+
+    connection = dbmod.connect(args.db)
+    try:
+        if args.db_command == "stats":
+            for key, value in dbmod.stats(connection).items():
+                print(f"{key:20} {value}")
+            return 0
+
+        if args.db_command == "sources":
+            rows = connection.execute(
+                """
+                SELECT s.name, s.kind, s.license, s.revision, s.url,
+                       (SELECT COUNT(*) FROM source_files f
+                         WHERE f.source_id = s.id) AS files,
+                       (SELECT COUNT(*) FROM packets p
+                         WHERE p.source_id = s.id) AS packets
+                FROM sources s ORDER BY s.name
+                """
+            ).fetchall()
+            for row in rows:
+                print(
+                    f"{row['name']:24} {row['kind'] or '':16} "
+                    f"files={row['files']:4} packets={row['packets']:4} "
+                    f"license={row['license'] or '?':10} "
+                    f"{(row['revision'] or '')[:12]}"
+                )
+            print(f"{len(rows)} source(s)")
+            return 0
+
+        if args.db_command == "packets":
+            rows = dbmod.search_packets(
+                connection,
+                opcode=args.opcode,
+                query=args.search,
+                source=args.source,
+                limit=args.limit,
+            )
+            for row in rows:
+                print(
+                    f"{row['source_name']:22} {row['opcode']:18} "
+                    f"{row['direction']:7} {row['name'] or '':24} "
+                    f"{row['format'] or ''}"
+                )
+            print(f"{len(rows)} packet definition(s)")
+            return 0
+
+        if args.db_command == "items":
+            rows = dbmod.search_items(
+                connection,
+                query=args.search,
+                vnum=args.vnum,
+                limit=args.limit,
+            )
+            for row in rows:
+                price = "" if row["price"] is None else f" {row['price']}g"
+                print(
+                    f"{row['vnum']:6} {row['name'] or '?':40} "
+                    f"type={row['category'] or '?'}{price}"
+                )
+            print(f"{len(rows)} item(s)")
+            return 0
+
+        if args.db_command == "nosmall":
+            groups = dbmod.nosmall_groups(
+                connection, query=args.search, limit=args.limit
+            )
+            for group in groups:
+                print(
+                    f"{group.base_vnum:6} {group.name[:50]:50} "
+                    f"{' '.join(str(v) for v in group.vnums)}"
+                )
+            print(f"{len(groups)} NosMall group(s)")
+            if args.export:
+                count = dbmod.export_bazar(
+                    connection,
+                    args.export,
+                    limit=5000 if args.all else args.limit,
+                )
+                print(f"exported {count} item(s) to {args.export}")
+            return 0
+
+        print(f"unknown db command: {args.db_command}", file=sys.stderr)
+        return 2
+    finally:
+        connection.close()
+
+
 def cmd_gui(args: argparse.Namespace) -> int:
     try:
         from .gui import run_gui
@@ -825,6 +930,80 @@ def build_parser() -> argparse.ArgumentParser:
     map_best.add_argument("--log", default=None, help="packet log to read mv lines")
     map_best.add_argument("--file", default=None, help="NStcData.NOS path")
     map_best.set_defaults(handler=cmd_map)
+
+    db_parser = sub.add_parser(
+        "db",
+        help="build/query the local game + packet SQLite database",
+    )
+    db_sub = db_parser.add_subparsers(dest="db_command", required=True)
+
+    db_build = db_sub.add_parser(
+        "build", help="import client data, protocol docs and online packet repos"
+    )
+    db_build.add_argument("--db", default=None, help="database path")
+    db_build.add_argument(
+        "--game-dir",
+        default=None,
+        help="NostaleData directory (default: the local client install)",
+    )
+    db_build.add_argument(
+        "--local-only",
+        action="store_true",
+        help="do not clone/scan the public GitHub sources",
+    )
+    db_build.add_argument(
+        "--cache",
+        default=None,
+        help="clone cache directory (default: ~/.cache/ntpl/sources)",
+    )
+    db_build.add_argument(
+        "--only-source",
+        action="append",
+        default=None,
+        help="limit online imports to this source name (repeatable)",
+    )
+    db_build.set_defaults(handler=cmd_db)
+
+    db_stats = db_sub.add_parser("stats", help="row counts")
+    db_stats.add_argument("--db", default=None)
+    db_stats.set_defaults(handler=cmd_db)
+
+    db_sources = db_sub.add_parser(
+        "sources", help="list indexed projects, licenses and counts"
+    )
+    db_sources.add_argument("--db", default=None)
+    db_sources.set_defaults(handler=cmd_db)
+
+    db_packets = db_sub.add_parser("packets", help="search indexed packet definitions")
+    db_packets.add_argument("--db", default=None)
+    db_packets.add_argument("--opcode", default=None)
+    db_packets.add_argument("--search", default="")
+    db_packets.add_argument("--source", default=None)
+    db_packets.add_argument("--limit", type=int, default=50)
+    db_packets.set_defaults(handler=cmd_db)
+
+    db_items = db_sub.add_parser("items", help="search Item.dat")
+    db_items.add_argument("--db", default=None)
+    db_items.add_argument("--vnum", type=int, default=None)
+    db_items.add_argument("--search", default="")
+    db_items.add_argument("--limit", type=int, default=50)
+    db_items.set_defaults(handler=cmd_db)
+
+    db_nosmall = db_sub.add_parser(
+        "nosmall", help="list/export the full client NosMall catalog"
+    )
+    db_nosmall.add_argument("--db", default=None)
+    db_nosmall.add_argument("--search", default="")
+    db_nosmall.add_argument("--limit", type=int, default=200)
+    db_nosmall.add_argument(
+        "--export",
+        default=None,
+        help="write a BazarConfig JSON (monitor items, c_blist groups)",
+    )
+    db_nosmall.add_argument(
+        "--all", action="store_true", help="export every catalog group"
+    )
+    db_nosmall.set_defaults(handler=cmd_db)
 
     replay = sub.add_parser("replay", help="resend SEND packets from a log")
     _add_connection(replay)

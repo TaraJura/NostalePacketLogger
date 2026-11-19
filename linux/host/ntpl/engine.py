@@ -13,10 +13,12 @@ one.
 
 from __future__ import annotations
 
+import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from .bazar import BazarState
 from .protocol import Kind, Packet
 
 
@@ -61,6 +63,21 @@ class CharacterStats:
     hp_max: int = 0
     mp: int = 0
     mp_max: int = 0
+
+
+@dataclass(frozen=True)
+class InventorySlot:
+    """One occupied inventory slot.
+
+    Bags: ``0`` Equip, ``1`` Main, ``2`` Etc.  The server sends the whole bag
+    as ``inv <bag> <slot>.<vnum>.<quantity>...`` at login and updates a single
+    slot with ``ivn <bag> <slot>.<vnum>.<quantity>.<unknown>``.
+    """
+
+    bag: int
+    index: int
+    vnum: int
+    quantity: int
 
 
 @dataclass
@@ -135,12 +152,38 @@ class WorldState:
     self_hit_count: int = 0
     combat: deque[dict] = field(default_factory=lambda: deque(maxlen=100))
     last_packet: Packet | None = None
+    #: bag -> slot index -> item.  Filled from `inv`/`ivn`; an attach after
+    #: login only sees the updates that happen while the host is connected.
+    inventory: dict[int, dict[int, InventorySlot]] = field(
+        default_factory=dict
+    )
+    gold: int = 0
+    #: char id -> player name from `in 1 <name> - <charId> ...`.
+    player_names: dict[int, str] = field(default_factory=dict)
+    #: NosBazar window/NPC state (see ntpl.bazar.BazarState).
+    bazar: BazarState = field(default_factory=BazarState)
 
     @property
     def position(self) -> tuple[int, int] | None:
         if self.x is None or self.y is None:
             return None
         return (self.x, self.y)
+
+    @property
+    def self_name(self) -> str | None:
+        """The local character's name, once its `in 1` spawn was seen."""
+        if self.self_id is None:
+            return None
+        return self.player_names.get(self.self_id)
+
+    def find_inventory(self, bag: int, vnum: int) -> InventorySlot | None:
+        """First occupied slot of ``vnum`` in ``bag``, lowest slot index first."""
+        slots = self.inventory.get(bag, {})
+        for index in sorted(slots):
+            slot = slots[index]
+            if slot.vnum == vnum and slot.quantity > 0:
+                return slot
+        return None
 
     def skill_slot(self, vnum: int) -> int | None:
         """Zero-based `u_s` slot for a skill vnum, or None if not learned."""
@@ -173,6 +216,152 @@ def walk_checksum(x: int, y: int) -> int:
 Handler = Callable[[WorldState, Packet], None]
 
 
+def _on_inventory(world: WorldState, packet: Packet) -> None:
+    # inv <bag> <slot>.<vnum>.<quantity>[.<...>] ...
+    # inv 0 (Equip) has seven fields per slot, inv 1/2 three; only the first
+    # three are the slot index, template vnum and quantity.
+    args = packet.args
+    if not args:
+        return
+    try:
+        bag = int(args[0])
+    except ValueError:
+        return
+    slots: dict[int, InventorySlot] = {}
+    for token in args[1:]:
+        fields = token.split(".")
+        if len(fields) < 3:
+            continue
+        try:
+            index, vnum, quantity = (
+                int(fields[0]),
+                int(fields[1]),
+                int(fields[2]),
+            )
+        except ValueError:
+            continue
+        if index < 0 or vnum <= 0 or quantity <= 0:
+            continue
+        slots[index] = InventorySlot(bag, index, vnum, quantity)
+    world.inventory[bag] = slots
+
+
+def _on_inventory_update(world: WorldState, packet: Packet) -> None:
+    # ivn <bag> <slot>.<vnum>.<quantity>.<unknown>[...]
+    args = packet.args
+    if len(args) < 2:
+        return
+    try:
+        bag = int(args[0])
+    except ValueError:
+        return
+    fields = args[1].split(".")
+    if len(fields) < 3:
+        return
+    try:
+        index, vnum, quantity = (
+            int(fields[0]),
+            int(fields[1]),
+            int(fields[2]),
+        )
+    except ValueError:
+        return
+    slots = world.inventory.setdefault(bag, {})
+    if index < 0:
+        return
+    if vnum <= 0 or quantity <= 0:
+        slots.pop(index, None)
+    else:
+        slots[index] = InventorySlot(bag, index, vnum, quantity)
+
+
+def _on_gold(world: WorldState, packet: Packet) -> None:
+    values = packet.ints(1)
+    if values and values[0] >= 0:
+        world.gold = values[0]
+
+
+def _learn_bazar_open(world: WorldState, packet: Packet) -> None:
+    """Remember the NPC/option that opened the bazaar window.
+
+    The user normally opens the bazaar by clicking Bibi Basar; replaying that
+    interaction later needs the entity id and the dialog option, and both are
+    map/session specific.  Learning them from the client's own packets is more
+    robust than the hardcoded id in Nostale-NB.
+    """
+    state = world.bazar
+    if state.npc_req_id is None:
+        return
+    if packet.timestamp - state.npc_req_at > 15.0:
+        return
+    state.npc_id = state.npc_req_id
+    if state.n_run is not None and packet.timestamp - state.n_run_at <= 15.0:
+        option, page, entity_id = state.n_run
+        if entity_id == state.npc_req_id:
+            state.open_option = option
+            state.open_page = page
+            state.option_learned = True
+
+
+def _on_bazar_response(world: WorldState, packet: Packet) -> None:
+    # rc_blist <header> <entry>[ <entry>...] confirms the window is open and
+    # answers a c_blist search.  Entries are grouped by searched vnum; the
+    # bazar module parses the pipe-separated fields and takes the minimum
+    # visible price (the first entry need not be the cheapest).
+    state = world.bazar
+    state.open = True
+    state.response_count += 1
+    state.last_response = packet.text
+    # Controllers run on time.monotonic(); packet timestamps are wall time.
+    state.last_response_at = time.monotonic()
+    state.responses.append((state.response_count, packet.text))
+
+
+def _on_npc_req(world: WorldState, packet: Packet) -> None:
+    values = packet.ints(2)
+    if values is None:
+        return
+    entity_id = values[1]
+    state = world.bazar
+    if packet.direction is Kind.SEND:
+        state.npc_req_id = entity_id
+        state.npc_req_at = packet.timestamp
+    else:
+        state.dialog_npc_id = entity_id
+        state.dialog_at = packet.timestamp
+
+
+def _on_npc_run(world: WorldState, packet: Packet) -> None:
+    # n_run <option> <page> 2 <entityId> -- the client's dialog choice.
+    if packet.direction is not Kind.SEND:
+        return
+    values = packet.ints(4)
+    if values is None:
+        return
+    state = world.bazar
+    state.n_run = (values[0], values[1], values[3])
+    state.n_run_at = packet.timestamp
+
+
+def _on_bazar_client_open(world: WorldState, packet: Packet) -> None:
+    # The client's own initial c_blist/c_slist after clicking NosBazar is
+    # proof that the last npc_req+n_run opened the bazaar.  A filtered search
+    # (count > 0) must not be mistaken for the opening.
+    if packet.direction is not Kind.SEND:
+        return
+    if packet.opcode == "c_blist":
+        args = packet.args
+        if len(args) < 9:
+            return
+        try:
+            count = int(args[8])
+        except ValueError:
+            return
+        if count != 0:
+            return
+    _learn_bazar_open(world, packet)
+
+
 def _on_walk(world: WorldState, packet: Packet) -> None:
     coords = packet.ints(2)
     # Negative coordinates are the CLI/GUI's position probe, not a real move.
@@ -191,6 +380,16 @@ def _remember_departure(world: WorldState) -> None:
         world.pending_departure = (world.map_id, world.x, world.y)
 
 
+def _reset_bazar_map_state(world: WorldState) -> None:
+    """The bazaar window belongs to a map instance: NPC ids are map-specific."""
+    state = world.bazar
+    state.open = False
+    state.npc_id = None
+    state.dialog_npc_id = None
+    state.npc_req_id = None
+    state.n_run = None
+
+
 def _on_map(world: WorldState, packet: Packet) -> None:
     # Live: c_map 0 <mapId> <state> (state 1 = entered, 0 = leaving).
     # The first field is a type, not the map id. Reading it made every map
@@ -204,6 +403,7 @@ def _on_map(world: WorldState, packet: Packet) -> None:
         world.map_id = values[0]
     world.entities.clear()
     world.drops.clear()
+    _reset_bazar_map_state(world)
 
 
 def _on_mapout(world: WorldState, packet: Packet) -> None:
@@ -212,6 +412,7 @@ def _on_mapout(world: WorldState, packet: Packet) -> None:
     _remember_departure(world)
     world.entities.clear()
     world.drops.clear()
+    _reset_bazar_map_state(world)
 
 
 def _on_drop(world: WorldState, packet: Packet) -> None:
@@ -311,6 +512,12 @@ def _on_spawn(world: WorldState, packet: Packet) -> None:
         entity.name = name
         entity.x = x
         entity.y = y
+        world.player_names[char_id] = name
+        if len(world.player_names) > 2000:
+            # The id -> name map only feeds the bazaar owner check; a busy
+            # town over a long session must not grow without bound.
+            world.player_names.clear()
+            world.player_names[char_id] = name
         return
 
     if kind in (2, 3):
@@ -600,6 +807,14 @@ class Engine:
                 "mv": _on_move,         # RECV: entity movement
                 "drop": _on_drop,       # RECV: item dropped on the ground
                 "get": _on_get,         # RECV: pickup confirmation
+                "inv": _on_inventory,   # RECV: whole bag contents
+                "ivn": _on_inventory_update,  # RECV: one bag slot
+                "gold": _on_gold,       # RECV: own gold
+                "rc_blist": _on_bazar_response,  # RECV: bazaar search answer
+                "npc_req": _on_npc_req,  # SEND/RECV: NPC dialog
+                "n_run": _on_npc_run,   # SEND: NPC dialog option
+                "c_blist": _on_bazar_client_open,  # SEND: bazaar listing
+                "c_slist": _on_bazar_client_open,  # SEND: bazaar sellers
                 "in": _on_spawn,        # RECV: entity spawned
                 "out": _on_despawn,     # RECV: entity despawned
                 "st": _on_status,       # RECV: entity HP/status (death)

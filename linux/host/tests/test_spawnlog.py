@@ -9,7 +9,9 @@ from ntpl.spawnlog import (
     _open_log_tail,
     client_log_path,
     default_log_path,
+    load_bazaar_open,
     load_gates,
+    load_inventory,
     load_last_position,
     load_player_spawns,
     load_portals,
@@ -159,6 +161,35 @@ class SpawnLogTests(unittest.TestCase):
         self.assertEqual(
             load_portals("/nonexistent/NosTalePacketLog.txt"), {}
         )
+
+    def test_bazaar_open_learns_the_last_npc_and_option(self):
+        log = self._write(
+            "21:12:30.101 [SEND] npc_req 2 10284\r\n"
+            "21:12:31.033 [SEND] n_run 60 0 2 10284\r\n"
+            "21:12:31.139 [SEND] c_blist  0 0 0 0 0 0 0 0 0\r\n"
+            "21:12:31.139 [SEND] c_slist 0 0 0\r\n"
+            "21:13:00.101 [SEND] npc_req 2 9999\r\n"
+            "21:13:01.000 [SEND] n_run 16 1 2 9999\r\n"
+            "21:13:01.100 [SEND] c_blist 0 0 0 0 0 0 0 0 1 1285\r\n"
+        )
+        self.assertEqual(load_bazaar_open(log), (10284, 60, 0))
+
+    def test_bazaar_open_without_a_client_packet_is_none(self):
+        log = self._write("21:12:30.101 [SEND] npc_req 2 10284\r\n")
+        self.assertEqual(load_bazaar_open(log), (None, None, None))
+
+    def test_inventory_replays_updates_and_gold(self):
+        log = self._write(
+            "02:02:16.473 [RECV] inv 2 0.2115.5 1.2282.11 2.0.0\r\n"
+            "02:02:16.473 [RECV] gold 34661 0\r\n"
+            "06:48:48.421 [RECV] ivn 2 1.2282.10.0\r\n"
+            "06:48:49.421 [RECV] ivn 2 0.0.0.0\r\n"
+            "06:48:50.421 [RECV] inv 2\r\n"
+            "06:48:51.421 [RECV] inv 1 4.1323.1\r\n"
+        )
+        bags, gold = load_inventory(log)
+        self.assertEqual(bags, {2: {}, 1: {4: (1323, 1)}})
+        self.assertEqual(gold, 34661)
 
 
 class ClientLogPathTests(unittest.TestCase):

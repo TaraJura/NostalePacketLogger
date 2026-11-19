@@ -165,14 +165,20 @@ Supporting data modules:
   `[RECV] in ...` log lines for entities that spawned before the GUI attached.
 - `botconfig.py` — the JSON bot configuration (target filters, spell rules,
   combat settings), with validation/clamping and atomic save.
+- `bazar.py` — NosBazar config/items, `c_blist`/`c_reg` builders, the real
+  15-field `rc_blist` parser, and a tick-driven monitor/relist controller
+  (`~/.config/ntpl/bazar-<pid>.json` per client).
 
-The GTK4 window has **Packets**, **Map / Bot** and **Bot log** tabs. The map
-tab shows the selected grid, live entities with hover tooltips, and the own
-character, lets the user click waypoints, and draws the path. The sidebar
-groups Character (HP/MP bars + recovery banner), Path, Combat (green/red
-toggles), Targets, Spells, Loot, Recovery and Configuration. The Bot log tab
-keeps a timestamped, selectable history of every action the status bar
-reports (attacks, TARGET replies, walks, pickups, recovery, DLL errors).
+The GTK4 window has **Packets**, **Map / Bot**, **Bot log** and **NosBazar**
+tabs. The map tab shows the selected grid, live entities with hover tooltips,
+and the own character, lets the user click waypoints, and draws the path. The
+sidebar groups Character (HP/MP bars + recovery banner), Path, Combat
+(green/red toggles), Targets, Spells, Loot, Recovery and Configuration. The
+Bot log tab keeps a timestamped, selectable history of every action the status
+bar reports (attacks, TARGET replies, walks, pickups, recovery, DLL errors).
+The NosBazar tab lists configured searches with the cheapest price, seller,
+gold/ND or NPC markup, and can relist with a floor; see
+[bazar.md](bazar.md).
 The bot runs on the GLib main loop:
 
 1. recover: below the HP threshold, sit and wait for full HP;

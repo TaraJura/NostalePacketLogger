@@ -70,6 +70,13 @@ Start with [docs/architecture.md](docs/architecture.md), then:
   the Map/Bot tab, path loop, auto-attack and tooltips
 - [docs/bot-config.md](docs/bot-config.md) — monster target filters,
   conditional spell rules and JSON export/import
+- [docs/bazar.md](docs/bazar.md) — the **NosBazar** tab: cheapest-listing
+  monitor with gold/ND and NPC markup, plus floor-protected relisting
+  (ported from `TaraJura/Nostale-NB`); packet formats in
+  [docs/protocol/bazaar.md](docs/protocol/bazaar.md)
+- [docs/database.md](docs/database.md) — local SQLite **game + packet
+  database** built from the client archives and public NosTale projects;
+  includes the full NosMall catalog and an import picker in the tab
 - [docs/mcp.md](docs/mcp.md) — MCP server for agents: state, movement,
   combat, raw packets, and the local broker that lets the GUI watch too
 - [docs/handoff-2026-11-06.md](docs/handoff-2026-11-06.md) — current state and
@@ -118,6 +125,17 @@ the **live NosTale client** under Wine 11:
 `walk` packet. The character must be **standing**: sitting blocks movement and
 is controlled by the `rest` packet. Some targets are still ignored (blocked
 tile/entity); the bot stops after three rejected steps.
+
+The **NosBazar** tab (fourth page) turns the live packet stream into the
+player-auction-house workflow of `Nostale-NB`: it opens the Bibi Basar dialog
+with the client's own send path, searches configured vnums with the required
+2.5 s pacing, shows the cheapest listing and its profit (gold per NosMall ND or
+an NPC-gold multiplier), and can undercut by one gold with a `min_price` floor.
+Relisting is gated behind an explicit checkbox, your character name, a floor
+and a known inventory slot; the monitor never sends `c_reg`. The Bibi entity
+id and dialog option are learned from your own opening (or the client's DLL
+log), because they are map/session-specific. Each client keeps its own
+`~/.config/ntpl/bazar-<pid>.json`; see [docs/bazar.md](docs/bazar.md).
 
 The client's own map grids are parsed from `NostaleData/NStcData.NOS`; live
 maps so far include **2, 3, 4, 20, 98, 103** and **104**, and every observed

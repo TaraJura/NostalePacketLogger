@@ -1,44 +1,59 @@
 # NPC Interaction Packets
 
-## `npc_req` (SEND)
+Live captures from the 2026-11-18 client build (2026-11-19 session):
 
-Initiate conversation with an NPC.
+```
+[SEND] npc_req 2 10284          # request dialog with entity 10284
+[RECV] npc_req 2 10284 460      # dialog opened; 460 is the dialog id
+[SEND] n_run 60 0 2 10284       # choose option 60 (the NosBazar entry)
+```
 
-**Format**: `npc_req <entityType> <entityId>`
+Other live dialogs used `n_run 16 1 2 3095` and `n_run 5002 0 2 9583`, so the
+option id is NPC-specific and the second field is a page/modifier. The third
+field is the entity type (2 = NPC) and the fourth the entity id.
 
-*TODO: Capture by talking to NPCs*
+A server `wopen` follows some dialog choices (a warehouse used
+`wopen 28 0 1322 0`; NosBazar used `wopen 32 2 717`). `wopen` is not unique to
+one window; the NosBazar is confirmed by `rc_blist` instead
+([bazaar.md](bazaar.md)).
 
----
+## `npc_req` (SEND/RECV)
+
+**SEND format**: `npc_req <entityType> <entityId>` (`2` for NPCs).
+
+**RECV format**: `npc_req <entityType> <entityId> <dialogId>`.
+
+The client sends it when the player clicks an NPC; the host can replay it to
+open a dialog without clicking. Entity ids are per map/session; Bibi Basar
+(NosBazar) is template vnum `793`, and the port learns its id from the open.
 
 ## `n_run` (SEND)
 
-Select an option in an NPC dialog.
-
-*TODO: Capture by selecting NPC dialog options*
-
----
+`n_run <option> <page> <entityType> <entityId>` — the player's dialog choice.
+For Bibi Basar the NosBazar option is `n_run 60 0 2 <entityId>`.
 
 ## `shop` (RECV)
 
-Shop contents received after talking to a shop NPC.
+`shop <entityType> <entityId> <shopId> <menuType> <shopType> <name>` — a map
+shop descriptor pushed with the NPC spawn, **not** the "shop opened" event:
 
-*TODO: Capture by opening a shop*
+```
+shop 2 9584 1 0 45 NosBazaar
+```
 
----
+A merchant's open event is `shopping 0 0 2 <entityId>`, answered by `n_inv`
+(shop stock). The bazaar is different: it opens through `n_run 60` and answers
+with `rc_blist`.
 
 ## `buy` (SEND)
 
-Buy an item from a shop.
+*TODO: Capture by buying items.*
 
-*TODO: Capture by buying items*
-
----
-
-## NPC Interaction Flow (Expected)
+## NPC Interaction Flow
 
 1. Player clicks NPC → `ncif` SEND (select)
 2. Player double-clicks/interacts → `npc_req` SEND
-3. Server sends dialog → RECV (dialog packet TBD)
+3. Server sends `npc_req … <dialogId>` and the dialog data
 4. Player picks option → `n_run` SEND
-5. If shop → `shop` RECV
+5. If shop → `shop` RECV; if a window → `wopen` RECV
 6. If buy → `buy` SEND

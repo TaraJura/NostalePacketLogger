@@ -23,7 +23,9 @@ fi
 LOG="$(mktemp)"
 PORTALS="$(mktemp)"
 BOTLOG="$(mktemp)"
-trap 'rm -f "$LOG" "$PORTALS" "$BOTLOG"' EXIT
+BAZAR="$(mktemp)"
+MIRROR="$(mktemp -d)"
+trap 'rm -f "$LOG" "$PORTALS" "$BOTLOG" "$BAZAR"; rm -rf "$MIRROR"' EXIT
 
 run() {
     xvfb-run -a env GDK_BACKEND=x11 \
@@ -31,6 +33,8 @@ run() {
         NTPL_LOG="$LOG" \
         NTPL_PORTALS="$PORTALS" \
         NTPL_BOT_LOG="$BOTLOG" \
+        NTPL_BAZAR_CONFIG="$BAZAR" \
+        NTPL_MIRROR_DIR="$MIRROR" \
         python3 "$ROOT/test/$1"
 }
 
@@ -50,6 +54,7 @@ run gui_loot_fight_smoke.py
 run gui_follow_smoke.py
 run gui_follow_attack_smoke.py
 run gui_follow_loot_smoke.py
+run gui_follow_mirror_smoke.py
 run gui_portal_block_smoke.py
 run gui_retaliate_smoke.py
 run gui_far_leg_smoke.py
@@ -63,3 +68,6 @@ run gui_defend_first_smoke.py
 run gui_start_sit_smoke.py
 run gui_resume_smoke.py
 run gui_hold_smoke.py
+run gui_bazar_smoke.py
+run gui_bazar_relist_smoke.py
+run gui_nosmall_import_smoke.py

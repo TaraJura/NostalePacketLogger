@@ -96,26 +96,40 @@ class BotConfigTests(unittest.TestCase):
         self.assertFalse(BotConfig().follow)
         self.assertEqual(BotConfig().follow_player, "")
         self.assertFalse(BotConfig().follow_attack)
+        self.assertFalse(BotConfig().follow_mirror)
         loaded = BotConfig.from_dict(
             {
                 "follow": True,
                 "follow_player": "  Follower Friend  ",
                 "follow_attack": True,
+                "follow_mirror": True,
             }
         )
         self.assertTrue(loaded.follow)
         self.assertEqual(loaded.follow_player, "Follower Friend")
         self.assertTrue(loaded.follow_attack)
+        self.assertTrue(loaded.follow_mirror)
         self.assertEqual(
             BotConfig.from_dict({"follow": "yes"}).follow, True
         )
+        self.assertTrue(
+            BotConfig.from_dict({"follow_mirror": 1}).follow_mirror
+        )
+        self.assertFalse(
+            BotConfig.from_dict({"follow_mirror": "off"}).follow_mirror
+        )
         config = BotConfig(
-            follow=True, follow_player="Mule", follow_attack=True
+            follow=True,
+            follow_player="Mule",
+            follow_attack=True,
+            follow_mirror=True,
         )
         self.assertEqual(config.to_dict()["follow_player"], "Mule")
+        self.assertTrue(config.to_dict()["follow_mirror"])
         loaded = BotConfig.from_dict(config.to_dict())
         self.assertTrue(loaded.follow)
         self.assertTrue(loaded.follow_attack)
+        self.assertTrue(loaded.follow_mirror)
 
     def test_revive_on_death_defaults_off_and_round_trips(self):
         self.assertFalse(BotConfig().revive_on_death)

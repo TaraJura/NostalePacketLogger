@@ -38,6 +38,25 @@ class ProtocolError(ValueError):
     """A line that is not a well-formed protocol message."""
 
 
+def decode_line(raw: bytes) -> str:
+    """Decode one DLL line without mangling player names.
+
+    The transport is UTF-8, but the game client is a Windows application and
+    writes its text (player/seller names, chat) in the system ANSI codepage,
+    usually Windows-1252.  A strict UTF-8 decode with ``errors="replace"``
+    turned ``Chopper�`` into a replacement glyph in the GUI.  Keep valid
+    UTF-8 as-is, otherwise fall back to cp1252 and finally latin-1 (which
+    accepts every byte).
+    """
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            return raw.decode("cp1252")
+        except UnicodeDecodeError:
+            return raw.decode("latin-1")
+
+
 class Kind(str, Enum):
     RECV = "RECV"
     SEND = "SEND"
@@ -69,7 +88,7 @@ class Message:
     def parse(cls, line: str) -> "Message | None":
         """Parse one line. Blank lines return None; malformed lines raise."""
         if isinstance(line, bytes):
-            line = line.decode("utf-8", "replace")
+            line = decode_line(line)
 
         line = line.rstrip("\r\n")
         if not line:

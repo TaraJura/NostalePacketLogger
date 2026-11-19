@@ -272,6 +272,7 @@ window header; the **Follow player** toggle is in the Map/Bot sidebar.
 | Pickup | walk to your own/unowned drops up to 20 cells away, pick them up when adjacent, then resume the path |
 | Follow player | walk toward the named player (or char id) and stay within two cells; while on, normal combat, recovery and the drawn path are idle, but own/free drops near the player are picked up when **Pickup** is on |
 | Attack the same target as the player | while following, also hit the monster the player last attacked (`su`) as soon as it is in range — also during the approach to the player; walking resumes between casts; no other target is chosen |
+| Mirror movement & spells | replay the followed character's own `walk`/`u_s` packets from the shared cross-client mirror bus (`~/.cache/ntpl/mirror`), with the followed char id replaced by the follower's own for self-target casts; the server's `mv`/`su` broadcasts are the fallback |
 | Loop | repeat the path when it finishes |
 | Targets | all / only selected / all except selected monster templates (`vnum`); Retaliate respects the same filter |
 | Spell rule | scanned spell + Always/My HP/My MP + below/above + cooldown + Monster/Self target; ordered top to bottom; static MP/range/cooldown checks from Skill.dat |
@@ -330,6 +331,10 @@ honest source.
    last hit (their latest `su`, valid for 5 s) when it is near the player, in
    the skill's range and in line, even while still approaching the player —
    it never picks another target or chases.
+   With **Mirror movement & spells** the follower instead replays the
+   followed client's own `walk`/`u_s` actions from the mirror bus (or the
+   server broadcast when no publisher exists), retargeting self casts to its
+   own char id; mirror actions take priority over loot and follow-attack.
    With **Pickup** on, the follower also collects own/free drops within
    10 cells of the player (one `get` when adjacent, MoveTo legs otherwise)
    and then resumes following. A player that is not in sight is reported

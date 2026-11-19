@@ -299,6 +299,20 @@ Walking resumes between casts, so it fights during the approach instead of
 waiting to reach the player's spot. It never picks its own target and never
 chases the monster. Saved as `follow_attack`.
 
+**Mirror movement & spells** (checkbox in the same frame) replays the
+followed character's own outgoing `walk` and `u_s` packets. Every attached
+client publishes those actions to a shared per-user mirror bus
+(`~/.cache/ntpl/mirror`, `NTPL_MIRROR_DIR` overrides); a follower reads the
+followed character's publisher file, resolves `u_s` slots back to skill vnums,
+and replays them with its own char id. A self/ally cast whose target is the
+followed player (or the follower) is retargeted to the follower's own id, so
+a buff is applied to the right character; a third-party target is skipped.
+Only skills the follower has learned are cast, and a mirrored monster spell
+still requires range and a clear line. When no publisher is present, the
+server's `mv`/`su` broadcasts drive the same behavior (the two copies are
+deduplicated). Movement mirrors the followed client's commanded destination,
+chopped into the usual ≤3-cell client-MoveTo legs. Saved as `follow_mirror`.
+
 ## Save and load
 
 **Save config…** writes every setting below to a JSON file; **Load config…**
@@ -337,6 +351,7 @@ Example:
   "follow": false,
   "follow_player": "Follower Friend",
   "follow_attack": false,
+  "follow_mirror": false,
   "draw_path": false,
   "map_id": 20,
   "waypoints": [[25, 118], [30, 120]],

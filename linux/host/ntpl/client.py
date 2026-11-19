@@ -26,6 +26,7 @@ from .protocol import (
     Kind,
     Message,
     ProtocolError,
+    decode_line,
     default_port,
 )
 
@@ -164,7 +165,7 @@ class PacketClient:
 
         raw = bytes(self._buffer[:newline])
         del self._buffer[: newline + 1]
-        return raw.decode("utf-8", "replace").rstrip("\r")
+        return decode_line(raw).rstrip("\r")
 
     def recv(self, timeout: float | None = None) -> Message | None:
         """Return the next message, or None on timeout.
