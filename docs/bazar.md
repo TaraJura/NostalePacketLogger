@@ -22,7 +22,11 @@ The packet formats and live captures are in
    your own `npc_req`/`n_run` packets (or from this client's DLL log if the
    GUI attached later). The id appears in **Bibi id** on the tab.
 3. Add items in the right-hand **Item editor**:
-   - **Name** — display label only; the server searches by vnum.
+   - **Name** — display label only; the server searches by vnum. Item names
+     are rendered in full (wrapped, never ellipsized) in both the Items list
+     and the results table. The **Copy** button next to Name puts the full
+     name on the clipboard; right-clicking an item row or a result row does
+     the same.
    - **Search vnums** — e.g. `1261 2174`; sent as
      `c_blist 0 0 0 0 0 0 0 0 2 1261 2174`. One vnum per item gives that
      item's cheapest listing. Several vnums form the same group search as

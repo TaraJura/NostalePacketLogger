@@ -283,7 +283,7 @@ both.
 make host-test          # 195 stdlib unit tests: protocol, engine, map, config, spells
 
 make gui-test           # headless GTK4 window + map surface against a fake stream
-make bot-test           # 29 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume
+make bot-test           # 34 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, follow mirror, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
 make all test-host
 ./scripts/dev-test-wine.sh 25
 ```

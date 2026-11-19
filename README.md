@@ -46,13 +46,17 @@ workflow of [`TaraJura/Nostale-NB`](https://github.com/TaraJura/Nostale-NB):
   (gold per NosMall ND or an NPC-gold markup) and status. Results are sorted
   **most profitable first**; the **Only priced** filter (on by default) hides
   rows with no listing/answer yet, so timeouts and idle rows never crowd the
-  table. Rows are updated in place across refresh cycles — a failed update
-  keeps the last price marked stale instead of clearing the table.
+  table. Item names are rendered in full (wrapped, never ellipsized). Rows
+  are updated in place across refresh cycles — a failed update keeps the last
+  price marked stale instead of clearing the table.
 - **Relist** — undercuts the cheapest listing by one gold with a configurable
   floor. It is double-gated: **Allow live re-listing** must be on, and the
   character name, a positive floor and an inventory slot must be known. The
   status reports `register sent (no ack)` because the server sends no
   confirmation for `c_reg`.
+- **Copy names** — right-click an item row in the **Items** list or a result
+  row, or use the **Copy** button next to **Name**, to put the full item name
+  on the clipboard.
 - **Import NosMall…** — reads the local game/packet database and offers only
   items with a known **ND cost** (an unpriced item cannot show a profit), with
   pets, fairies and partner supplies excluded. Search by name/vnum, click a
@@ -74,7 +78,7 @@ sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
 make -C linux host-test                      # 278 Python unit tests
 make -C linux gui-test                       # headless GTK4 smokes (xvfb)
-make -C linux bot-test                       # 33 fake-server bot smokes
+make -C linux bot-test                       # 34 fake-server bot smokes
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path
 linux/scripts/dev-test-wine.sh 25
@@ -138,7 +142,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 ## Status
 
 The Linux port builds, its 278 unit tests pass, the three GTK4 window smokes
-and 33 bot smoke tests pass, and the real injector has been run against
+and 34 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 
 - both hooks `ACTIVE` (`recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`),

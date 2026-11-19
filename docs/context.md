@@ -7,7 +7,7 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 278 unittest cases, 3 GTK4 smokes, 33 fake-server bot
+- **Linux host**: 278 unittest cases, 3 GTK4 smokes, 34 fake-server bot
   smokes pass. Build: `make -C linux all test-host`, tests above.
 - **NosBazar tab** (fourth GUI page): monitor + floor-protected relist ported
   from `TaraJura/Nostale-NB`. It learns the Bibi Basar entity id/option from

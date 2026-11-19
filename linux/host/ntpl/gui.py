@@ -575,6 +575,55 @@ class Application(Gtk.Application):
         self._bazar_npc_autofilled = False
         self._bazar_npc_autofill_value = ""
         self._bazar_config_loaded = False
+        # Right-click "Copy item name" in the NosBazar items/results lists.
+        self._install_copy_action()
+
+    def _install_copy_action(self) -> None:
+        action = Gio.SimpleAction.new(
+            "copy-item-name", GLib.VariantType.new("s")
+        )
+        action.connect("activate", self._on_copy_item_name)
+        self.add_action(action)
+
+    def _on_copy_item_name(self, _action, parameter) -> None:
+        try:
+            name = parameter.get_string()
+        except AttributeError:
+            return
+        self._copy_text(name)
+
+    def _copy_text(self, text: str) -> None:
+        """Put an item name on the system clipboard and confirm it."""
+        text = (text or "").strip()
+        if not text:
+            return
+        display = Gdk.Display.get_default()
+        if display is None:
+            return
+        try:
+            provider = Gdk.ContentProvider.new_for_bytes(
+                "text/plain;charset=utf-8",
+                GLib.Bytes.new(text.encode("utf-8")),
+            )
+            display.get_clipboard().set_content(provider)
+        except (AttributeError, TypeError, GLib.Error):
+            self._set_status("cannot access the clipboard")
+            return
+        self._set_status(f"copied item name: {text}")
+
+    def _bazar_copy_menu(self, anchor: Gtk.Widget, name: str) -> None:
+        """A right-click menu with the one action that matters here."""
+        menu = Gio.Menu()
+        item = Gio.MenuItem.new("Copy item name", None)
+        item.set_action_and_target_value(
+            "app.copy-item-name", GLib.Variant("s", name)
+        )
+        menu.append_item(item)
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.set_has_arrow(False)
+        popover.set_parent(anchor)
+        popover.connect("closed", lambda p: p.unparent())
+        popover.popup()
 
     # -- UI -------------------------------------------------------------
 
@@ -1184,12 +1233,15 @@ class Application(Gtk.Application):
         for item in items:
             row = Gtk.ListBoxRow()
             row.item_name = item.name  # type: ignore[attr-defined]
-            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
             name = Gtk.Label(label=item.name)
             name.set_xalign(0)
             name.set_hexpand(True)
-            name.set_ellipsize(Pango.EllipsizeMode.END)
-            name.set_max_width_chars(18)
+            # Full name, wrapped instead of ellipsized: the list is the
+            # place to identify an item, so a cut-off label is useless.
+            name.set_wrap(True)
+            name.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            name.set_max_width_chars(34)
             detail = Gtk.Label(
                 label=(
                     f"{' '.join(str(v) for v in item.vnums) or 'no search'}"
@@ -1197,13 +1249,25 @@ class Application(Gtk.Application):
                     f" · min {item.min_price:,}"
                 )
             )
-            detail.set_xalign(1)
+            detail.set_xalign(0)
             detail.add_css_class("dim-label")
             detail.set_ellipsize(Pango.EllipsizeMode.END)
-            detail.set_max_width_chars(26)
+            detail.set_max_width_chars(34)
             box.append(name)
             box.append(detail)
             row.set_child(box)
+            right = Gtk.GestureClick()
+            right.set_button(3)
+
+            def on_right(
+                _gesture, _n_press, _x, _y, row=row, name=item.name
+            ) -> None:
+                self.bazar_selected_name = name
+                self.bazar_items_list.select_row(row)
+                self._bazar_copy_menu(row, name)
+
+            right.connect("pressed", on_right)
+            row.add_controller(right)
             self.bazar_items_list.append(row)
         selected = None
         child = self.bazar_items_list.get_first_child()
@@ -1832,8 +1896,9 @@ class Application(Gtk.Application):
             return
 
         grid = Gtk.Grid()
-        grid.set_column_spacing(14)
+        grid.set_column_spacing(10)
         grid.set_row_spacing(3)
+        grid.set_margin_end(14)
         grid.set_margin_top(2)
         headers = ("Item", "Cost", "NB Price", "Profit", "Seller", "Status")
         aligns = (0.0, 0.0, 1.0, 1.0, 0.0, 0.0)
@@ -1856,13 +1921,30 @@ class Application(Gtk.Application):
             for column, (text, align) in enumerate(zip(cells, aligns)):
                 label = Gtk.Label(label=text)
                 label.set_xalign(align)
-                label.set_ellipsize(Pango.EllipsizeMode.END)
                 if column == 0:
-                    label.set_max_width_chars(22)
-                elif column == 4:
-                    label.set_max_width_chars(18)
-                elif column == 5:
-                    label.set_max_width_chars(26)
+                    # Render the full item name; wrap long names instead of
+                    # cutting them with an ellipsis. 30 chars keeps the price,
+                    # seller and status columns visible in the narrow pane.
+                    label.set_wrap(True)
+                    label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                    label.set_max_width_chars(30)
+                    label.set_hexpand(True)
+                    right = Gtk.GestureClick()
+                    right.set_button(3)
+
+                    def on_right(
+                        _gesture, _n_press, _x, _y, label=label, name=text
+                    ) -> None:
+                        self._bazar_copy_menu(label, name)
+
+                    right.connect("pressed", on_right)
+                    label.add_controller(right)
+                else:
+                    label.set_ellipsize(Pango.EllipsizeMode.END)
+                    if column == 4:
+                        label.set_max_width_chars(18)
+                    elif column == 5:
+                        label.set_max_width_chars(26)
                 if column == 5:
                     if quote.status == "ok":
                         label.add_css_class("bazar-ok")
@@ -2126,7 +2208,7 @@ class Application(Gtk.Application):
             Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
         )
         items_scroll.set_min_content_height(140)
-        items_scroll.set_max_content_height(220)
+        items_scroll.set_max_content_height(280)
         items_box.append(items_scroll)
         item_buttons = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL, spacing=6
@@ -2219,9 +2301,18 @@ class Application(Gtk.Application):
             form[key] = widget
             return widget
 
+        name_entry = entry("name", "display name", 18)
+        copy_name = Gtk.Button(label="Copy")
+        copy_name.set_tooltip_text(
+            "Copy the item name to the clipboard (also available by "
+            "right-clicking an item row or a result row)"
+        )
+        copy_name.connect(
+            "clicked", lambda *_: self._copy_text(name_entry.get_text())
+        )
         box.append(
             self._field_row(
-                Gtk.Label(label="Name"), entry("name", "display name", 18)
+                Gtk.Label(label="Name"), name_entry, copy_name
             )
         )
         box.append(
