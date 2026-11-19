@@ -62,7 +62,7 @@ From `linux/`:
 ```bash
 make host-test      # 278 unittest cases
 make gui-test       # 3 headless GTK4 smokes: packet window, picker, multi-client
-make bot-test       # 34 smokes: combat, rules/config, recovery, follow, follow mirror, NosBazar monitor/relist/copy, NosMall import filters
+make bot-test       # 35 smokes: combat, rules/config, recovery, follow, follow mirror, follow nameless/char id, NosBazar monitor/relist/copy, NosMall import filters
 ```
 
 The tests start a fake TCP server, so they need neither the DLL nor Wine. The

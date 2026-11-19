@@ -283,6 +283,13 @@ player who spawned before the GUI attached is seeded from the client's own
 log (`in`/`mv`). When the player is out of sight the status line says so
 (throttled to once per 5 s) and the bot waits instead of exploring.
 
+The "not in sight" line now also lists the visible player names and any
+**unnamed** player char ids. A character who was already in view when the DLL
+was injected has no `in 1 <name> - <id>` packet in the log, so the host knows
+their position from `mv 1 <id>` but never learned their name. Enter that
+**char id** in the Follow field instead of the name (Follow accepts either)
+and the bot follows the same entity immediately.
+
 **Loot while following**: with the normal **Pickup** toggle on, the follower
 also collects own/free drops lying within 10 cells of the followed player —
 one `get` when adjacent, the usual client-MoveTo legs otherwise — and then

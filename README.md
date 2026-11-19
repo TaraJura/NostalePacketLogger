@@ -78,7 +78,7 @@ sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
 make -C linux host-test                      # 278 Python unit tests
 make -C linux gui-test                       # headless GTK4 smokes (xvfb)
-make -C linux bot-test                       # 34 fake-server bot smokes
+make -C linux bot-test                       # 35 fake-server bot smokes
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path
 linux/scripts/dev-test-wine.sh 25
@@ -142,7 +142,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 ## Status
 
 The Linux port builds, its 278 unit tests pass, the three GTK4 window smokes
-and 34 bot smoke tests pass, and the real injector has been run against
+and 35 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 
 - both hooks `ACTIVE` (`recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`),

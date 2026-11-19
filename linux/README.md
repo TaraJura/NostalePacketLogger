@@ -67,7 +67,7 @@ make -C linux all test-host
 make -C linux host-test          # 278 cases: protocol, client, engine, mapdata, config, names, noscrypto, headless, gameforge auth, client locks, bazar, database, mirror
 make -C linux gui-test           # headless GTK4: map switch, tooltips, toggles,
                                  # banner, client picker, multi-client locks
-make -C linux bot-test           # 34 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, cross-client follow mirror, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
+make -C linux bot-test           # 35 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, cross-client follow mirror, follow nameless/char id, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
 ./linux/scripts/dev-test-wine.sh 25
 ```
 

@@ -2562,7 +2562,7 @@ class Application(Gtk.Application):
         )
         self._bind_toggle_color(self.follow_player_toggle)
         self.follow_player_entry = Gtk.Entry()
-        self.follow_player_entry.set_placeholder_text("player name")
+        self.follow_player_entry.set_placeholder_text("player name or char id")
         self.follow_player_entry.set_max_length(40)
         self.follow_attack_check = Gtk.CheckButton(
             label="Attack the same target as the player"
@@ -7188,6 +7188,51 @@ class Application(Gtk.Application):
         )
         return True
 
+    def _follow_missing_text(self, name: str) -> str:
+        """Explain why a follow target was not found, including char ids.
+
+        The client only sends an entity's name in its ``in 1 <name> - <id>``
+        spawn. A player already in view when the DLL is injected never sends
+        that packet again, so the host knows the position (from ``mv 1 <id>``)
+        but not the name. Such a player is still followable by char id.
+        """
+        world = self.engine.world
+        own_id = self._char_id()
+        named: list[str] = []
+        unnamed: list[int] = []
+        for entity in world.entities.values():
+            if entity.kind != 1 or entity.entity_id == own_id:
+                continue
+            label = entity.name or self.log_names.get(entity.entity_id, "")
+            if label:
+                named.append(label)
+            else:
+                unnamed.append(entity.entity_id)
+        wanted = name.strip()
+        head = (
+            f"following: char {wanted} is not in sight"
+            if wanted.isdigit()
+            else f"following: {wanted} is not in sight"
+        )
+        parts = [head]
+        map_id = world.map_id
+        if map_id is None and self.map_grid is not None:
+            map_id = self.map_grid.map_id
+        if map_id is not None:
+            parts.append(f"map {map_id}")
+        if named:
+            parts.append(
+                "visible players: " + ", ".join(sorted(set(named))[:8])
+            )
+        if unnamed and not wanted.isdigit():
+            parts.append(
+                "unnamed players (enter the char id): "
+                + ", ".join(str(value) for value in sorted(set(unnamed))[:8])
+            )
+        if not named and not unnamed:
+            parts.append("no other player visible — same map and closer?")
+        return " · ".join(parts)
+
     def _follow_step(self, name: str, now: float) -> bool:
         """Walk toward the specified player; fight only the player's target.
 
@@ -7203,7 +7248,7 @@ class Application(Gtk.Application):
         if player is None:
             if now >= self.follow_warn_at:
                 self.follow_warn_at = now + 5.0
-                self._set_status(f"following: {name} is not in sight")
+                self._set_status(self._follow_missing_text(name))
             return True
         position = self._player_cell()
         if position is None:
