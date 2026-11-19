@@ -29,14 +29,50 @@ The **Map / Bot** tab draws the A\* route, monsters, portals and the bot
 controls. The picker gives each running game client its own window; a client
 already attached by another window is disabled.
 
+## NosBazar
+
+The fourth tab turns the live packet stream into the player-auction-house
+workflow of [`TaraJura/Nostale-NB`](https://github.com/TaraJura/Nostale-NB):
+
+- **Monitor** — opens the Bibi Basar dialog through the client's own send
+  path, learns the map/session-specific NPC entity id and dialog option from
+  your own opening (or the client's DLL log), and searches the configured
+  `c_blist` groups at the required 2.5 s pacing. Timed-out items get one retry
+  pass; the next refresh starts after the configured interval.
+- **Results** — parses the real 15-field `rc_blist` response, keeps the
+  cheapest visible listing per item, and shows the seller, gold price, profit
+  (gold per NosMall ND or an NPC-gold markup) and status. Results are sorted
+  **most profitable first**; the **Only priced** filter (on by default) hides
+  rows with no listing/answer yet, so timeouts and idle rows never crowd the
+  table. Rows are updated in place across refresh cycles — a failed update
+  keeps the last price marked stale instead of clearing the table.
+- **Relist** — undercuts the cheapest listing by one gold with a configurable
+  floor. It is double-gated: **Allow live re-listing** must be on, and the
+  character name, a positive floor and an inventory slot must be known. The
+  status reports `register sent (no ack)` because the server sends no
+  confirmation for `c_reg`.
+- **Import NosMall…** — reads the local game/packet database and offers only
+  items with a known **ND cost** (an unpriced item cannot show a profit), with
+  pets, fairies and partner supplies excluded. Search by name/vnum, click a
+  row or **Add all matching**, and use **Remove unpriced & pets** to clean an
+  existing item list. The curated price map comes from Nostale-NB plus any
+  item already configured with its cost.
+- **Per client** — each game window keeps its own configuration at
+  `~/.config/ntpl/bazar-<winpid>.json`; selections are saved when the item
+  list changes and on shutdown.
+
+The packet formats and state machine are documented in
+[docs/bazar.md](docs/bazar.md) and [docs/protocol/bazaar.md](docs/protocol/bazaar.md);
+the catalog/database side is in [docs/database.md](docs/database.md).
+
 ## Quick start on Linux
 
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 190 Python unit tests
+make -C linux host-test                      # 278 Python unit tests
 make -C linux gui-test                       # headless GTK4 smokes (xvfb)
-make -C linux bot-test                       # 29 fake-server bot smokes
+make -C linux bot-test                       # 33 fake-server bot smokes
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path
 linux/scripts/dev-test-wine.sh 25
@@ -99,8 +135,8 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 190 unit tests pass, the three GTK4 window smokes
-and twenty bot smoke tests pass, and the real injector has been run against
+The Linux port builds, its 278 unit tests pass, the three GTK4 window smokes
+and 33 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 
 - both hooks `ACTIVE` (`recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`),
@@ -126,16 +162,11 @@ the **live NosTale client** under Wine 11:
 is controlled by the `rest` packet. Some targets are still ignored (blocked
 tile/entity); the bot stops after three rejected steps.
 
-The **NosBazar** tab (fourth page) turns the live packet stream into the
-player-auction-house workflow of `Nostale-NB`: it opens the Bibi Basar dialog
-with the client's own send path, searches configured vnums with the required
-2.5 s pacing, shows the cheapest listing and its profit (gold per NosMall ND or
-an NPC-gold multiplier), and can undercut by one gold with a `min_price` floor.
-Relisting is gated behind an explicit checkbox, your character name, a floor
-and a known inventory slot; the monitor never sends `c_reg`. The Bibi entity
-id and dialog option are learned from your own opening (or the client's DLL
-log), because they are map/session-specific. Each client keeps its own
-`~/.config/ntpl/bazar-<pid>.json`; see [docs/bazar.md](docs/bazar.md).
+The **NosBazar** tab (fourth page) is described in
+[NosBazar](#nosbazar) above: cheapest-listing monitor, profit-sorted results,
+floor-protected relisting and the priced, non-pet NosMall importer. Each
+client keeps its own `~/.config/ntpl/bazar-<pid>.json`; see
+[docs/bazar.md](docs/bazar.md).
 
 The client's own map grids are parsed from `NostaleData/NStcData.NOS`; live
 maps so far include **2, 3, 4, 20, 98, 103** and **104**, and every observed
@@ -150,7 +181,7 @@ recovery banner, green/red active toggles, hover tooltips with monster names
 from the client's language archive, server-sent portals (`gp`) and Time-Space
 entrances (`wp`, with the nosapki stone icon and the client's own "Required
 Level N" wording), and an explicit unknown-vnum option for monsters that
-spawned before injection. **Block portals** (on by default) drops the
+spawned before injection. **Block portals** (off by default) drops the
 client's own `preq` portal request in the DLL and keeps paths off the warp
 tiles, so a farming loop cannot enter another map even from a tile it is
 already standing on. A third top-level **Bot log** tab keeps a

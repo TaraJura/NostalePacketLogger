@@ -47,9 +47,10 @@ sudo apt install python3-gi gir1.2-gtk-4.0
 | `monsternames.py` | `NSlangData_*.NOS` text archive, nibble codec, monster/skill names |
 | `spells.py` | `NSgtdData.NOS` → `Skill.dat` spell catalog (MP, range, cooldown) |
 | `spawnlog.py` | entity → vnum/player-name backfill; bazaar NPC and inventory replay from the DLL log |
-| `botconfig.py` | JSON bot configuration (targets, spell rules, settings) |
+| `botconfig.py` | JSON bot configuration (targets, spell rules, follow/mirror settings) |
 | `bazar.py` | NosBazar config, `c_blist`/`c_reg` builders, 15-field `rc_blist` parser, monitor/relist controller |
-| `nosmall.py` | full NosMall catalog parser, variant grouping, Bazar export |
+| `nosmall.py` | full NosMall catalog parser, variant grouping, ND-cost price map, pet filter, Bazar export |
+| `mirror.py` | cross-client Follow mirror bus: per-host `walk`/`u_s` publisher and reader |
 | `database.py` | SQLite game/packet database: client archives, protocol wiki, public packet repos |
 | `cli.py` | `monitor`, `walk`, `cast`, `send`, `status`, `map`, `db`, `replay`, `gui` |
 | `gui.py` | GTK4 window: packet table + Map/Bot + Bot log + NosBazar tabs; optional import |
@@ -59,9 +60,9 @@ sudo apt install python3-gi gir1.2-gtk-4.0
 From `linux/`:
 
 ```bash
-make host-test      # 257 unittest cases
+make host-test      # 278 unittest cases
 make gui-test       # 3 headless GTK4 smokes: packet window, picker, multi-client
-make bot-test       # 31 smokes: combat, rules/config, recovery, follow, NosBazar monitor and relist
+make bot-test       # 33 smokes: combat, rules/config, recovery, follow, follow mirror, NosBazar monitor/relist, NosMall import filters
 ```
 
 The tests start a fake TCP server, so they need neither the DLL nor Wine. The
