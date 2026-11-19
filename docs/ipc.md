@@ -203,9 +203,12 @@ prefix: `<prefix>/drive_c/ntpl-<pid>.port`) containing the port number, where
 The native host finds clients without probing the ports, because a probe would
 take over the DLL's single host slot and kick whoever is connected:
 
-1. `Injector.exe --list --no-tag`, run with the Wine binary and prefix taken
+1. `Injector.exe --list`, run with the Wine binary and prefix taken
    from `/proc/<linux-pid>/exe` and `/proc/<linux-pid>/environ`, reports the
-   Windows PID and window title of every `NostaleClientX.exe` window.
+   Windows PID and window title of every `NostaleClientX.exe` window. The
+   listing also numbers the visible game windows in their title bar
+   (`NosTale [#2]`), so a picker row and the game window share a number;
+   `--no-tag` turns the numbering off.
 2. `ntpl.clients` pairs each PID with its port file.
 3. The GUI (or the `Client…` button) lists them; a client with no port file is
    injected with `Injector.exe --pid <winpid> --dll <dll>` and its port file is

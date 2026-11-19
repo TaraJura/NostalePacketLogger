@@ -23,6 +23,9 @@ Schema (version 1)::
       "revive_on_death": false,     # accept dlgi #revival (10 Seeds of Power)
       "loop": true,
       "block_portals": false,    # off: portals stay usable by default
+      "follow": false,           # follow a player instead of fighting
+      "follow_player": "Name",    # player name, or char id as text
+      "follow_attack": false,     # attack the monster the player hits
       "draw_path": false,
       "map_id": 20,                 # map the route belongs to
       "waypoints": [[25, 118], [30, 120]],
@@ -126,6 +129,9 @@ class BotConfig:
     revive_on_death: bool = False
     loop: bool = True
     block_portals: bool = False
+    follow: bool = False
+    follow_player: str = ""
+    follow_attack: bool = False
     draw_path: bool = False
     map_id: int | None = None
     waypoints: list[tuple[int, int]] = field(default_factory=list)
@@ -153,6 +159,9 @@ class BotConfig:
             "revive_on_death": self.revive_on_death,
             "loop": self.loop,
             "block_portals": self.block_portals,
+            "follow": self.follow,
+            "follow_player": self.follow_player,
+            "follow_attack": self.follow_attack,
             "draw_path": self.draw_path,
             "map_id": self.map_id,
             "waypoints": [[x, y] for x, y in self.waypoints],
@@ -224,6 +233,9 @@ class BotConfig:
             revive_on_death=_as_bool(data.get("revive_on_death"), False),
             loop=_as_bool(data.get("loop"), True),
             block_portals=_as_bool(data.get("block_portals"), False),
+            follow=_as_bool(data.get("follow"), False),
+            follow_player=_as_text(data.get("follow_player"), "")[:40],
+            follow_attack=_as_bool(data.get("follow_attack"), False),
             draw_path=_as_bool(data.get("draw_path"), False),
             map_id=map_id,
             waypoints=waypoints,

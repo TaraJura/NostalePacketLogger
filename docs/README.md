@@ -7,6 +7,7 @@
 | [map.md](map.md) | maps, walkability, A*, the Map/Bot tab, path loop and auto-attack |
 | [bot-config.md](bot-config.md) | monster target filters, conditional spell rules, JSON export/import |
 | [mcp.md](mcp.md) | expose the engine to an AI agent over MCP: tools, the DLL broker, Claude Code config, security |
+| [handoff-2026-11-19.md](handoff-2026-11-19.md) | **latest handoff**: multi-client logs and window numbering, follow mode (loot/attack), strict focus, recovery priority and configured thresholds, route resume/click behavior, the 96 MB log freeze fix |
 | [handoff-2026-11-06.md](handoff-2026-11-06.md) | **read after a reboot**: current state, why Gameforge shows "Ve hře", exact reinjection + auto-attack test procedure |
 | [live-session-2026-11-06.md](live-session-2026-11-06.md) | what was verified on the running client, the bugs fixed, the mechanics learned, open items |
 | [feature-review-2026-11-06.md](feature-review-2026-11-06.md) | feature inventory, automated coverage and the live combination-test matrix |
@@ -28,7 +29,7 @@ the host differ, the game's packets do not.
 - **Windows tree (`windows/`)** — the original working implementation. Injector
   + DLL + WinForms GUI, named pipes.
 - **Linux tree (`linux/`)** — MinGW DLL + TCP loopback + Python CLI + GTK4 GUI
-  + state engine. Builds cleanly, **190 host tests pass**, the GTK4 window
+  + state engine. Builds cleanly, **201 host tests pass**, the GTK4 window
   passes three headless smokes (packet window, client picker, multi-client
   locks), and the DLL has
   been verified against the **live NosTale client** under Wine 11: both hooks
@@ -58,7 +59,7 @@ the host differ, the game's packets do not.
   scanned from `NSgtdData.NOS` → `Skill.dat` (Always/HP/MP conditions, MP,
   range, cast time, cooldown); the whole configuration can be saved/loaded as
   JSON. `make gui-test` and `make
-  bot-test` pass (9 bot smokes, including the spell rotation, HP/MP recovery,
+  bot-test` pass (29 bot smokes, including the spell rotation, HP/MP recovery,
   finish-kill-before-recovery and loot approach). See
   [map.md](map.md) and
   [bot-config.md](bot-config.md).

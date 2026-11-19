@@ -17,6 +17,13 @@ bool             g_cs_ready = false;
 bool             g_quiet = false;
 char             g_path[MAX_PATH] = {0};
 
+// A long session used to grow the per-client log unbounded (96 MB after six
+// hours on a busy map); every GUI attach then scanned that file several
+// times. Cap it and start a fresh file in place; the host reads the tail, so
+// only the oldest packets are lost.
+constexpr long kMaxLogBytes = 16 * 1024 * 1024;
+long g_writes_since_check = 0;
+
 bool try_open(const std::string& path) {
     FILE* f = std::fopen(path.c_str(), "w");
     if (f == nullptr) {
@@ -56,6 +63,29 @@ void write_prefix_locked(const char* direction) {
     GetLocalTime(&st);
     std::fprintf(g_file, "%02d:%02d:%02d.%03d [%s] ",
                  st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, direction);
+}
+
+// Called with g_cs held (the log writer thread is the only writer).
+void rotate_if_needed_locked() {
+    if (g_file == nullptr || g_path[0] == '\0') {
+        return;
+    }
+    if (++g_writes_since_check < 4096) {
+        return;
+    }
+    g_writes_since_check = 0;
+    const long position = std::ftell(g_file);
+    if (position >= 0 && position < kMaxLogBytes) {
+        return;
+    }
+    std::fclose(g_file);
+    g_file = std::fopen(g_path, "w");
+    if (g_file != nullptr) {
+        write_prefix_locked("STATUS");
+        std::fprintf(g_file,
+                     "log truncated at %ld KB; a new session file starts\n",
+                     position / 1024);
+    }
 }
 
 }  // namespace
@@ -115,6 +145,7 @@ void logf(const char* fmt, ...) {
     va_end(args);
 
     EnterCriticalSection(&g_cs);
+    rotate_if_needed_locked();
     write_prefix_locked("STATUS");
     std::fprintf(g_file, "%s\n", message);
     std::fflush(g_file);
@@ -127,6 +158,7 @@ void log_packet(const char* direction, const char* packet) {
     }
 
     EnterCriticalSection(&g_cs);
+    rotate_if_needed_locked();
     write_prefix_locked(direction);
     std::fprintf(g_file, "%s\n", packet);
     LeaveCriticalSection(&g_cs);

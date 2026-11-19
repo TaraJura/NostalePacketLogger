@@ -26,30 +26,40 @@ the per-session entity id. This works for monsters that spawned before the GUI
 attached because `spawnlog.py` backfills the vnum from the DLL log; see
 [map.md](map.md#entities-that-spawned-before-the-host-attached).
 
+**Fight in place when in range**: while the engaged monster is within the
+skill's range and line the bot keeps attacking without taking a drawn-path
+leg, chasing it or walking to a drop (a drop at the feet is still picked).
+If it steps out of range/cover, or combat is paused by refused casts, the
+bot does not freeze: the route (or the stationary chase) moves until it can
+hit again. A monster beyond the 15-cell search radius releases the target.
+
 **Target focus**: once the bot attacks a monster it keeps that target
-until it dies. A closer monster only becomes the target after the current one
-is gone (dead, blocked, out of the acquisition radius or without line of
-sight). The one exception is **Retaliate**: a monster that hits the
-character takes priority over the current target. Once the bot is fighting
-such an attacker it stays on it until it dies — a second monster that also
-hits the character does not steal the fight, so two attackers cannot make
-the bot ping-pong between them. A retaliate switch is named in the Bot log
-(`retaliate: <id> is attacking you; switching from <old>`), so it is never
-mistaken for a focus failure; when the attacker dies the other recent
-attacker (or the original target) is next.
+until it dies. A closer monster, another attacker, a momentarily blocked
+line or a refused cast does not steal it — **Retaliate** only chooses the
+first target (the monster that hit you) when nothing is locked, and takes
+over after the current target dies. Two attackers cannot make the bot
+ping-pong between them. The lock is released only by the server's death
+notice (`st` with 0 HP), a `TARGET` refusal from the client, or the target
+leaving the acquisition radius.
 
 Attacking also requires **line of sight**: the straight line from the
 character to the monster must not cross a blocked terrain cell, so the bot
 does not fire through town walls or rock ledges (the server refuses those
-anyway). If attacks are still refused repeatedly (safe zone, invisible
-obstacle), the bot **pauses combat** after a few refusals instead of hopping
+anyway). A locked target behind cover is kept: the bot waits or walks until
+the shot is clear. If attacks are still refused repeatedly (safe zone,
+invisible obstacle), the bot **pauses combat** after a few refusals instead
+of hopping
 to the next target; the pause ends after 30 s or once the character has
-moved five cells away. A server `cancel` is paired with the cast it ends, so
+moved five cells away, and also as soon as a resolvable monster hits the
+character (it fights back instead of standing still). A server `cancel` is paired with the cast it ends, so
 the normal end of a landed cast is not counted as a refusal even when the
 next attack has already been sent. A refused cast waits for the skill's own
 cooldown instead of retrying at once (an early retry is refused again).
-Only a target that has **never landed a hit** is treated as a client-only
-ghost and dropped after 2 refusals; a target that has been hit is kept.
+Focus fire is strict for any target that lands hits: refused casts never
+drop or switch it. A target that never lands a single hit (the server
+cancels every attack — a client-only ghost) cannot be killed and is dropped
+after 3 consecutive refusals, with a status line; a `TARGET` refusal (the
+client cannot select the object) or the target's death releases it too.
 
 **Retaliate ignores the target filter**: a monster that hits the character is
 fought even when its vnum is excluded (or unknown), because self-defence must
@@ -202,7 +212,9 @@ always uses slot 0, the skill's own range and cooldown, and a 15-cell target
 acquisition radius. Recovery runs before spell rules: below **Auto-recover
 HP/MP → Below HP/MP %** the bot finishes the current kill, then sits and
 waits until the resource that triggered recovery is full, so a heal rule with
-a lower threshold does not fire while recovery is active. Spell rules require **Auto-attack** to be
+a lower threshold does not fire while recovery is active. A fight that is
+paused by repeated refusals does not block recovery: the bot heals instead of
+waiting for a kill it cannot finish. Spell rules require **Auto-attack** to be
 on.
 
 The catalog is loaded in a background thread at startup (Skill.dat decodes
@@ -259,6 +271,34 @@ you actually want to travel to the next map. The
 setting is saved as `block_portals`; the live state is in the DLL's status line
 (`portalblock=off|BLOCKED`).
 
+## Follow a player — trail a character
+
+Type a player's name (or their char id) in the **Follow** frame and turn
+**Follow player** on, then press **Start**. The bot stands up and walks toward
+that player through the client's own MoveTo, stopping within two cells. While
+the toggle is on it does nothing else: no general attacks or targeting, no
+pickups, no recovery and no drawn path. The player is matched
+case-insensitively against live player entities of the current map; a
+player who spawned before the GUI attached is seeded from the client's own
+log (`in`/`mv`). When the player is out of sight the status line says so
+(throttled to once per 5 s) and the bot waits instead of exploring.
+
+**Loot while following**: with the normal **Pickup** toggle on, the follower
+also collects own/free drops lying within 10 cells of the followed player —
+one `get` when adjacent, the usual client-MoveTo legs otherwise — and then
+resumes following. Pickup comes before following movement and before the
+shared-target attack. This is the same Pickup toggle the normal bot uses;
+turn it off to make the follower ignore loot.
+
+**Attack the same target as the player** (checkbox in the same frame) makes
+the follower fight too: it reads the followed player's latest `su` packet
+(`su 1 <charId> 3 <monsterId> …`, valid for 5 s) and attacks that monster
+with the equipped basic skill as soon as it is in the skill's range with a
+clear line — even while the follower is still walking toward the player.
+Walking resumes between casts, so it fights during the approach instead of
+waiting to reach the player's spot. It never picks its own target and never
+chases the monster. Saved as `follow_attack`.
+
 ## Save and load
 
 **Save config…** writes every setting below to a JSON file; **Load config…**
@@ -267,7 +307,9 @@ old session), validates and clamps every value, and reports errors in the
 status bar. The drawn **route** is saved too — waypoints, the Draw path
 start point, its map id and the Draw path toggle — so loading the config
 redraws the same A* path on the map. Live entity state (monsters, drops,
-positions) is not saved. Start first walks to the route's start point; if
+positions) is not saved. Start joins the route from wherever the character
+stands — at the nearest leg, so an interrupted or manually moved character
+continues instead of walking back to the saved start point. If
 the character is sitting it stands up and waits for the server's
 confirmation before the first `MOVE`, because a seated client ignores
 MoveTo and every leg would time out.
@@ -292,6 +334,9 @@ Example:
   "revive_on_death": false,
   "loop": true,
   "block_portals": false,
+  "follow": false,
+  "follow_player": "Follower Friend",
+  "follow_attack": false,
   "draw_path": false,
   "map_id": 20,
   "waypoints": [[25, 118], [30, 120]],

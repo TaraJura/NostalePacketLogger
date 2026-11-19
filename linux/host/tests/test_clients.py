@@ -20,6 +20,7 @@ from ntpl.clients import (
     acquire_client_lock,
     client_lock_owner,
     client_lock_path,
+    list_clients,
     parse_injector_list,
     port_file,
     port_is_listening,
@@ -50,6 +51,32 @@ class ParseInjectorListTest(unittest.TestCase):
             "No NosTale client found. Start the game first.\n"
         )
         self.assertEqual(rows, [])
+
+
+class ListClientsTest(unittest.TestCase):
+    def test_listing_keeps_window_numbering_and_skips_helpers(self) -> None:
+        context = WineContext(wine="wine", prefix=Path("/p"), env={})
+        calls: list[list[str]] = []
+
+        def fake_run(_context, _injector, arguments, _timeout):
+            calls.append(list(arguments))
+            return subprocess.CompletedProcess(
+                [],
+                0,
+                stdout=(
+                    "Found 2 NosTale process(es):\n\n"
+                    "  [1] PID 624  NostaleClientX.exe  NosTale [#1]\n"
+                    "  [2] PID 625  NostaleClientX.exe  (no window title)\n"
+                ),
+                stderr="",
+            )
+
+        with mock.patch("ntpl.clients._run_injector", fake_run):
+            clients = list_clients(context, Path("/p/Injector.exe"))
+
+        self.assertEqual(calls, [["--list"]])
+        self.assertEqual([c.winpid for c in clients], [624])
+        self.assertEqual(clients[0].title, "NosTale [#1]")
 
 
 class PortFileTest(unittest.TestCase):

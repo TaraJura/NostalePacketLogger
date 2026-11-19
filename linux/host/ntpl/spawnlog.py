@@ -18,6 +18,7 @@ handles a reused entity id.
 
 from __future__ import annotations
 
+import io
 import os
 import re
 from pathlib import Path
@@ -30,12 +31,47 @@ _SU_MARKER = "[RECV] su "
 _WALK_MARKER = "[SEND] walk "
 _CMAP_MARKER = "[RECV] c_map "
 _MAPOUT_MARKER = "[RECV] mapout"
+_OUT_MARKER = "[RECV] out "
 _MV_MARKER = "[RECV] mv "
 _TP_MARKER = "[RECV] tp "
 _GP_MARKER = "[RECV] gp "
 _WP_MARKER = "[RECV] wp "
 _ENTITY = re.compile(r"^([23]) (\d+) (\d+) ")
 _PLAYER = re.compile(r"^1 (.+) - (\d+) ")
+
+#: Backfill reads only the recent part of a session log. A long-running
+#: client's file can reach hundreds of megabytes (multi-hour farming), and
+#: every GUI attach used to scan all of it several times on the GTK main
+#: thread — minutes of "Not Responding". The login `ski` list is read from
+#: the head instead; everything else only needs the current session's tail.
+LOG_TAIL_BYTES = 8 * 1024 * 1024
+
+
+def _open_log_tail(
+    source: Path, tail_bytes: int = LOG_TAIL_BYTES
+) -> io.TextIOWrapper:
+    handle = open(source, "rb")
+    try:
+        size = os.fstat(handle.fileno()).st_size
+        if size > tail_bytes:
+            handle.seek(size - tail_bytes)
+            handle.readline()  # drop the partial line at the cut
+        return io.TextIOWrapper(handle, encoding="latin1", errors="replace")
+    except OSError:
+        handle.close()
+        raise
+
+
+def _log_head_lines(
+    source: Path, head_bytes: int = LOG_TAIL_BYTES
+) -> list[str]:
+    """Lines from the start of the log (the login-time `ski` list)."""
+    with open(source, "rb") as handle:
+        data = handle.read(head_bytes)
+    if len(data) == head_bytes and not data.endswith(b"\n"):
+        cut = data.rfind(b"\n")
+        data = data[: cut + 1] if cut >= 0 else b""
+    return data.decode("latin1", "replace").splitlines()
 
 
 def _ints_after(line: str, marker: str, count: int) -> list[int]:
@@ -132,7 +168,7 @@ def load_spawns(
     vnums: dict[int, int] = {}
     names: dict[int, str] = {}
     try:
-        log = open(source, "r", encoding="latin1", errors="replace")
+        log = _open_log_tail(source)
     except OSError:
         return vnums, names
 
@@ -156,6 +192,60 @@ def load_spawns(
     return vnums, names
 
 
+def load_player_spawns(
+    path: str | Path | None = None,
+) -> dict[int, tuple[str, int, int]]:
+    """Return ``charId -> (name, x, y)`` for the players in the log.
+
+    Combines the `in 1 <name> - <charId> <x> <y> ...` spawn with later
+    `mv 1 <charId> <x> <y> ...` moves (last one wins). A GUI that attaches
+    after another player spawned still knows where that player is, so
+    following by name works instead of reporting "not in sight" forever.
+    """
+    source = Path(path) if path is not None else default_log_path()
+    if source is None:
+        return {}
+    try:
+        log = _open_log_tail(source)
+    except OSError:
+        return {}
+
+    players: dict[int, tuple[str, int, int]] = {}
+    with log:
+        for line in log:
+            marker = line.find(_IN_MARKER)
+            if marker >= 0:
+                record = line[marker + len(_IN_MARKER):].strip()
+                match = _PLAYER.match(record)
+                if match is None:
+                    continue
+                try:
+                    rest = record[len(match.group(0)):].split()
+                    x, y = int(rest[0]), int(rest[1])
+                except (IndexError, ValueError):
+                    continue
+                players[int(match.group(2))] = (match.group(1).strip(), x, y)
+                continue
+            change = _ints_after(line, _CMAP_MARKER, 3)
+            if change and change[2] == 1:
+                # Entering another map clears the client's entity list.
+                players.clear()
+                continue
+            if _MAPOUT_MARKER in line:
+                players.clear()
+                continue
+            despawn = _ints_after(line, _OUT_MARKER, 2)
+            if despawn and despawn[0] == 1:
+                players.pop(despawn[1], None)
+                continue
+            values = _ints_after(line, _MV_MARKER, 4)
+            if values and values[0] == 1:
+                char_id = values[1]
+                name = players.get(char_id, ("", 0, 0))[0]
+                players[char_id] = (name, values[2], values[3])
+    return players
+
+
 def load_skill_list(
     path: str | Path | None = None,
 ) -> list[int]:
@@ -168,24 +258,25 @@ def load_skill_list(
     if source is None:
         return []
     try:
-        log = open(source, "r", encoding="latin1", errors="replace")
+        # `ski` is sent at login, i.e. at the start of the session log; the
+        # tail of a multi-hour file would not contain it.
+        lines = _log_head_lines(source)
     except OSError:
         return []
 
     pages: dict[int, list[int]] = {}
-    with log:
-        for line in log:
-            marker = line.find(_SKI_MARKER)
-            if marker < 0:
-                continue
-            values = []
-            for token in line[marker + len(_SKI_MARKER) :].split():
-                try:
-                    values.append(int(token))
-                except ValueError:
-                    break
-            if values:
-                pages[values[0]] = [n for n in values[1:] if n > 0]
+    for line in lines:
+        marker = line.find(_SKI_MARKER)
+        if marker < 0:
+            continue
+        values = []
+        for token in line[marker + len(_SKI_MARKER) :].split():
+            try:
+                values.append(int(token))
+            except ValueError:
+                break
+        if values:
+            pages[values[0]] = [n for n in values[1:] if n > 0]
 
     ordered: list[int] = []
     for page in sorted(pages):
@@ -209,7 +300,7 @@ def load_last_position(
     if source is None:
         return None, None, None, None
     try:
-        log = open(source, "r", encoding="latin1", errors="replace")
+        log = _open_log_tail(source)
     except OSError:
         return None, None, None, None
 
@@ -260,7 +351,7 @@ def load_gates(
     if source is None:
         return gates
     try:
-        log = open(source, "r", encoding="latin1", errors="replace")
+        log = _open_log_tail(source)
     except OSError:
         return gates
 
@@ -301,7 +392,7 @@ def load_timespaces(
     if source is None:
         return timespaces
     try:
-        log = open(source, "r", encoding="latin1", errors="replace")
+        log = _open_log_tail(source)
     except OSError:
         return timespaces
 
@@ -345,7 +436,7 @@ def load_portals(
     if source is None:
         return portals
     try:
-        log = open(source, "r", encoding="latin1", errors="replace")
+        log = _open_log_tail(source)
     except OSError:
         return portals
 
@@ -412,7 +503,7 @@ def load_skill_slots(
     if source is None:
         return slots, self_id
     try:
-        log = open(source, "r", encoding="latin1", errors="replace")
+        log = _open_log_tail(source)
     except OSError:
         return slots, self_id
 

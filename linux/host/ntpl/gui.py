@@ -66,6 +66,7 @@ from .spawnlog import (
     client_log_path,
     load_gates,
     load_last_position,
+    load_player_spawns,
     load_portals as load_log_portals,
     load_skill_list,
     load_skill_slots,
@@ -88,9 +89,13 @@ LOG_MAX_LINES = 4000
 LOG_TRIM_LINES = 500
 #: The Bot log tab is mirrored to this file so the log is readable outside the
 #: GUI (`tail -f`), survives a restart, and can be inspected by an agent.
-#: NTPL_BOT_LOG overrides the path; the file rotates once when it gets large.
+#: NTPL_BOT_LOG overrides the path for every window; without it each window
+#: moves to bot-<winpid>.log when it attaches, so several GUIs never interleave
+#: their actions into one file (which looks like one bot switching targets).
+#: The file rotates once when it gets large.
+BOT_LOG_OVERRIDE = os.environ.get("NTPL_BOT_LOG")
 BOT_LOG_PATH = Path(
-    os.environ.get("NTPL_BOT_LOG", str(Path.home() / ".config/ntpl/bot.log"))
+    BOT_LOG_OVERRIDE or str(Path.home() / ".config/ntpl" / "bot.log")
 )
 BOT_LOG_MAX_BYTES = 4 * 1024 * 1024
 DRAIN_INTERVAL_MS = 50
@@ -118,10 +123,12 @@ ATTACK_SEARCH_CELLS = 15
 #: the server rejects, leaving the character standing still, so every bot leg
 #: is chopped to at most this many cells.
 MAX_MOVE_LEG_CELLS = 3
-#: Consecutive `cancel` replies to attacks on the same target. The server
-#: refuses a client-only ghost entity (a monster that died while the bot was
-#: dead/out of range) forever, so after this many the bot drops the target.
-MAX_CANCEL_STREAK = 2
+#: Consecutive `cancel` replies to attacks on the same target. A target that
+#: lands hits resets the streak, so strict focus keeps it until death; a
+#: client-only ghost (a monster that died while the bot was dead/out of range)
+#: refuses every hit forever and is dropped after this many, with a status
+#: line naming it. High enough that a live fight never reaches it.
+MAX_CANCEL_STREAK = 3
 #: Unresolved casts kept to pair `su`/`cancel` replies with the attack that
 #: caused them. With a short skill cooldown the next attack is already sent
 #: when the previous cast's cancel arrives, so a cancel does not necessarily
@@ -134,11 +141,39 @@ CAST_PENDING_TTL_S = 3.0
 CANCEL_WINDOW_S = 10.0
 CANCEL_PAUSE_S = 30.0
 CANCEL_PAUSE_TRIGGER = 3
+#: TARGET selection failures (the client has no object for the id — usually a
+#: monster killed while out of view, which the server never reports with
+#: `out`) within this window pause combat briefly instead of hopping through
+#: a burst of ghost ids.
+TARGET_FAIL_WINDOW_S = 10.0
+TARGET_FAIL_TRIGGER = 3
+TARGET_FAIL_PAUSE_S = 5.0
 #: The server only accepts `get` when the character is on or next to the
 #: drop, so the bot walks to everything farther than this.
 PICKUP_RANGE_CELLS = 1
 #: Drops farther than this are ignored (usually leftovers from other fights).
 LOOT_APPROACH_CELLS = 20
+#: Keep this close to a followed player; stop walking inside this radius.
+FOLLOW_STOP_CELLS = 2
+#: `rest 1 1 <charId>` is a toggle, and its confirmation can lag when several
+#: clients share the prefix. Re-sending too early stands the character back
+#: up, so recovery never finishes and the character appears to sit/stand at
+#: random. Wait this long before repeating a sit/stand request.
+REST_RETRY_S = 5.0
+#: `_finish_kill_first` only defers recovery while the bot is actually
+#: attacking. A stale `fight_target_id` (a kill whose `st` was missed, or a
+#: fight that stopped) used to block sitting forever, so recovery only
+#: "worked" after Stop/Start.
+FINISH_KILL_GRACE_S = 12.0
+#: How long the followed player's last `su` target stays valid for
+#: "attack the same target as the player". A new hit refreshes it.
+FOLLOW_TARGET_TTL_S = 5.0
+#: While following, only drops this close to the followed player are taken,
+#: so the follower never wanders away from the player for loot.
+FOLLOW_LOOT_RADIUS = 10
+#: A waypoint counts as reached within this Chebyshev distance; standing on
+#: the route's last waypoint also means "the next leg is the first one".
+ROUTE_ARRIVE_CELLS = 1
 #: Pause after a `get` before the next pickup. The server confirms with
 #: `get 1 <charId> <dropId> 0` within a few ticks, so a pile of drops at the
 #: feet is collected at about three per second.
@@ -348,6 +383,16 @@ class Application(Gtk.Application):
         self.recover_mp_toggle = None
         self.revive_toggle = None
         self.revive_sent_at = 0.0
+        self.follow_player_toggle = None
+        self.follow_player_entry = None
+        self.follow_attack_check = None
+        # Throttle for the "player not in sight" status: the follow tick runs
+        # many times per second and used to write the same line every tick,
+        # flooding the Bot log and its file.
+        self.follow_warn_at = 0.0
+        # player char id -> (monster id they last hit, monotonic time). Fed by
+        # the server's `su` packets; only players' monster hits are kept.
+        self.player_targets: dict[int, tuple[int, float]] = {}
         self.attack_unknown_toggle = None
         self.recover_banner = None
         self.unknown_warn_at = 0.0
@@ -363,6 +408,14 @@ class Application(Gtk.Application):
         self.pending_loot_id: int | None = None
         self.pending_since = 0.0
         self.pending_until = 0.0
+        # The last MOVE the bot issued; a client walk or server `tp` to any
+        # other cell while the bot runs is a manual interruption, so the bot
+        # re-plans from the new position instead of waiting or stopping.
+        self.command_target: tuple[int, int] | None = None
+        self.command_at = 0.0
+        self.external_move = False
+        self.external_move_position: tuple[int, int] | None = None
+        self.replan_at = 0.0
         # The DLL's real player position (POS), preferred for the own marker
         # so the map follows the animation instead of the walk packet's
         # destination.
@@ -395,14 +448,13 @@ class Application(Gtk.Application):
         self.pickup_attempts: dict[int, int] = {}
         self.pickup_ignored: dict[int, float] = {}
         self.recovering = False
+        self.recovery_pending = False
         self.recover_need_hp = False
         self.recover_need_mp = False
         self.recover_rest_at = 0.0
         # The monster the bot is currently hitting; recovery waits until it
         # dies so a low bar never abandons a half-killed target.
         self.fight_target_id = None
-        # The last retaliate-driven switch already written to the log.
-        self.retaliate_logged: tuple[int, int] | None = None
         # Attack pacing / cancel retry. Every attack is queued as
         # [sent_at, landed, target_id]; the server's `su`/`cancel` replies are
         # matched to the oldest queued cast in send order. A `cancel` after a
@@ -419,6 +471,7 @@ class Application(Gtk.Application):
         self.cancel_streak = 0
         self.cancel_streak_target: int | None = None
         self.cancel_events: list[float] = []
+        self.target_fail_events: list[float] = []
         self.combat_paused_until = 0.0
         self.combat_pause_pos: tuple[int, int] | None = None
         self.dead_warned = False
@@ -435,6 +488,7 @@ class Application(Gtk.Application):
         self._bot_log_lines = 0
         self._bot_log_scroll_scheduled = False
         self._bot_log_file = None
+        self.bot_log_path = BOT_LOG_PATH
 
     # -- UI -------------------------------------------------------------
 
@@ -664,16 +718,12 @@ class Application(Gtk.Application):
         return box
 
     def _open_bot_log_file(self) -> None:
+        path = self.bot_log_path
         try:
-            BOT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            if (
-                BOT_LOG_PATH.exists()
-                and BOT_LOG_PATH.stat().st_size > BOT_LOG_MAX_BYTES
-            ):
-                BOT_LOG_PATH.replace(
-                    BOT_LOG_PATH.with_name(BOT_LOG_PATH.name + ".1")
-                )
-            self._bot_log_file = BOT_LOG_PATH.open(
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists() and path.stat().st_size > BOT_LOG_MAX_BYTES:
+                path.replace(path.with_name(path.name + ".1"))
+            self._bot_log_file = path.open(
                 "a", encoding="utf-8", buffering=1
             )
             self._bot_log_file.write(
@@ -681,6 +731,25 @@ class Application(Gtk.Application):
             )
         except OSError:
             self._bot_log_file = None
+
+    def _switch_bot_log(self, winpid: int) -> None:
+        """Move the tab's file to this client's own bot-<winpid>.log.
+
+        Called once the attached client is known. The per-client logs mirror
+        the per-client DLL logs; a shared file from several GUIs interleaves
+        two bots' actions and looks like one bot switching targets.
+        """
+        path = BOT_LOG_PATH.with_name(f"bot-{winpid}.log")
+        if path == self.bot_log_path:
+            return
+        if self._bot_log_file is not None:
+            try:
+                self._bot_log_file.close()
+            except OSError:
+                pass
+            self._bot_log_file = None
+        self.bot_log_path = path
+        self._open_bot_log_file()
 
     def _log_line(self, text: str) -> None:
         """Append one timestamped action line to the Bot log tab."""
@@ -826,9 +895,10 @@ class Application(Gtk.Application):
         self.draw_path_toggle.set_active(False)
         self.draw_path_toggle.set_tooltip_text(
             "On: the first map click sets the route start (cyan ring), later "
-            "clicks add waypoints. Start walks the character to the start "
-            "point first, then follows the drawn route. Off: a map click "
-            "walks the character there immediately."
+            "clicks add waypoints. Start joins the route from wherever the "
+            "character stands — at the nearest leg — and follows it; the "
+            "start point is not walked to. Off: a map click walks the "
+            "character there immediately."
         )
         self._bind_toggle_color(self.draw_path_toggle)
         path_box.append(self.draw_path_toggle)
@@ -848,6 +918,39 @@ class Application(Gtk.Application):
         )
         path_box.append(self.block_portal_toggle)
         sidebar.append(self._frame("Path", path_box))
+
+        # Follow a named player (a mule that trails the character you play).
+        follow_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.follow_player_toggle = Gtk.ToggleButton(label="Follow player")
+        self.follow_player_toggle.set_active(False)
+        self.follow_player_toggle.set_tooltip_text(
+            "Keep the character near the named player: it stands up and "
+            "walks toward them. While this is on it does no normal combat, "
+            "recovery or drawn path; it picks up loot near the player when "
+            "the Pickup toggle is on, and attacks the player's own target "
+            "if the checkbox below is on. Type the player's name, or their "
+            "char id, and press Start."
+        )
+        self._bind_toggle_color(self.follow_player_toggle)
+        self.follow_player_entry = Gtk.Entry()
+        self.follow_player_entry.set_placeholder_text("player name")
+        self.follow_player_entry.set_max_length(40)
+        self.follow_attack_check = Gtk.CheckButton(
+            label="Attack the same target as the player"
+        )
+        self.follow_attack_check.set_active(False)
+        self.follow_attack_check.set_tooltip_text(
+            "While following, also attack the monster the followed player is "
+            "attacking (their latest `su`) as soon as it is inside the "
+            "skill's range with a clear line — also while still walking to "
+            "the player; following resumes between casts. Nothing else is "
+            "attacked; combat, pickup and recovery stay off."
+        )
+        follow_box.append(
+            self._field_row(self.follow_player_toggle, self.follow_player_entry)
+        )
+        follow_box.append(self.follow_attack_check)
+        sidebar.append(self._frame("Follow", follow_box))
 
         # Combat.
         combat_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -1150,6 +1253,23 @@ class Application(Gtk.Application):
             if char_id is not None:
                 world.self_id = char_id
                 self._learn_char_id(char_id)
+        # A player who spawned before this GUI attached has no live `in` in
+        # memory; the log still has their spawn and movements. Seed them so
+        # Follow can find them by name instead of reporting "not in sight".
+        for player_id, (name, px, py) in load_player_spawns(
+            self.log_file
+        ).items():
+            if player_id == world.self_id:
+                continue
+            entity = world.entities.get(player_id)
+            if entity is None:
+                world.entities[player_id] = Entity(
+                    player_id, 1, name=name, x=px, y=py
+                )
+            else:
+                entity.x, entity.y = px, py
+                if not entity.name:
+                    entity.name = name
         merged = False
         # `gp` is the server's own portal list: exact and complete per map.
         for (map_id, x, y), destination in load_gates(self.log_file).items():
@@ -2019,6 +2139,8 @@ class Application(Gtk.Application):
             if target == "monster":
                 if monster is None:
                     continue
+                if not self._has_line_of_sight(monster):
+                    continue
                 if not self._spell_in_range(info, monster):
                     continue
             if info is not None and info.mp_cost > 0 and stats.mp < info.mp_cost:
@@ -2140,6 +2262,19 @@ class Application(Gtk.Application):
                 self.block_portal_toggle is not None
                 and self.block_portal_toggle.get_active()
             ),
+            follow=bool(
+                self.follow_player_toggle is not None
+                and self.follow_player_toggle.get_active()
+            ),
+            follow_player=(
+                self.follow_player_entry.get_text().strip()
+                if self.follow_player_entry is not None
+                else ""
+            ),
+            follow_attack=bool(
+                self.follow_attack_check is not None
+                and self.follow_attack_check.get_active()
+            ),
             draw_path=bool(
                 self.draw_path_toggle is not None
                 and self.draw_path_toggle.get_active()
@@ -2176,6 +2311,12 @@ class Application(Gtk.Application):
         self.loop_toggle.set_active(config.loop)
         if self.block_portal_toggle is not None:
             self.block_portal_toggle.set_active(config.block_portals)
+        if self.follow_player_toggle is not None:
+            self.follow_player_toggle.set_active(config.follow)
+        if self.follow_player_entry is not None:
+            self.follow_player_entry.set_text(config.follow_player)
+        if self.follow_attack_check is not None:
+            self.follow_attack_check.set_active(config.follow_attack)
         if self.draw_path_toggle is not None:
             self.draw_path_toggle.set_active(config.draw_path)
 
@@ -2535,7 +2676,9 @@ class Application(Gtk.Application):
 
         The pause also ends early once the character has walked away from the
         place where the refusals started, so leaving the town/safe zone
-        resumes farming without waiting for the timer.
+        resumes farming without waiting for the timer. Being attacked ends it
+        too when the attacker can be fought back: standing still while a
+        monster hits the character looked like a frozen bot.
         """
         if now >= self.combat_paused_until:
             return False
@@ -2553,6 +2696,15 @@ class Application(Gtk.Application):
             self.combat_pause_pos = None
             self._set_status("moved away; combat resumed")
             return False
+        if self._under_attack():
+            attacker = self._retaliation_target(int(self._attack_reach()))
+            if attacker is not None:
+                self.combat_paused_until = 0.0
+                self.combat_pause_pos = None
+                self.cancel_events.clear()
+                self.target_fail_events.clear()
+                self._set_status("attacked while paused; fighting back")
+                return False
         return True
 
     def _attack_reach(self) -> float:
@@ -3036,8 +3188,19 @@ class Application(Gtk.Application):
             and 0 <= cell[1] < self.map_grid.height
         ):
             return
+        self._handle_map_cell(cell, gesture.get_current_button())
 
-        if gesture.get_current_button() == 3:
+    def _handle_map_cell(self, cell: tuple[int, int], button: int = 1) -> None:
+        """One map click, already converted to a map cell.
+
+        Split from `_on_map_click` so the drawing behaviour (add/remove a
+        waypoint, walk there) is testable without synthesising widget
+        coordinates.
+        """
+        if self.map_grid is None:
+            return
+
+        if button == 3:
             if self.waypoints:
                 self.waypoints.pop()
                 self._rebuild_path()
@@ -3070,12 +3233,17 @@ class Application(Gtk.Application):
 
         if not self.bot_running and draw_path and self.path_start is None:
             # The first Draw path press defines where the route begins; it is
-            # not anchored to the character.
-            self.path_start = cell
-            self.waypoints.clear()
-            self._rebuild_path()
-            self._set_status(f"start point {cell}; click to add waypoints")
-            return
+            # not anchored to the character. A route that already has
+            # waypoints (loaded from a config, or with the start cleared) must
+            # keep them: the click then adds a waypoint instead of wiping the
+            # whole drawn path.
+            if not self.waypoints:
+                self.path_start = cell
+                self._rebuild_path()
+                self._set_status(
+                    f"start point {cell}; click to add waypoints"
+                )
+                return
 
         self.waypoints.append(cell)
         self._rebuild_path()
@@ -3178,7 +3346,7 @@ class Application(Gtk.Application):
                 char_id = self._char_id()
                 if char_id is not None:
                     self._send(f"rest 1 1 {char_id}")
-                    self.stand_sent_until = now + 2.0
+                    self.stand_sent_until = now + REST_RETRY_S
                     self._set_status(
                         "sitting; standing up before walking"
                     )
@@ -3442,9 +3610,151 @@ class Application(Gtk.Application):
                 return (entity.x, entity.y)
         return None
 
+    def _find_player(self, name: str) -> Entity | None:
+        """The live player entity matching a name or a char id.
+
+        Player spawns (`in 1 <name> - <charId> <x> <y> …`) are keyed by char
+        id and keep the full name, spaces included. A numeric entry is taken
+        as the char id, so the id shown in the tooltip/status works too.
+        """
+        wanted = name.strip()
+        if not wanted:
+            return None
+        if wanted.isdigit():
+            entity = self.engine.world.entities.get(int(wanted))
+            return entity if entity is not None and entity.kind == 1 else None
+        folded = wanted.casefold()
+        for entity in self.engine.world.entities.values():
+            if entity.kind != 1:
+                continue
+            # A player who spawned before the host attached has no `in`
+            # packet in memory; the log backfill still knows the name.
+            name = entity.name or self.log_names.get(entity.entity_id, "")
+            if name.casefold() == folded:
+                return entity
+        return None
+
+    def _resume_waypoint_index(self, position: tuple[int, int]) -> int:
+        """Which waypoint to head to first from the current cell.
+
+        Start joins the drawn route at the nearest leg instead of walking
+        back to the route start (or re-treading already visited legs): the
+        index returned is the end of the nearest segment, so an interrupted
+        or manually moved character continues wherever it stands.
+        """
+        waypoints = self.waypoints
+        if not waypoints:
+            return 0
+
+        def distance_to_segment(
+            start: tuple[int, int], end: tuple[int, int]
+        ) -> int:
+            return min(
+                max(abs(cx - position[0]), abs(cy - position[1]))
+                for cx, cy in self._segment_cells(start, end)
+            )
+
+        best_index = 0
+        if self.path_start is not None:
+            best = distance_to_segment(self.path_start, waypoints[0])
+        else:
+            best = max(
+                abs(waypoints[0][0] - position[0]),
+                abs(waypoints[0][1] - position[1]),
+            )
+        for index in range(1, len(waypoints)):
+            distance = distance_to_segment(
+                waypoints[index - 1], waypoints[index]
+            )
+            if distance < best:
+                best = distance
+                best_index = index
+        if best_index == len(waypoints) - 1:
+            # Standing at the route's last point (or past it): the next leg
+            # is the first one, so Stop/Start after finishing re-runs the
+            # route instead of idling at its end.
+            last = waypoints[-1]
+            if (
+                max(
+                    abs(last[0] - position[0]),
+                    abs(last[1] - position[1]),
+                )
+                <= ROUTE_ARRIVE_CELLS
+            ):
+                return 0
+        return best_index
+
+    def _goals_from_path(
+        self, path: list[tuple[int, int]]
+    ) -> list[tuple[int, int]]:
+        """Split a planned path into the bot's three-cell MoveTo goals."""
+        goals = [path[index] for index in range(2, len(path), 3)]
+        if not goals or goals[-1] != path[-1]:
+            goals.append(path[-1])
+        return goals
+
+    def _replan_execution(
+        self, position: tuple[int, int] | None = None
+    ) -> None:
+        """Re-plan the walk from a new position (manual interruption).
+
+        Joins the route at the nearest leg from where the character is now,
+        the same way Start does, so an interruption continues the route
+        instead of waiting for a timeout or needing Stop/Start.
+        """
+        if not self.waypoints:
+            return
+        if position is None:
+            position = self._player_cell()
+        if position is None:
+            return
+        exec_path = self._apply_execution_path(position)
+        if not exec_path:
+            return
+        self.bot_goals = self._goals_from_path(exec_path)
+        self.path_index = 0
+
+    def _apply_execution_path(
+        self, position: tuple[int, int]
+    ) -> list[tuple[int, int]]:
+        """The route the bot will actually walk, from where it stands.
+
+        The drawn preview in `path_cells` is left alone (clicks redraw the
+        route); this plans from the current position to the nearest remaining
+        leg, so Stop/Start or a manual move resumes the route instead of
+        walking back to the start.
+        """
+        if self.map_grid is None:
+            self._set_status("no map loaded")
+            return []
+        resume = self._resume_waypoint_index(position)
+        remaining = self.waypoints[resume:]
+        path: list[tuple[int, int]] = []
+        current = position
+        for waypoint in remaining:
+            leg = astar(
+                self.map_grid, current, waypoint, self._portal_cells()
+            )
+            if leg is None:
+                self._set_status(f"no path to {waypoint}")
+                return []
+            path.extend(leg)
+            current = waypoint
+        self._set_status(
+            f"path from you: {len(path)} cells, "
+            f"{len(remaining)}/{len(self.waypoints)} waypoint(s)"
+        )
+        self._set_path_info(
+            f"path: {len(path)} cells · {len(remaining)} waypoint(s)"
+        )
+        return path
+
     def _rebuild_path(self) -> None:
         self.path_cells = []
-        self.path_index = 0
+        if not self.bot_running:
+            # Drawing/editing must never rewind a running bot: the execution
+            # goals and their index belong to the Start that planned them.
+            self.path_index = 0
         if self.map_grid is None:
             return
         if not self.waypoints:
@@ -3456,8 +3766,10 @@ class Application(Gtk.Application):
                 )
             return
 
-        # A planned route starts at the first clicked point (Draw path), not
-        # at the character; Start walks to that point first.
+        # Preview of the drawn route: from the route's start point (or the
+        # character when no start is set) through every waypoint. Clicks must
+        # never shrink or reset the drawn route; the execution path is planned
+        # separately at Start (see _apply_execution_path).
         current = self.path_start
         if current is None:
             current = self._player_cell()
@@ -3702,7 +4014,9 @@ class Application(Gtk.Application):
 
         hint = Gtk.Label(
             label=(
-                "Choose the window to attach to. A client without the logger "
+                "Choose the window to attach to. Listing marks every game "
+                "window with a number in its title bar (NosTale [#2]); pick "
+                "the row with the same number. A client without the logger "
                 "is injected automatically (Inject && connect). Clients "
                 "attached by another GUI are disabled."
             )
@@ -3957,6 +4271,7 @@ class Application(Gtk.Application):
         # Another client is another character and another map: packets already
         # parsed for the previous one must not leak into the new session.
         self.engine = Engine()
+        self.player_targets.clear()
         self.char_id = None
         self.last_move = None
         self.status_received = False
@@ -3968,6 +4283,8 @@ class Application(Gtk.Application):
             )
         self.spawns_loaded = False
         self._ensure_spawns_loaded()
+        if BOT_LOG_OVERRIDE is None:
+            self._switch_bot_log(client.winpid)
         self.client_label = f"{client.title} · PID {client.winpid}"
         if self.window is not None:
             self.window.set_title(
@@ -4017,6 +4334,17 @@ class Application(Gtk.Application):
                             # the status bar (it hid action messages).
                             self._update_char_info()
                             dirty = True
+                elif message.payload.startswith("MOVE: character is sitting"):
+                    # The DLL's own MoveTo refused because the client is
+                    # seated, meaning POS/rest confirmations lagged behind.
+                    # Trust the DLL: cancel the refused leg and stand at once
+                    # instead of retrying MOVE every second.
+                    self.engine.world.resting = True
+                    self.stand_sent_until = 0.0
+                    self.pending_target = None
+                    self.pending_is_path = False
+                    self.pending_loot_id = None
+                    self._set_status(message.payload)
                 elif message.payload.startswith("TARGET "):
                     # DLL answer to a bot TARGET. The attack has already gone
                     # out in the same tick (the DLL handles commands in
@@ -4044,6 +4372,32 @@ class Application(Gtk.Application):
                                 self.engine.world.entities.pop(blocked, None)
                                 dirty = True
                         self._set_status(message.payload)
+                        # Hundreds of ids can look like monsters in the world
+                        # state while the client cannot select them (killed
+                        # while out of view, never `out`). Dropping them one
+                        # by one used to look like frantic target switching;
+                        # after a few in a row, pause combat briefly instead.
+                        now = time.monotonic()
+                        self.target_fail_events = [
+                            when
+                            for when in self.target_fail_events
+                            if now - when <= TARGET_FAIL_WINDOW_S
+                        ]
+                        self.target_fail_events.append(now)
+                        if (
+                            len(self.target_fail_events)
+                            >= TARGET_FAIL_TRIGGER
+                            and now >= self.combat_paused_until
+                        ):
+                            self.combat_paused_until = (
+                                now + TARGET_FAIL_PAUSE_S
+                            )
+                            self.combat_pause_pos = self._player_cell()
+                            self.target_fail_events.clear()
+                            self._set_status(
+                                "target selection keeps failing (the client "
+                                "has no such monster); pausing combat"
+                            )
                     elif len(parts) >= 5 and parts[2] == "OK":
                         self._log_line(
                             f"monster {parts[1]} selected "
@@ -4100,12 +4454,34 @@ class Application(Gtk.Application):
 
     def _track_packet(self, packet: Packet) -> None:
         if packet.direction is not Kind.RECV:
+            # Client sends are deliberately not used for interruption
+            # detection: the client's own `walk` for a MoveTo need not carry
+            # the exact commanded cell (it walks its internal path), so
+            # comparing it caused false "interrupted" replans. The server's
+            # `tp` below is authoritative.
             return
         if packet.opcode in ("tp", "mv"):
             values = packet.ints(4) if packet.opcode == "tp" else packet.ints(5)
             if values and values[0] == 1:
                 self.last_move = (values[0], values[1], values[2], values[3])
                 self.last_move_time = time.monotonic()
+                char_id = self._char_id()
+                if (
+                    packet.opcode == "tp"
+                    and self.bot_running
+                    and char_id is not None
+                    and values[1] == char_id
+                ):
+                    expected = self.pending_target or self.command_target
+                    if (
+                        expected is not None
+                        and (values[2], values[3]) != expected
+                    ):
+                        # The server put the character on a cell the bot did
+                        # not ask for (a correction, or the player took over
+                        # and walked). Re-plan from there.
+                        self.external_move = True
+                        self.external_move_position = (values[2], values[3])
                 # The server answers an injected walk with
                 # `tp 1 <charId> <x> <y>`; match it to the pending target to
                 # learn our own char id even before the first `rest`.
@@ -4119,6 +4495,22 @@ class Application(Gtk.Application):
             values = packet.ints(1)
             if values:
                 self._learn_char_id(values[0])
+        elif packet.opcode == "su":
+            # su <attackerType> <attackerId> <targetType> <targetId> ...
+            # Track which monster each player is hitting, so "attack the
+            # same target as the player" can follow it. Only players (type 1)
+            # hitting monsters (type 3); our own hits are irrelevant here.
+            values = packet.ints(4)
+            if len(values) >= 4 and values[0] == 1 and values[2] == 3:
+                now = time.monotonic()
+                self.player_targets[values[1]] = (values[3], now)
+                if len(self.player_targets) > 32:
+                    cutoff = now - FOLLOW_TARGET_TTL_S
+                    self.player_targets = {
+                        char_id: entry
+                        for char_id, entry in self.player_targets.items()
+                        if entry[1] >= cutoff
+                    }
 
     # -- callbacks ------------------------------------------------------
 
@@ -4292,6 +4684,8 @@ class Application(Gtk.Application):
             self._set_status(f"move failed: {exc}")
             self._stop_bot()
             return False
+        self.command_target = (x, y)
+        self.command_at = time.monotonic()
         return True
 
     def _client_target(self, entity_id: int) -> bool:
@@ -4316,7 +4710,23 @@ class Application(Gtk.Application):
         Recovery waits for it: a low HP/MP bar must not abandon a fight the
         bot already started. When the monster dies it leaves the entity list
         (the `st` death handler) and recovery starts on the next tick.
+
+        Strict focus keeps a live target even when the server refuses every
+        cast, so a paused fight must not block recovery: otherwise the bot
+        neither attacks (the refusal pause) nor heals and stands there until
+        the pause runs out. That looked like "recovery stopped working".
         """
+        if self._combat_paused(time.monotonic()):
+            return False
+        if (
+            time.monotonic() - self.last_attack_sent_at
+            > FINISH_KILL_GRACE_S
+        ):
+            # Nothing has been sent at this target for a while: it is not a
+            # fight in progress (a kill the server never reported with `st`,
+            # or a fight that already stopped). Heal now instead of waiting
+            # for a death that may never arrive.
+            return False
         entity_id = self.fight_target_id
         if entity_id is None:
             return False
@@ -4382,25 +4792,16 @@ class Application(Gtk.Application):
     def _start_bot(self) -> None:
         if self.bot_running:
             return
-        if self.waypoints:
-            # Re-plan from the current position so a route drawn earlier (or
-            # before a map change) cannot start with a stale first leg.
-            self._rebuild_path()
-        if not self.path_cells:
-            # A path is optional: without one the bot can stand and fight /
-            # pick up / recover (stationary combat mode).
-            if not (
-                (self.auto_attack_toggle is not None
-                 and self.auto_attack_toggle.get_active())
-                or (self.pickup_toggle is not None
-                    and self.pickup_toggle.get_active())
-                or (self.recover_toggle is not None
-                    and self.recover_toggle.get_active())
-                or (self.recover_mp_toggle is not None
-                    and self.recover_mp_toggle.get_active())
-            ):
-                self._set_status("add waypoints or enable combat/pickup")
-                return
+        following = bool(
+            self.follow_player_toggle is not None
+            and self.follow_player_toggle.get_active()
+        )
+        if following and (
+            self.follow_player_entry is None
+            or not self.follow_player_entry.get_text().strip()
+        ):
+            self._set_status("follow is on; type the player name first")
+            return
         position = self._player_cell()
         if position is None:
             self.start_when_located = True
@@ -4409,37 +4810,41 @@ class Application(Gtk.Application):
                 "locating character; starting when the position arrives"
             )
             return
-        if self.path_start is not None and position != self.path_start:
-            # Draw path defines a route that does not depend on where the
-            # character stands. Start walks to its starting point first, then
-            # the idle callback runs this method again for the route itself.
-            self.start_when_located = False
-            start = self.path_start
-            self._set_path_info(f"walking to route start {start}…")
-            self._start_travel(start, self._start_bot)
-            return
+        if self.waypoints:
+            # Plan the walk from where the character stands (nearest leg),
+            # without touching the drawn preview in path_cells.
+            exec_path = self._apply_execution_path(position)
+            if not exec_path:
+                self._set_status(
+                    "no walkable path to the waypoints; cannot start"
+                )
+                self._set_path_info("no path")
+                return
+        else:
+            exec_path = list(self.path_cells)
+            if not exec_path:
+                # A path is optional: without one the bot can stand and
+                # fight / pick up / recover (stationary combat mode).
+                if not (
+                    following
+                    or (self.auto_attack_toggle is not None
+                     and self.auto_attack_toggle.get_active())
+                    or (self.pickup_toggle is not None
+                        and self.pickup_toggle.get_active())
+                    or (self.recover_toggle is not None
+                        and self.recover_toggle.get_active())
+                    or (self.recover_mp_toggle is not None
+                        and self.recover_mp_toggle.get_active())
+                ):
+                    self._set_status("add waypoints or enable combat/pickup")
+                    return
         # The client's MoveTo already does the pathfinding and animation. Give
         # it a multi-cell leg per call instead of one cell: a per-cell MOVE
         # starts and stops the walk every few hundred ms, which looks robotic.
         # Three cells per MOVE is short enough that the client animates it and
         # long enough that the movement is continuous.
-        if self.path_cells:
-            self.bot_goals = [
-                self.path_cells[i] for i in range(2, len(self.path_cells), 3)
-            ]
-            if (
-                not self.bot_goals
-                or self.bot_goals[-1] != self.path_cells[-1]
-            ):
-                self.bot_goals.append(self.path_cells[-1])
-        elif self.waypoints:
-            # A* could not connect the route to the waypoints: walking the raw
-            # clicks would send far MOVEs the server rejects.
-            self._set_status(
-                "no walkable path to the waypoints; cannot start"
-            )
-            self._set_path_info("no path")
-            return
+        if exec_path:
+            self.bot_goals = self._goals_from_path(exec_path)
         else:
             self.bot_goals = []
         self.bot_running = True
@@ -4453,13 +4858,13 @@ class Application(Gtk.Application):
         self.pickup_attempts.clear()
         self.pickup_ignored.clear()
         self.recovering = False
+        self.recovery_pending = False
         self.recover_need_hp = False
         self.recover_need_mp = False
         self.recover_rest_at = 0.0
         # The monster the bot is currently hitting; recovery waits until it
         # dies so a low bar never abandons a half-killed target.
         self.fight_target_id = None
-        self.retaliate_logged = None
         # Attack pacing / cancel retry.
         self.last_attack_sent_at = 0.0
         self.last_cancel_count = self.engine.world.cancel_count
@@ -4470,6 +4875,8 @@ class Application(Gtk.Application):
         self.cancel_streak = 0
         self.cancel_streak_target = None
         self.cancel_events.clear()
+        self.target_fail_events.clear()
+        self.follow_warn_at = 0.0
         self.combat_paused_until = 0.0
         self.combat_pause_pos = None
         self.dead_warned = False
@@ -4494,10 +4901,10 @@ class Application(Gtk.Application):
             GLib.source_remove(self.bot_timer)
             self.bot_timer = None
         self.recovering = False
+        self.recovery_pending = False
         self.recover_need_hp = False
         self.recover_need_mp = False
         self.fight_target_id = None
-        self.retaliate_logged = None
         self.pending_casts.clear()
         self._set_status("bot stopped")
         self._set_path_info("stopped")
@@ -4594,6 +5001,189 @@ class Application(Gtk.Application):
     ) -> tuple[int, int] | None:
         """A walkable cell to path toward for a monster outside range."""
         return self._walkable_cell(monster.x, monster.y)
+
+    def _follow_attack_step(self, player: Entity, now: float) -> bool:
+        """Attack the monster the followed player last hit, if it is in reach.
+
+        Only when the Follow frame's "Attack the same target as the player"
+        checkbox is on. This is not general combat: the bot never picks its
+        own target and never chases the monster. It fires whenever the
+        monster is inside the skill's range with a clear line — also while
+        still walking toward the player — and resumes following between
+        casts.
+        """
+        if (
+            self.follow_attack_check is None
+            or not self.follow_attack_check.get_active()
+        ):
+            return False
+        entry = self.player_targets.get(player.entity_id)
+        if entry is None:
+            return False
+        target_id, when = entry
+        if now - when > FOLLOW_TARGET_TTL_S:
+            return False
+        monster = self.engine.world.entities.get(target_id)
+        if monster is None or monster.kind != 3:
+            return False
+        if self._target_blocked(monster.entity_id):
+            return False
+        position = self._player_cell()
+        if position is None:
+            return False
+        info = self.spells.get(self._basic_skill_vnum() or 0)
+        attack_range = (
+            float(info.range)
+            if info is not None and info.range > 0
+            else float(ATTACK_SEARCH_CELLS)
+        )
+        distance = max(
+            abs(monster.x - position[0]), abs(monster.y - position[1])
+        )
+        if distance > attack_range or not self._has_line_of_sight(monster):
+            return False
+        if now < self.attack_cooldown_until:
+            return False
+        stats = self.engine.world.stats
+        if info is not None and info.mp_cost > 0 and stats.mp < info.mp_cost:
+            return False
+        if not self._ensure_target(monster.entity_id, now):
+            return False
+        packet = self._skill_packet(monster.entity_id, skill=0)
+        if not self._send(packet):
+            return False
+        self._note_attack(monster.entity_id, now)
+        self.fight_target_id = monster.entity_id
+        cooldown = (
+            max(info.cooldown, info.cast_time) if info is not None else 1.0
+        )
+        self.attack_cooldown_until = now + cooldown
+        cast_pause = info.cast_time if info is not None else 0.0
+        self.walk_not_before = now + max(self.attack_walk_delay, cast_pause)
+        self._set_status(f"follow-attack {monster.entity_id}: {packet}")
+        return True
+
+    def _follow_loot_step(self, player: Entity, now: float) -> bool:
+        """Pick up own/free drops near the followed player.
+
+        Follow mode used to ignore loot completely. With the Pickup toggle on
+        (the same toggle the normal bot uses) the follower collects drops
+        lying within FOLLOW_LOOT_RADIUS of the player, then resumes following.
+        A drop at the feet is taken with one `get`; a farther one is walked to
+        with the usual client-MoveTo legs.
+        """
+        if (
+            self.pickup_toggle is None
+            or not self.pickup_toggle.get_active()
+        ):
+            return False
+        char_id = self._char_id()
+        if char_id is None or now < self.pickup_cooldown_until:
+            return False
+        drop = self._nearest_drop(LOOT_APPROACH_CELLS)
+        if drop is None:
+            return False
+        if (
+            max(abs(drop.x - player.x), abs(drop.y - player.y))
+            > FOLLOW_LOOT_RADIUS
+        ):
+            return False
+        position = self._player_cell()
+        if position is None:
+            return False
+        distance = max(
+            abs(drop.x - position[0]), abs(drop.y - position[1])
+        )
+        if distance > PICKUP_RANGE_CELLS:
+            if not self._walk_to_loot(drop, now):
+                self.pickup_ignored[drop.drop_id] = now + 5.0
+            return True
+        if not self._send(f"get 1 {char_id} {drop.drop_id}"):
+            return False
+        attempts = self.pickup_attempts.get(drop.drop_id, 0) + 1
+        self.pickup_attempts[drop.drop_id] = attempts
+        if attempts >= 3:
+            self.pickup_ignored[drop.drop_id] = now + 15.0
+        self.pickup_cooldown_until = now + PICKUP_COOLDOWN_S
+        self._set_status(
+            f"pickup {drop.item_vnum} x{drop.amount} ({drop.drop_id})"
+        )
+        return True
+
+    def _follow_step(self, name: str, now: float) -> bool:
+        """Walk toward the specified player; fight only the player's target.
+
+        Always returns True: follow mode owns the tick, so the general
+        combat, recovery and the drawn path stay idle until the toggle is
+        turned off. Loot is still collected when the Pickup toggle is on
+        (drops near the player), and with the "Attack the same target"
+        checkbox on the bot fires at the monster the player last hit as soon
+        as that monster is in range — it keeps walking toward the player
+        between casts instead of waiting to arrive first.
+        """
+        player = self._find_player(name)
+        if player is None:
+            if now >= self.follow_warn_at:
+                self.follow_warn_at = now + 5.0
+                self._set_status(f"following: {name} is not in sight")
+            return True
+        position = self._player_cell()
+        if position is None:
+            return True
+        # Loot near the player comes first; following resumes right after.
+        if self._follow_loot_step(player, now):
+            return True
+        # Attack the player's target whenever it is in range, even while
+        # still approaching the player. Walking resumes between casts.
+        if self._follow_attack_step(player, now):
+            return True
+        distance = max(abs(player.x - position[0]), abs(player.y - position[1]))
+        if distance <= FOLLOW_STOP_CELLS:
+            self._set_status(
+                f"following {player.name or name} "
+                f"(char {player.entity_id}, {distance} cells)"
+            )
+            return True
+        if now < self.walk_not_before:
+            return True
+        if self.map_grid is None:
+            self._set_status(f"following {name}: map data not loaded")
+            return True
+        goal = self._walkable_cell(player.x, player.y)
+        if goal is None:
+            self._set_status(
+                f"following {name}: no walkable cell near "
+                f"{player.x},{player.y}"
+            )
+            return True
+        path = astar(self.map_grid, position, goal, self._portal_cells())
+        if path is None or len(path) < 2:
+            self._set_status(f"following {name}: no walkable path")
+            return True
+        leg = path[min(3, len(path) - 1)]
+        if leg == position:
+            return True
+        if not self._client_move(leg[0], leg[1]):
+            return True
+        self.pending_target = leg
+        self.pending_is_path = False
+        self.pending_loot_id = None
+        self.pending_since = now
+        self.pending_distance = max(
+            abs(leg[0] - position[0]), abs(leg[1] - position[1])
+        )
+        self.pending_until = now + min(
+            60.0,
+            max(
+                self.walk_timeout,
+                self.pending_distance * self.walk_timeout_per_cell,
+            ),
+        )
+        self._set_status(
+            f"following {player.name or name} to {player.x},{player.y} "
+            f"({distance} cells)"
+        )
+        return True
 
     def _walk_to_loot(self, drop: GroundItem, now: float) -> bool:
         """Walk one leg toward a drop, then pick it up and resume.
@@ -4694,11 +5284,11 @@ class Application(Gtk.Application):
     def _locked_target(self, radius: int) -> Entity | None:
         """The monster the bot is already fighting, while it is still valid.
 
-        Focus fire: a closer monster must not steal the fight. Retaliate is
-        checked before this, so a monster that hits the character still gets
-        priority. The lock breaks when the target dies (the `st` death handler
-        removes it), is blocked/refused, leaves the radius or loses line of
-        sight.
+        Focus fire: nothing steals a live target — not a closer monster, not
+        another attacker, and not a momentary blocked line (the bot waits or
+        walks around instead of switching). The lock breaks only when the
+        target dies (the `st` death handler removes it), the client refuses
+        to select it (`TARGET ... ERR`), or it leaves the search radius.
         """
         if self.fight_target_id is None:
             return None
@@ -4713,9 +5303,36 @@ class Application(Gtk.Application):
         distance = max(
             abs(entity.x - position[0]), abs(entity.y - position[1])
         )
-        if distance > radius or not self._has_line_of_sight(entity):
+        if distance > radius:
             return None
         return entity
+
+    def _engaged_target(self) -> Entity | None:
+        """The live monster the bot is fighting, while it is within reach.
+
+        Used to hold position: while this exists the bot takes no path leg
+        and no loot walk until the monster dies. The radius is the normal
+        attack search radius, so a monster that runs far away releases the
+        bot; a monster merely stepping out of skill range does not.
+        """
+        if self.fight_target_id is None:
+            return None
+        entity = self.engine.world.entities.get(self.fight_target_id)
+        if entity is None or entity.kind != 3:
+            return None
+        if self._target_blocked(entity.entity_id):
+            return None
+        position = self._player_cell()
+        if position is None:
+            return None
+        radius = ATTACK_SEARCH_CELLS
+        info = self.spells.get(self._basic_skill_vnum() or 0)
+        if info is not None and info.range > 0:
+            radius = max(radius, int(info.range))
+        distance = max(
+            abs(entity.x - position[0]), abs(entity.y - position[1])
+        )
+        return entity if distance <= radius else None
 
     def _nearest_monster(self, radius: int) -> Entity | None:
         position = self._player_cell()
@@ -4794,6 +5411,15 @@ class Application(Gtk.Application):
         now = time.monotonic()
         world = self.engine.world
         char_id = self._char_id()
+        follow_enabled = bool(
+            self.follow_player_toggle is not None
+            and self.follow_player_toggle.get_active()
+        )
+        follow_name = (
+            self.follow_player_entry.get_text().strip()
+            if follow_enabled and self.follow_player_entry is not None
+            else ""
+        )
 
         if world.dead:
             # Dead characters cannot attack or move; the server answers every
@@ -4847,6 +5473,24 @@ class Application(Gtk.Application):
             return True
         self.dead_warned = False
         self.revive_sent_at = 0.0
+
+        # A manual walk or a server correction moved the character while the
+        # bot was driving: adopt the new cell and re-plan right away instead
+        # of waiting for the old leg to time out (three timeouts used to stop
+        # the bot, which is why Stop/Start felt necessary).
+        if self.external_move:
+            self.external_move = False
+            moved_to = self.external_move_position
+            self.external_move_position = None
+            self.pending_target = None
+            self.pending_is_path = False
+            self.pending_loot_id = None
+            self.rejected_walks = 0
+            if now >= self.replan_at:
+                self.replan_at = now + 0.5
+                if self.waypoints:
+                    self._replan_execution(moved_to)
+                    self._set_status("walk interrupted; re-joining the route")
 
         # Match the server's hit/cancel replies to the cast they belong to.
         # A splash cast can report several hits; they all belong to the oldest
@@ -4925,18 +5569,21 @@ class Application(Gtk.Application):
                             self.cancel_streak_target = target
                             self.cancel_streak = 1
                         if self.cancel_streak >= MAX_CANCEL_STREAK:
-                            # The client still has an object for it (TARGET
-                            # says OK) but the server refuses every hit: a
-                            # ghost entity from a kill that happened while the
-                            # bot was dead or out of range. Drop it and pick
-                            # another target.
+                            # Three casts in a row without a single `su`:
+                            # the server does not see this monster (a
+                            # client-only ghost from a kill while the bot was
+                            # dead or out of range). It cannot be killed, so
+                            # drop it and let the bot pick a live target. Any
+                            # target that lands a hit resets the streak and
+                            # is kept until it dies (strict focus).
                             world.entities.pop(target, None)
                             self.target_blocked[target] = (
                                 now + TARGET_BLOCK_S
                             )
                             self._set_status(
                                 f"target {target} refused "
-                                f"{self.cancel_streak} attacks; dropping it"
+                                f"{self.cancel_streak} attacks and never "
+                                "landed a hit; dropping it"
                             )
                             self.fight_target_id = None
                             self.cancel_streak = 0
@@ -4964,13 +5611,17 @@ class Application(Gtk.Application):
                         )
 
         # -- recovery: sit below the configured HP/MP %, wait until full --
+        # Follow mode never sits: the character would fall behind the player
+        # it is supposed to trail (the Follow tooltip promises the same).
         recover_hp = (
             self.recover_toggle is not None
             and self.recover_toggle.get_active()
+            and not follow_enabled
         )
         recover_mp = (
             self.recover_mp_toggle is not None
             and self.recover_mp_toggle.get_active()
+            and not follow_enabled
         )
         hp_max = world.stats.hp_max
         mp_max = world.stats.mp_max
@@ -4984,6 +5635,24 @@ class Application(Gtk.Application):
         mp_low = (
             recover_mp and mp_pct is not None and mp_pct < mp_threshold
         )
+        # Recovery is pending as soon as a threshold is crossed: from then
+        # on the bot must not start new fights or walk the route; it only
+        # retaliates and finishes the current kill, then sits.
+        self.recovery_pending = bool(hp_low or mp_low or self.recovering)
+        if self.recovery_pending and (
+            self.pending_is_path or self.pending_loot_id is not None
+        ):
+            # A threshold was crossed mid-walk: stop the route/loot leg at
+            # once instead of finishing it first.
+            if self.pending_loot_id is not None:
+                self.pickup_ignored[self.pending_loot_id] = (
+                    time.monotonic() + 15.0
+                )
+            self.pending_target = None
+            self.pending_is_path = False
+            self.pending_loot_id = None
+            self.rejected_walks = 0
+            self._set_status("recovery pending; stopping the walk to heal")
         if (recover_hp or recover_mp) and char_id is not None:
             if not self.recovering and self.fight_target_id is not None:
                 if self.fight_target_id not in world.entities:
@@ -4998,13 +5667,22 @@ class Application(Gtk.Application):
                 else None
             )
             if attacker is not None or self._under_attack():
+                # Retaliation has priority over any walk in progress.
+                if self.pending_is_path or self.pending_loot_id is not None:
+                    if self.pending_loot_id is not None:
+                        self.pickup_ignored[self.pending_loot_id] = (
+                            time.monotonic() + 15.0
+                        )
+                    self.pending_target = None
+                    self.pending_is_path = False
+                    self.pending_loot_id = None
                 if self.recovering:
                     self.recovering = False
                     self.recover_need_hp = False
                     self.recover_need_mp = False
                     # Without this, the start-recovery block below sees the
-                    # still-low HP in the SAME tick and starts again, then the
-                    # next tick aborts again: a 50 ms log spam loop.
+                    # still-low HP in the SAME tick and starts again, then
+                    # the next tick aborts again: a log spam loop.
                     hp_low = mp_low = False
                     if world.resting is True and char_id is not None:
                         self._send(f"rest 1 1 {char_id}")
@@ -5061,7 +5739,7 @@ class Application(Gtk.Application):
                     return True
                 if world.resting is not True and now >= self.recover_rest_at:
                     self._send(f"rest 1 1 {char_id}")
-                    self.recover_rest_at = now + 2.5
+                    self.recover_rest_at = now + REST_RETRY_S
                     self._set_status("sitting to recover")
                 self._schedule_stats_redraw()
                 return True
@@ -5083,6 +5761,24 @@ class Application(Gtk.Application):
             )
 
         if self.pending_target is not None:
+            # A seated client ignores MoveTo, so the pending leg would time
+            # out. A stale POS can hide the sit state until the first MOVE is
+            # ignored (the live 2026-11-08 failure), so check it here instead
+            # of waiting for the timeout: stand first, then re-plan the leg.
+            if (
+                world.resting is True
+                and now >= self.stand_sent_until
+            ):
+                standing_id = self._char_id()
+                if standing_id is not None:
+                    self._send(f"rest 1 1 {standing_id}")
+                    self.stand_sent_until = now + REST_RETRY_S
+                    self.pending_target = None
+                    self.pending_is_path = False
+                    self.pending_loot_id = None
+                    self.rejected_walks = 0
+                    self._set_status("sitting; standing up before walking")
+                    return True
             # The client's own MoveTo sends a `walk` SEND packet; the engine
             # updates world.position from it. A server `tp`/`mv` is accepted
             # too, in case the server corrects the client.
@@ -5160,10 +5856,19 @@ class Application(Gtk.Application):
         char_id = self._char_id()
         if world.resting is True and char_id is not None and now >= self.stand_sent_until:
             self._send(f"rest 1 1 {char_id}")
-            self.stand_sent_until = now + 2.0
+            self.stand_sent_until = now + REST_RETRY_S
             self._set_status("standing up")
             return True
 
+        # Follow mode owns the tick: while it is on, the character only keeps
+        # close to the named player (the player's own client does the rest).
+        if follow_enabled:
+            if not follow_name:
+                self._set_status("follow is on; type the player name")
+                return True
+            return self._follow_step(follow_name, now)
+
+        engaged = self._engaged_target()
         if (
             self.pickup_toggle is not None
             and self.pickup_toggle.get_active()
@@ -5179,10 +5884,14 @@ class Application(Gtk.Application):
                         abs(drop.x - position[0]), abs(drop.y - position[1])
                     )
                 if distance is not None and distance > PICKUP_RANGE_CELLS:
-                    # Walk to the drop at once, fight or not. Only a low-HP
-                    # character leaves it for after the fight; a drop at the
-                    # feet is still collected (one `get`, no movement).
-                    if defend_first:
+                    # Never walk away from a live fight: the drop at the feet
+                    # is still collected (one `get`, no movement), but a
+                    # farther one waits until the target dies.
+                    if (
+                        defend_first
+                        or engaged is not None
+                        or self.recovery_pending
+                    ):
                         drop = None
                     elif self._walk_to_loot(drop, now):
                         return True
@@ -5219,56 +5928,26 @@ class Application(Gtk.Application):
                 radius = max(radius, int(base_info.range))
             monster = None
             if retaliate:
-                # Stay on an attacker the bot is already fighting. Taking the
-                # newest hit every time made Retaliate ping-pong between two
-                # monsters that both hit the character. A different attacker
-                # only takes over when the current target is not one.
+                # Focus fire: a live target is kept until it dies. Retaliate
+                # only chooses the first target (the monster that hit you)
+                # when there is no lock; it never steals a live one, so two
+                # alternating attackers cannot make the bot ping-pong.
                 locked = self._locked_target(radius)
-                if locked is not None and self._recent_attacker(
-                    locked.entity_id
-                ):
+                if locked is not None:
                     monster = locked
                 else:
-                    # The monster hitting us wins the target lock. That is
-                    # the one allowed reason to leave a target that is still
-                    # alive; say so in the bot log so it is never mistaken
-                    # for a focus failure.
-                    attacker = self._retaliation_target(radius)
-                    if attacker is not None:
-                        monster = attacker
-                        previous = self.fight_target_id
-                        previous_entity = (
-                            world.entities.get(previous)
-                            if previous is not None
-                            else None
-                        )
-                        if (
-                            previous_entity is not None
-                            and previous_entity.kind == 3
-                            and previous != attacker.entity_id
-                        ):
-                            if self.retaliate_logged != (
-                                previous,
-                                attacker.entity_id,
-                            ):
-                                self.retaliate_logged = (
-                                    previous,
-                                    attacker.entity_id,
-                                )
-                                self._set_status(
-                                    f"retaliate: {attacker.entity_id} is "
-                                    f"attacking you; switching from "
-                                    f"{previous}"
-                                )
-                        else:
-                            self.retaliate_logged = None
-                    else:
-                        self.retaliate_logged = None
+                    monster = self._retaliation_target(radius)
             if monster is None and auto_attack:
                 # Stay on the current target until it dies or becomes
                 # invalid; only then pick the nearest monster.
                 monster = self._locked_target(radius)
-            if monster is None and auto_attack:
+            if (
+                monster is None
+                and auto_attack
+                and not self.recovery_pending
+            ):
+                # Do not start a new fight once a recovery threshold has
+                # been crossed: retaliate and the current kill only.
                 monster = self._nearest_monster(radius)
 
             if (
@@ -5319,10 +5998,16 @@ class Application(Gtk.Application):
                 and basic_distance is not None
                 and basic_distance <= basic_range
             )
+            # A locked target behind cover is kept, not swapped: wait or walk
+            # until the shot is clear. No attack ever goes through a wall.
+            monster_sight = (
+                monster is None or self._has_line_of_sight(monster)
+            )
             if (
                 rule is None
                 and monster is not None
                 and basic_in_range
+                and monster_sight
                 and now >= self.attack_cooldown_until
             ):
                 stats = self.engine.world.stats
@@ -5386,16 +6071,18 @@ class Application(Gtk.Application):
             if (
                 rule is None
                 and monster is not None
-                and not basic_in_range
+                and (not basic_in_range or not monster_sight)
                 and now >= self.attack_cooldown_until
                 and not self.bot_goals
+                and not self.recovery_pending
             ):
                 # Stationary combat, like clicking a monster in game: walk to
-                # it, then attack as soon as it is in range. With a drawn
-                # path the bot clears what is already in range and then keeps
-                # following the route instead of detouring.
+                # it, then attack as soon as it is in range. An engaged
+                # target that moved out of range/cover is followed too; the
+                # bot only refuses to walk away from a target it can hit
+                # (the combat block above returns in that case).
                 if self._chase_step(monster, basic_range, now):
-                    return True
+                        return True
 
             if (
                 rule is None
@@ -5414,10 +6101,26 @@ class Application(Gtk.Application):
                 # leg; the route resumes when no attackable monster is left.
                 return True
 
+        if self.recovery_pending:
+            # A recovery threshold is crossed: stop the route here instead
+            # of walking on. Retaliation and finishing the current kill are
+            # handled above; the bot sits as soon as they are done.
+            return True
+
+        # No frozen "hold": a target that is in skill range and line is
+        # already handled by the combat block above (it returns without
+        # walking). Everything else — out of range, behind cover, or a
+        # paused/refused fight — lets the path or the chase move the
+        # character, otherwise the bot stands next to a monster it cannot
+        # kill forever.
+
         if not self.bot_goals:
-            # Stationary mode: combat/pickup/recovery continue until Stop.
+            # Stationary mode: combat/pickup/recovery/follow continue until
+            # Stop.
             if (
-                (self.auto_attack_toggle is not None
+                (self.follow_player_toggle is not None
+                 and self.follow_player_toggle.get_active())
+                or (self.auto_attack_toggle is not None
                  and self.auto_attack_toggle.get_active())
                 or (self.pickup_toggle is not None
                     and self.pickup_toggle.get_active())

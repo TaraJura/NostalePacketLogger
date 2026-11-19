@@ -1,4 +1,4 @@
-"""Headless smoke test for death handling and ghost targets.
+"""Headless smoke test for death handling and refused (ghost) targets.
 
 Two live failures from 2026-11-08:
 
@@ -7,8 +7,10 @@ Two live failures from 2026-11-08:
    must stay silent and wait for `revive 1 <charId> 0`, then resume.
 
 2. After the revive the bot kept attacking a monster that only existed in the
-   client (the server refused every hit). After MAX_CANCEL_STREAK refusals on
-   the same target the bot must drop it instead of retrying forever.
+   client (the server refused every hit). The target never landed a single
+   hit, so after MAX_CANCEL_STREAK consecutive refusals it is dropped as a
+   client-only ghost (with a status line), and combat pauses. A target that
+   lands hits is never dropped this way (strict focus).
 
 Fake state: player at (25,117), monster 500 in range. The server first reports
 0 HP, then revives the character; afterwards every attack is answered with
@@ -152,7 +154,52 @@ def main() -> int:
         try:
             lines = list(server.received)
             alive_attacks = attacks(lines)
-            tail = alive_attacks[-MAX_CANCEL_STREAK:]
+            targets = {
+                line.split()[3]
+                for line in alive_attacks
+                if len(line.split()) >= 4
+            }
+            status = app.status.get_text()
+            log_text = ""
+            if app.bot_log_buffer is not None:
+                buffer = app.bot_log_buffer
+                log_text = buffer.get_text(
+                    buffer.get_start_iter(), buffer.get_end_iter(), False
+                )
+            result["pause_ok"] = bool(
+                # Dead: not a single attack was sent.
+                result.get("while_dead") == []
+                # Alive again: attacks resumed on the same monster. It never
+                # lands a hit, so after the streak the bot drops it as a
+                # ghost; the same refusals reach the global pause trigger.
+                and len(alive_attacks) == MAX_CANCEL_STREAK
+                and targets == {"500"}
+                and "dropping it" in log_text
+                and "pausing combat" in log_text
+            )
+            result["pause_detail"] = (
+                f"while_dead={len(result.get('while_dead', []))} "
+                f"alive_attacks={len(alive_attacks)} targets={targets} "
+                f"dropped={'dropping it' in log_text} "
+                f"paused={'pausing combat' in log_text} "
+                f"status={status!r}"
+            )
+            # The paused fight must not block recovery: a live, refused
+            # target used to look like "recovery stopped working".
+            server.send("RECV|stat 30 2791 30 3827 0 0\n")
+            GLib.timeout_add(4000, recover_check)
+        except Exception as exc:  # noqa: BLE001
+            result["detail"] = f"alive_check exception: {exc!r}"
+            app.quit()
+        return False
+
+    def recover_check() -> bool:
+        try:
+            rests = [
+                line
+                for line in server.received
+                if line.startswith("SEND|rest 1 1")
+            ]
             status = app.status.get_text()
             log_text = ""
             if app.bot_log_buffer is not None:
@@ -161,26 +208,16 @@ def main() -> int:
                     buffer.get_start_iter(), buffer.get_end_iter(), False
                 )
             result["ok"] = bool(
-                # Dead: not a single attack was sent.
-                result.get("while_dead") == []
-                # Alive again: attacks resumed, but the ghost was dropped
-                # after the streak instead of being retried forever.
-                # One target drops after MAX_CANCEL_STREAK refusals; the
-                # next refusal reaches CANCEL_PAUSE_TRIGGER and combat pauses
-                # instead of hopping to more targets.
-                and len(alive_attacks) == MAX_CANCEL_STREAK + 1
-                and "dropping it" in log_text
-                and "pausing combat" in log_text
+                result.get("pause_ok")
+                and rests
+                and "recovering" in (log_text + status)
             )
             result["detail"] = (
-                f"while_dead={len(result.get('while_dead', []))} "
-                f"alive_attacks={len(alive_attacks)} "
-                f"dropped={'dropping it' in log_text} "
-                f"paused={'pausing combat' in log_text} "
-                f"tail={tail} status={status!r}"
+                f"{result.get('pause_detail', '')} rests={rests} "
+                f"status={status!r}"
             )
         except Exception as exc:  # noqa: BLE001
-            result["detail"] = f"alive_check exception: {exc!r}"
+            result["detail"] = f"recover_check exception: {exc!r}"
         app.quit()
         return False
 

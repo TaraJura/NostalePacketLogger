@@ -298,8 +298,10 @@ Follow toggle and a raw send entry), **Map / Bot** and **Bot log** (a
 timestamped, selectable text view of every action the status bar reports --
 attacks, selections, walks, pickups, recovery, DLL errors -- capped at 4,000
 lines with a Clear log button). The same lines are appended to
-`~/.config/ntpl/bot.log` (`NTPL_BOT_LOG` overrides; rotates at 4 MiB), so
-the log can be tailed or read outside the GUI, including after a restart.
+`~/.config/ntpl/bot-<winpid>.log` once a client is attached (`bot.log` before
+that; `NTPL_BOT_LOG` overrides; rotates at 4 MiB), so several windows never
+interleave their actions in one file and the log can be tailed or read
+outside the GUI, including after a restart.
 Options:
 
 - `--map-data PATH` — `NStcData.NOS` archive (or `NTPL_NSTC`);

@@ -51,7 +51,7 @@ void print_usage() {
         "Options:\n"
         "  --dll <path>                     DLL to inject (default: %s next to "
         "this exe)\n"
-        "  --no-tag                         do not append the PID to window "
+        "  --no-tag                         do not number the game window "
         "titles\n"
         "  --help                           this text\n"
         "\n"
@@ -94,7 +94,7 @@ int interactive(const std::string& dll_path, bool tag_windows) {
     std::vector<ProcessInfo> processes = FindNostaleProcesses();
 
     if (tag_windows) {
-        TagWindowsWithPid(processes);
+        TagWindowsWithNumber(processes);
     }
 
     print_processes(processes);
@@ -179,7 +179,7 @@ int main(int argc, char** argv) {
     if (list_only) {
         std::vector<ProcessInfo> processes = FindNostaleProcesses();
         if (tag_windows) {
-            TagWindowsWithPid(processes);
+            TagWindowsWithNumber(processes);
         }
         print_processes(processes);
         return processes.empty() ? 2 : 0;
@@ -196,7 +196,7 @@ int main(int argc, char** argv) {
         std::printf("DLL: %s\n\n", dll_path.c_str());
         std::vector<ProcessInfo> processes = FindNostaleProcesses();
         if (tag_windows) {
-            TagWindowsWithPid(processes);
+            TagWindowsWithNumber(processes);
         }
         print_processes(processes);
         if (processes.empty()) {

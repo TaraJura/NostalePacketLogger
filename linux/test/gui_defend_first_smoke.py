@@ -9,7 +9,9 @@ never fired and the bot re-sent ``rest`` every few seconds while being hit.
 HP and MP are below 70 % here, and an attacker is hitting the character
 from an entity the host never saw (999 has no spawn). The bot must not sit:
 being hit is enough to forbid resting, even when the attacker cannot be
-resolved. It must keep attacking the monster it can see.
+resolved. While recovery is pending it also must NOT start a fight with the
+unrelated monster it can see (no new targets): with the attacker unresolvable
+there is nothing to retaliate against, so it just waits.
 
 Run through scripts/dev-test-bot.sh (Xvfb).
 """
@@ -142,11 +144,12 @@ def main() -> int:
             ]
             result["ok"] = bool(
                 not rests
-                and server.attacks >= 1
+                and server.attacks == 0
                 and not app.recovering
             )
             result["detail"] = (
                 f"rests={rests} attacks={server.attacks} "
+                f"(no new targets while recovery is pending) "
                 f"recovering={app.recovering} "
                 f"status={app.status.get_text()!r}"
             )

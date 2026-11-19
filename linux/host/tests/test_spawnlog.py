@@ -5,10 +5,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ntpl.spawnlog import (
+    _log_head_lines,
+    _open_log_tail,
     client_log_path,
     default_log_path,
     load_gates,
     load_last_position,
+    load_player_spawns,
     load_portals,
     load_skill_list,
     load_skill_slots,
@@ -26,6 +29,33 @@ class SpawnLogTests(unittest.TestCase):
             handle.write(text)
         self.addCleanup(Path(handle.name).unlink, missing_ok=True)
         return Path(handle.name)
+
+    def test_tail_read_skips_the_old_part(self):
+        log = self._write("OLD\n" * 1000 + "NEW\n")
+        with _open_log_tail(log, tail_bytes=200) as handle:
+            text = handle.read()
+        self.assertIn("NEW", text)
+        self.assertLess(len(text), 210)
+
+    def test_head_read_returns_the_start_only(self):
+        log = self._write("FIRST\n" * 100)
+        self.assertEqual(_log_head_lines(log, head_bytes=6), ["FIRST"])
+
+    def test_reads_player_positions_from_spawn_and_moves(self):
+        log = self._write(
+            "17:07:20.798 [RECV] in 1 Guder - 4165102 105 23 2 0 0 0\r\n"
+            "17:07:21.000 [RECV] mv 1 4165102 106 24 6\r\n"
+            "17:07:21.000 [RECV] mv 3 5114 50 166 4\r\n"
+        )
+        self.assertEqual(
+            load_player_spawns(log), {4165102: ("Guder", 106, 24)}
+        )
+
+    def test_player_move_without_spawn_keeps_an_empty_name(self):
+        log = self._write("17:07:21.000 [RECV] mv 1 424242 10 11 6\r\n")
+        self.assertEqual(
+            load_player_spawns(log), {424242: ("", 10, 11)}
+        )
 
     def test_reads_monster_vnums_and_player_names(self):
         log = self._write(

@@ -92,6 +92,31 @@ class BotConfigTests(unittest.TestCase):
         loaded = BotConfig.from_dict(config.to_dict())
         self.assertTrue(loaded.block_portals)
 
+    def test_follow_defaults_off_and_round_trips(self):
+        self.assertFalse(BotConfig().follow)
+        self.assertEqual(BotConfig().follow_player, "")
+        self.assertFalse(BotConfig().follow_attack)
+        loaded = BotConfig.from_dict(
+            {
+                "follow": True,
+                "follow_player": "  Follower Friend  ",
+                "follow_attack": True,
+            }
+        )
+        self.assertTrue(loaded.follow)
+        self.assertEqual(loaded.follow_player, "Follower Friend")
+        self.assertTrue(loaded.follow_attack)
+        self.assertEqual(
+            BotConfig.from_dict({"follow": "yes"}).follow, True
+        )
+        config = BotConfig(
+            follow=True, follow_player="Mule", follow_attack=True
+        )
+        self.assertEqual(config.to_dict()["follow_player"], "Mule")
+        loaded = BotConfig.from_dict(config.to_dict())
+        self.assertTrue(loaded.follow)
+        self.assertTrue(loaded.follow_attack)
+
     def test_revive_on_death_defaults_off_and_round_trips(self):
         self.assertFalse(BotConfig().revive_on_death)
         self.assertFalse(BotConfig.from_dict({}).revive_on_death)

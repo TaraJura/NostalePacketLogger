@@ -36,7 +36,7 @@ sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
 make -C linux host-test                      # 190 Python unit tests
 make -C linux gui-test                       # headless GTK4 smokes (xvfb)
-make -C linux bot-test                       # 20 fake-server bot smokes
+make -C linux bot-test                       # 29 fake-server bot smokes
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path
 linux/scripts/dev-test-wine.sh 25
@@ -138,7 +138,8 @@ tiles, so a farming loop cannot enter another map even from a tile it is
 already standing on. A third top-level **Bot log** tab keeps a
 timestamped, selectable record of every action (attacks, TARGET selections and
 refusals, walks, pickups, recovery, DLL errors) for debugging, and mirrors it
-to `~/.config/ntpl/bot.log` (`NTPL_BOT_LOG` overrides) so it can be tailed
+to `~/.config/ntpl/bot-<winpid>.log` once a client is attached (`bot.log`
+before that; `NTPL_BOT_LOG` overrides) so it can be tailed
 outside the GUI. Out-of-range targets are chased on foot and attacked once
 in range, like clicking a monster in game. Targets can be filtered by monster
 vnum; ordered spell rules cast by HP/MP conditions; the whole bot configuration

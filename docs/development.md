@@ -30,7 +30,7 @@ The MinGW compiler is `i686-w64-mingw32-g++`. Override with
 ```bash
 make -C linux host-test        # 195 stdlib unittest cases
 make -C linux gui-test         # headless GTK4, needs xvfb
-make -C linux bot-test         # 21 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach, loot under attack, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, ghost-target dropping, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting
+make -C linux bot-test         # 29 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume
 make -C linux all test-host
 linux/scripts/dev-test-wine.sh 25
 ```
@@ -58,20 +58,20 @@ portal blocking (A* avoids warp tiles, a MOVE onto one is refused, `PORTALS|1`
 is sent), retaliate-only defence (Auto-attack off, the attacker is attacked
 and a landed `su`+`cancel` is not logged as a cancelled attack), far-goal leg
 chopping (a goal 4 cells away is walked as a 3-cell MOVE, not one rejected far
-`walk`), and death/ghost handling (no attack while dead, resume on `revive`,
-and a target whose every hit is cancelled is dropped after 2 refusals, the
-next refusal pausing combat), and target focus (a monster moved next to the
+`walk`), and death handling (no attack while dead, resume on `revive`; a target
+that has landed a hit is kept through refused casts, while a never-hit
+ghost is dropped after 3 and the refusals pause combat), and target focus (a monster moved next to the
 character does not steal the fight from the current target; after its death
-the nearest one is chosen). The focus+retaliate smoke covers the one allowed
-switch: an attacker takes the lock, a second, closer attacker does not steal
-it, the first is killed, the second takes over, and the bot returns to the
-original target after that; the Bot log names the first retaliate switch. The cancel-pair
+the nearest one is chosen). The focus+retaliate smoke proves strict focus: an attacker does not steal a
+live target, a second attacker does not steal the target that took over, and
+the next monster is chosen only after the previous one dies. The cancel-pair
 smoke keeps a fast attack (0.3 s) flowing while the server ends each landed
 cast with a delayed `cancel`, so a normal cast end is not counted as a
 refusal or used to drop the target. The refusal-keep smoke makes every cast
 after the first one fail while the first has already landed: the bot must
-keep that target and back off to the skill cooldown, while a never-hit
-target is still dropped as a ghost. The defend-first smoke hits the
+keep that target and back off to the skill cooldown; refused casts never
+drop a target that has landed a hit (a never-hit ghost is dropped after 3
+in a row, and a `TARGET` refusal drops it too). The defend-first smoke hits the
 character from an entity the host never saw while HP/MP are below the
 recovery threshold: the bot must not sit, must keep attacking, and pickups
 wait. The start-sit smoke starts a route while the game is seated and the

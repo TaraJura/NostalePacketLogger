@@ -6,7 +6,9 @@ itself.  Two sources are combined:
 * ``Injector.exe --list``, run with the game's *own* Wine binary and prefix,
   reports the Windows PID and window title of every client.  Using the Wine
   from ``/proc/<pid>/exe`` matters: the game may run on a newer Wine than the
-  one in ``PATH``, and two Wine versions must not share a prefix.
+  one in ``PATH``, and two Wine versions must not share a prefix.  The listing
+  also numbers the visible game windows ("NosTale [#2]") so the picker row and
+  the window title bar share a number.
 * Each injected DLL writes ``C:\\ntpl-<pid>.port`` with the port it listens
   on, so several clients can run at once without fighting over one port.  The
   GUI matches that file to the WinPID from the injector list.
@@ -302,7 +304,10 @@ def _run_injector(
 def list_clients(
     context: WineContext, injector: Path, timeout: float = LIST_TIMEOUT
 ) -> list[ClientInfo]:
-    result = _run_injector(context, injector, ["--list", "--no-tag"], timeout)
+    # No --no-tag: listing numbers the visible game windows " [#n]" so the
+    # picker row and the game's title bar show the same number. Windowless
+    # CEF helpers are skipped by the injector and filtered below.
+    result = _run_injector(context, injector, ["--list"], timeout)
     clients: list[ClientInfo] = []
     for winpid, _exe, title in parse_injector_list(result.stdout):
         # The CEF helpers (gpu/renderer/utility) share the .exe name and have

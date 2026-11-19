@@ -100,13 +100,15 @@ The injector enumerates **Windows** PIDs by executable name
 (`NostaleClientX.exe`, `NostaleX.dat`, `CustomClient.exe`) inside the prefix.
 You do not need to translate Linux PIDs. `Injector.exe --list` shows the
 windows, `--pid <winpid>` injects just one, and `--all` injects every one.
+Listing also numbers each visible game window in its title bar
+(`NosTale [#2]`) so it matches its picker row; `--no-tag` disables that.
 
 Expected output:
 
 ```
 DLL: Z:\home\...\linux\build\PacketLogger.dll
 Found 1 NosTale process(es):
-  [1] PID 1234  NostaleClientX.exe  NosTale - ...
+  [1] PID 1234  NostaleClientX.exe  NosTale [#1]
 [+] injected into PID 1234 (NostaleClientX.exe)
 ```
 
@@ -193,8 +195,10 @@ JSON save/load. Server-sent `gp`
 portals and `wp` Time-Space entrances are drawn on the map. The **Bot log**
 tab keeps a timestamped, selectable history of every action (attacks, target
 selections/refusals, walks, pickups, recovery, DLL errors) for debugging;
-the same lines are appended to `~/.config/ntpl/bot.log` (`NTPL_BOT_LOG`
-overrides), so they can be tailed or read after a restart.
+the same lines are appended to `~/.config/ntpl/bot-<winpid>.log` once a
+client is attached (`bot.log` before that; `NTPL_BOT_LOG` overrides), so
+they can be tailed or read after a restart and two windows never mix their
+actions in one file.
 `--log PATH` (or `NTPL_LOG`) selects the DLL log used to backfill vnums for
 entities that spawned before the GUI attached. See [map.md](map.md) and
 [bot-config.md](bot-config.md).
@@ -234,8 +238,12 @@ pip; on Ubuntu use the apt package.
 
 Each injected DLL writes its own session log, `C:\NosTalePacketLog-<pid>.txt`
 (one per game process, so several clients in one prefix do not truncate and
-interleave each other's session). The GUI and the MCP server read the attached
-client's file; without a client they use the newest per-client log:
+interleave each other's session). The DLL caps the file at 16 MB and starts a
+new one in place (a `log truncated` status line marks it), so a multi-hour
+session cannot leave a 100+ MB file behind. The GUI and the MCP server read
+the attached client's file; without a client they use the newest per-client
+log. Backfill only reads the last 8 MB (the login-time `ski` list comes from
+the first 8 MB), so attaching never scans a whole long session:
 
 ```bash
 tail -f "$WINEPREFIX"/drive_c/NosTalePacketLog-*.txt
@@ -275,7 +283,7 @@ both.
 make host-test          # 195 stdlib unit tests: protocol, engine, map, config, spells
 
 make gui-test           # headless GTK4 window + map surface against a fake stream
-make bot-test           # 21 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach, loot under attack, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, ghost-target dropping, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting
+make bot-test           # 29 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume
 make all test-host
 ./scripts/dev-test-wine.sh 25
 ```

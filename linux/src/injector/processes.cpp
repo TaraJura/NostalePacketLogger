@@ -59,7 +59,28 @@ std::wstring window_title_for(DWORD pid) {
 
 struct TagSearch {
     DWORD pid;
+    int   number;
 };
+
+// Drop an earlier " [#<n>]" marker so renumbering does not stack suffixes.
+std::wstring without_number_marker(const std::wstring& title) {
+    const std::wstring open = L" [#";
+    const std::size_t start = title.rfind(open);
+    if (start == std::wstring::npos || title.empty() ||
+        title.back() != L']') {
+        return title;
+    }
+    const std::size_t first = start + open.size();
+    if (first + 1 >= title.size()) {
+        return title;  // no digits between " [#" and "]"
+    }
+    for (std::size_t i = first; i + 1 < title.size(); ++i) {
+        if (title[i] < L'0' || title[i] > L'9') {
+            return title;
+        }
+    }
+    return title.substr(0, start);
+}
 
 BOOL CALLBACK tag_enum_proc(HWND window, LPARAM parameter) {
     auto* data = reinterpret_cast<TagSearch*>(parameter);
@@ -81,12 +102,12 @@ BOOL CALLBACK tag_enum_proc(HWND window, LPARAM parameter) {
     }
 
     wchar_t suffix[32] = {0};
-    std::swprintf(suffix, 32, L" - %lu",
-                  static_cast<unsigned long>(data->pid));
+    std::swprintf(suffix, 32, L" [#%d]", data->number);
 
-    const std::wstring current(title);
-    if (current.find(suffix) == std::wstring::npos) {
-        SetWindowTextW(window, (current + suffix).c_str());
+    const std::wstring base = without_number_marker(title);
+    const std::wstring wanted = base + suffix;
+    if (std::wstring(title) != wanted) {
+        SetWindowTextW(window, wanted.c_str());
     }
     return FALSE;
 }
@@ -133,6 +154,7 @@ std::vector<ProcessInfo> FindNostaleProcesses() {
             info.pid = entry.th32ProcessID;
             info.exe_name = entry.szExeFile;
             info.window_title = window_title_for(info.pid);
+            info.has_window = !info.window_title.empty();
             if (info.window_title.empty()) {
                 info.window_title = L"(no window title)";
             }
@@ -144,9 +166,19 @@ std::vector<ProcessInfo> FindNostaleProcesses() {
     return result;
 }
 
-void TagWindowsWithPid(const std::vector<ProcessInfo>& processes) {
-    for (const ProcessInfo& process : processes) {
-        TagSearch data = {process.pid};
+void TagWindowsWithNumber(std::vector<ProcessInfo>& processes) {
+    int number = 0;
+    for (ProcessInfo& process : processes) {
+        if (!process.has_window) {
+            continue;
+        }
+        ++number;
+        TagSearch data = {process.pid, number};
         EnumWindows(tag_enum_proc, reinterpret_cast<LPARAM>(&data));
+        // Keep the printed title identical to what the title bar now shows.
+        const std::wstring marked = window_title_for(process.pid);
+        if (!marked.empty()) {
+            process.window_title = marked;
+        }
     }
 }

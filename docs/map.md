@@ -213,8 +213,19 @@ grouped by function:
   legs the bot uses, because a single far MoveTo makes the client jump (and
   the server correct it). If sitting, it stands first. Stop, Clear path or a
   map change cancels the walk. With Draw path on, a click instead adds a
-  waypoint and draws the A* route the bot will follow; Start then runs the
-  bot along it. While the bot is running, clicks add waypoints regardless.
+  waypoint and draws the A* route; the drawn preview always keeps the whole
+  route, and a click never resets it (a route whose start point is empty
+  simply gains another waypoint). Start plans the walk from the character's
+  **current position** to the nearest remaining leg — Stop/Start after an
+  interruption (or a manual walk) continues the route where the character
+  stands, and the stored start point is never walked back to. Standing on
+  the last waypoint makes Start run the route from its beginning again.
+  While the bot is running, clicks add waypoints regardless. If you take
+  over and walk the character (or the server corrects its position) while
+  the bot is driving, the server's `tp` shows the character on a cell the bot did not command,
+  the bot joins the route at the nearest leg from the new cell and keeps going — no Stop/Start
+  is needed, and a manual move no longer counts as a rejected leg (three
+  genuinely rejected legs still stop it with a status).
   The own marker follows the DLL's real player position (`POS`, polled twice
   a second), not the walk packet's destination, so the dot tracks the
   actual movement instead of jumping ahead.
@@ -247,17 +258,20 @@ The layout is responsive: wide windows show map + sidebar side by side; below
 ~80 ms instead of one redraw per packet. Right-click removes the last waypoint;
 left-click walks there in short legs, or adds a waypoint when Draw path is on.
 The own marker is driven by a 2 Hz `POS` poll of the client's real position.
-The packet **Follow** toggle lives in the Packets tab, not in the window header.
+The packet **Follow** toggle (auto-scroll) lives in the Packets tab, not in the
+window header; the **Follow player** toggle is in the Map/Bot sidebar.
 
 | Control | Effect |
 |---|---|
-| Auto-attack | attack the nearest allowed monster (Retaliate priority) with the equipped SP card's basic skill (slot 0); no skill/range/delay knobs — Skill.dat drives the pace |
-| Retaliate | attack the monster that hit you; once engaged, keep that attacker until it dies — a second attacker does not steal the fight |
+| Auto-attack | attack the nearest allowed monster (Retaliate priority) with the equipped SP card's basic skill (slot 0); no skill/range/delay knobs — Skill.dat drives the pace. While the engaged monster is in skill range with a clear line the bot fights in place (no path leg, chase or loot walk); if it moves out of range or behind cover, the path/chase resumes instead of freezing |
+| Retaliate | attack the monster that hit you when no target is locked; a live target is never abandoned for another attacker (strict focus) |
 | Auto-recover HP | below the HP threshold, sit and wait for full HP, then stand (after finishing the current kill) |
 | Below HP % | HP recovery threshold (default 70) |
 | Auto-recover MP | below the MP threshold, sit and wait for full MP, then stand (after finishing the current kill) |
 | Below MP % | MP recovery threshold (default 70) |
 | Pickup | walk to your own/unowned drops up to 20 cells away, pick them up when adjacent, then resume the path |
+| Follow player | walk toward the named player (or char id) and stay within two cells; while on, normal combat, recovery and the drawn path are idle, but own/free drops near the player are picked up when **Pickup** is on |
+| Attack the same target as the player | while following, also hit the monster the player last attacked (`su`) as soon as it is in range — also during the approach to the player; walking resumes between casts; no other target is chosen |
 | Loop | repeat the path when it finishes |
 | Targets | all / only selected / all except selected monster templates (`vnum`); Retaliate respects the same filter |
 | Spell rule | scanned spell + Always/My HP/My MP + below/above + cooldown + Monster/Self target; ordered top to bottom; static MP/range/cooldown checks from Skill.dat |
@@ -290,34 +304,67 @@ honest source.
 `_bot_tick` runs on the GTK main loop every 50 ms:
 
 1. **Recovery** — if Auto-recover HP/MP is on and HP or MP is below its
-   threshold, the bot first finishes the monster it is currently hitting (if
-   the target is alive and still in range); only then does it stop the walk,
-   sit (`rest 1 1 <charId>` unless already sitting) and wait. No attack,
+   threshold, the bot first finishes the monster it is currently hitting — but only if
+   the target is alive, still in range, combat is not paused by refusals, and
+   the bot has actually attacked it within the last 12 s (a stale target
+   whose death was never reported must not block sitting); otherwise it
+   heals at once. The priority is **Retaliate -> finish the current kill ->
+   recover**: while a monster is hitting the character the bot fights back
+   (at any HP), then finishes the target it was fighting, and only then
+   sits. The trigger is the **configured threshold** (`Below HP %` / `Below
+   MP %`, no fixed percentage): once it is crossed the bot stops route and
+   loot walks and does **not** pick a new monster; it only retaliates and
+   finishes the current kill, then sits (`rest 1 1 <charId>` unless already
+   sitting) and waits. No attack,
    pickup or movement happens until every resource that triggered recovery is
    full; then the bot stands (`rest`) and resumes. `stat` is the source of
    HP/MP.
 2. **Stand up** if `WorldState.resting` is true and the char id is known:
    `rest 1 1 <charId>` (the server toggles sit/stand; sitting blocks movement).
-3. **Pick up** if enabled and a drop owned by you (or unowned) is within
+3. **Follow** when the **Follow player** toggle is on and a name (or char id)
+   is entered: the bot stands up and walks toward that live player entity
+   with the same client MoveTo legs, stopping within two cells. Follow owns
+   the tick — general combat, pickup, recovery and the drawn path stay idle
+   until the toggle is turned off. With **Attack the same target as the
+   player** checked, the bot also fires at the monster the followed player
+   last hit (their latest `su`, valid for 5 s) when it is near the player, in
+   the skill's range and in line, even while still approaching the player —
+   it never picks another target or chases.
+   With **Pickup** on, the follower also collects own/free drops within
+   10 cells of the player (one `get` when adjacent, MoveTo legs otherwise)
+   and then resumes following. A player that is not in sight is reported
+   and the bot waits.
+4. **Pick up** if enabled and a drop owned by you (or unowned) is within
    20 cells: walk to it with the same client MoveTo legs, send
    `get 1 <charId> <dropId>` once adjacent, then resume the path. The server
    rejects `get` from far away, so the walk is required. Each drop is tried
    at most three times; the server's `get` confirmation removes it from
    `WorldState.drops`.
-4. **Auto-attack / clear before moving.** Combat takes priority over the
+5. **Auto-attack / clear before moving.** Combat takes priority over the
    path: while any allowed monster is within attack range the bot stays and
    keeps attacking (the skill's cast time and cooldown pace it); when none is
    left it takes the next path leg. With no path, Start runs stationary
    combat, pickup and recovery. Targets are acquired within 15 cells; a
    monster outside the skill's own range is chased on foot (one A* leg at a
    time) until it is in range — the game's click-a-monster behaviour.
-   Target choice: with **Retaliate** on, first try the most recent `su`
-   attacker that hit you (within 5 s); otherwise pick the nearest `kind == 3`
-   entity within range. Both paths apply the **Targets** filter.
+   Target choice: the bot first keeps its current target while it is alive,
+   selectable and within the search radius — a closer monster, another
+   attacker or a momentarily blocked line never steals it. For the first
+   target, with **Retaliate** on, the most recent `su`
+   attacker that hit you (within 5 s) wins; otherwise pick the nearest
+   `kind == 3` entity within range. Both paths apply the **Targets** filter.
    A killed monster gets no `out` packet: the server's `st` status packet
    (current HP reaches 0) removes it from the entity list immediately, so the
    bot picks a live monster instead of attacking the corpse. A `TARGET`
-   refusal is the fallback removal.
+   refusal is the fallback removal. A target that lands hits is kept through
+   refused casts; one that never lands a hit is dropped after 3 consecutive
+   refusals (a client-only ghost), and repeated refusals pause combat.
+   **In-range fights stay in place**: while the engaged monster is within
+   the skill's range and line, the bot keeps attacking without taking a path
+   leg, chasing or walking to loot (a drop at the feet is still picked). If
+   the monster steps out of range or behind cover, or combat is paused by
+   refusals, the bot does **not** freeze: the drawn route (or the stationary
+   chase) moves the character until it can hit again.
    Spell rules are evaluated before the basic attack in list order: the first
    enabled rule that is off its per-rule cooldown, has enough MP, has the
    target in spell range and whose condition (Always or HP/MP threshold) is
@@ -332,7 +379,7 @@ honest source.
    vnum; the bot resolves it to the zero-based `u_s` slot from the learned
    `ski` list (e.g. 876 → slot 10) before sending. Cast time from Skill.dat
    extends the walk pause.
-5. **Walk** a multi-cell leg (three cells from the A* path, plus the final
+6. **Walk** a multi-cell leg (three cells from the A* path, plus the final
    cell on the 8-direction path) by calling the client's own MoveTo: the GUI
    sends `MOVE|x y` to the DLL. The client pathfinds,
    animates and sends its own `walk` packet with
@@ -428,7 +475,7 @@ never sees the `at` packet.
 ```bash
 make -C linux host-test   # 190 cases incl. synthetic NOS, 8-way A*, checksum, config
 make -C linux gui-test    # GUI + map surface + tooltips + unknown-position guard
-make -C linux bot-test    # 21 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, loot approach, loot under attack, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, ghost-target dropping, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting
+make -C linux bot-test    # 29 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume
 ```
 
 The bot test sends a fake player at (25,117) on map 20, a monster at

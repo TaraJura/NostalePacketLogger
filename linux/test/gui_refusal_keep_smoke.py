@@ -7,9 +7,10 @@ cooldown was over, was refused again, and the "2 refusals = ghost" rule
 dropped a perfectly healthy target.
 
 Here the first attack lands (`su`), then every later attack is refused
-(`cancel 0 0 -1`). The target has been hit, so it is not a ghost: the bot
-must keep it, back off to the skill's own cooldown, and not log
-"dropping it". Only a never-hit target may be dropped.
+(`cancel 0 0 -1`). The bot must keep the target, back off to the skill's own
+cooldown, and not log "dropping it": refused casts never drop or switch a
+target that has landed a hit (strict focus). A never-hit ghost is dropped
+after 3 in a row.
 
 Run through scripts/dev-test-bot.sh (Xvfb).
 """

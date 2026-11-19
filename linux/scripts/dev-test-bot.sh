@@ -40,10 +40,16 @@ run gui_spell_order_smoke.py
 run gui_out_of_range_smoke.py
 run gui_bot_reject_smoke.py
 run gui_recover_smoke.py
+run gui_recover_priority_smoke.py
+run gui_recover_threshold_smoke.py
+run gui_recover_stale_smoke.py
 run gui_recover_mp_smoke.py
 run gui_recover_fight_smoke.py
 run gui_loot_smoke.py
 run gui_loot_fight_smoke.py
+run gui_follow_smoke.py
+run gui_follow_attack_smoke.py
+run gui_follow_loot_smoke.py
 run gui_portal_block_smoke.py
 run gui_retaliate_smoke.py
 run gui_far_leg_smoke.py
@@ -55,3 +61,5 @@ run gui_cancel_pair_smoke.py
 run gui_refusal_keep_smoke.py
 run gui_defend_first_smoke.py
 run gui_start_sit_smoke.py
+run gui_resume_smoke.py
+run gui_hold_smoke.py
