@@ -31,6 +31,8 @@ already attached by another window is disabled.
 
 ## NosBazar
 
+![NosBazar tab: cheapest listing and profit per item](docs/assets/gui-bazar.png)
+
 The fourth tab turns the live packet stream into the player-auction-house
 workflow of [`TaraJura/Nostale-NB`](https://github.com/TaraJura/Nostale-NB):
 

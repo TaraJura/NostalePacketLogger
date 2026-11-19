@@ -5,7 +5,7 @@ opens the real GTK4 window against a real map from NStcData, draws a route,
 spawns a few monsters with their real names, and leaves the window on screen
 for ``linux/scripts/readme-shots.sh`` to capture with ffmpeg/Xvfb.
 
-    NTPL_SHOT_MODE=map|packets|picker|spells \
+    NTPL_SHOT_MODE=map|packets|picker|spells|bazar \
         PYTHONPATH=linux/host python3 linux/test/gui_readme_shots.py
 """
 
@@ -25,6 +25,8 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import GLib
 
+from ntpl import bazar as bazar_module
+from ntpl.bazar import BazarItem, build_search_packet
 from ntpl.clients import ClientInfo, Discovery, WineContext, client_lock_path
 from ntpl.gui import Application
 from ntpl.mapdata import astar, load_nstc
@@ -33,6 +35,37 @@ MODE = os.environ.get("NTPL_SHOT_MODE", "map")
 CHAR_ID = 14881134
 HP, HP_MAX = 2950, 3209
 MP, MP_MAX = 3600, 3727
+
+#: The demo catalog shown on the NosBazar tab. Prices are synthetic but the
+#: vnums, ND costs and names are from the real NosMall catalog, so the profit
+#: column exercises the same math as a live pass.
+BAZAR_ITEMS = (
+    ("Wings of Friendship", (2160, 2312, 10048), 0.5, 11111, "Trader"),
+    ("Speaker", (2173, 10028), 0.5, 9800, "Merchant"),
+    ("Speech Bubble", (2174, 10029), 0.5, 5999, "ShopMule"),
+    ("Soulstone Blessing", (1362, 5195, 9075), 1.0, 37999, "Auctioneer"),
+    ("Perfume", (1428,), 0.8, 5555, "Dealer"),
+    ("Higher SP Protection Scroll", (1364, 9464), 5.0, 40000, "Collector"),
+    ("Lower SP Protection Scroll", (1363, 5933, 9463), 5.0, 35000, "Broker"),
+    (
+        "Equipment Protection Scroll",
+        (1218, 9458),
+        20.0,
+        177777,
+        "Vendor",
+    ),
+    ("Golden Specialist Card Holder", (4240,), 100.0, 750000, "Reseller"),
+    ("Ancelloan's Blessing", (1286, 1452, 9041), 5.0, 29000, "Bargain"),
+    ("Tarot Card Game", (1904,), 10.0, 58900, "Market"),
+    ("Blessing Amulet", (282, 8541), 50.0, 550000, "Courier"),
+    (
+        "Sealed Champion Blessing Amulet (Random)",
+        (5735,),
+        50.0,
+        300000,
+        "Trader",
+    ),
+)
 
 
 def pick_scene():
@@ -91,6 +124,7 @@ def start_fake_client(scene) -> int:
     port = listener.getsockname()[1]
     first, middle, last = path[len(path) // 4], path[len(path) // 2], path[-1]
     player = path[len(path) // 3]
+    bazar_mode = MODE == "bazar"
     lines = [
         "STATUS|ready",
         "RECV|walk 1 2 3 4",
@@ -108,13 +142,78 @@ def start_fake_client(scene) -> int:
         f"RECV|mv 3 5003 {last[0]} {last[1]} 4",
         "RECV|get 5001 4001",
     ]
+    if bazar_mode:
+        lines.extend(
+            [
+                # Our own name fills the Monitor character field, and the
+                # Bibi entity next to us drives the open sequence.
+                f"RECV|in 1 BotMule - {CHAR_ID} {start[0]} {start[1]} 2 0 0 0",
+                f"RECV|in 2 793 9584 {start[0] + 1} {start[1]} 3 100 100 "
+                "460 0 0 -1 1 0 -1 - 0",
+                "RECV|inv 2 7.2174.5",
+                "RECV|gold 100000 0",
+            ]
+        )
     payload = ("\n".join(lines) + "\n").encode("latin-1")
+    by_vnum = {
+        vnum: (price, seller)
+        for _name, vnums, _cost, price, seller in BAZAR_ITEMS
+        for vnum in vnums
+    }
+
+    def bazar_response(text: str, connection: socket.socket) -> None:
+        if text == "POS":
+            connection.sendall(
+                (f"STATUS|POS {start[0]} {start[1]} {CHAR_ID} 0\n").encode()
+            )
+            return
+        if text.startswith("SEND|npc_req 2 9584"):
+            connection.sendall(b"RECV|npc_req 2 9584 439\n")
+            return
+        if text.startswith("SEND|n_run 60 0 2 9584"):
+            connection.sendall(b"RECV|wopen  28 0 9584 0\n")
+            return
+        if not text.startswith("SEND|c_blist "):
+            return
+        parts = text.split()
+        try:
+            count = int(parts[9])
+            wanted = [int(value) for value in parts[10 : 10 + count]]
+        except (IndexError, ValueError):
+            wanted = []
+        for vnum in wanted:
+            hit = by_vnum.get(vnum)
+            if hit is None:
+                continue
+            price, seller = hit
+            entry = (
+                f"1001|2002|{seller}|{vnum}|5|0|{price}|120|"
+                "0|0|0|0|0|0|^0"
+            )
+            connection.sendall(f"RECV|rc_blist 0 {entry}\n".encode())
+            return
+        connection.sendall(b"RECV|rc_blist 0\n")
 
     def serve() -> None:
         connection, _ = listener.accept()
         try:
             connection.sendall(payload)
-            time.sleep(120)
+            if not bazar_mode:
+                time.sleep(120)
+                return
+            buffer = b""
+            while True:
+                chunk = connection.recv(4096)
+                if not chunk:
+                    return
+                buffer += chunk
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    bazar_response(
+                        line.decode("utf-8", "replace"), connection
+                    )
+        except OSError:
+            return
         finally:
             connection.close()
             listener.close()
@@ -143,6 +242,21 @@ def picker_discovery(port: int) -> Discovery:
 
 
 def main() -> int:
+    if MODE == "bazar":
+        # Never touch the developer's real bazar config or mirror bus.
+        if not os.environ.get("NTPL_BAZAR_CONFIG"):
+            handle = tempfile.NamedTemporaryFile(
+                prefix="ntpl-shot-bazar-", suffix=".json", delete=False
+            )
+            handle.close()
+            os.environ["NTPL_BAZAR_CONFIG"] = handle.name
+        os.environ.setdefault(
+            "NTPL_MIRROR_DIR", tempfile.mkdtemp(prefix="ntpl-shot-mirror-")
+        )
+        # A full demo table should be on screen when the capture runs, not a
+        # half-finished 2.5 s-paced pass.
+        bazar_module.SEARCH_INTERVAL_S = 0.15
+        bazar_module.RESPONSE_TIMEOUT_S = 2.0
     scene = pick_scene()
     if scene is None:
         print("no walkable scene found")
@@ -151,7 +265,39 @@ def main() -> int:
     port = start_fake_client(scene)
     app = Application("127.0.0.1", port, unique=False, select_client=False)
     waypoints = [path[-1]]
-    scheduled = {"late": False}
+    scheduled = {"late": False, "bazar": False}
+
+    def start_bazar() -> bool:
+        if app.window is None:
+            return True
+        if not any(
+            entity.vnum == 793
+            for entity in app.engine.world.entities.values()
+        ):
+            return True
+        items = [
+            BazarItem(
+                name=name,
+                search_packet=build_search_packet(list(vnums)),
+                vnum=vnums[0],
+                amount=5,
+                min_price=0,
+                nos_cost=cost,
+                enabled=True,
+            )
+            for name, vnums, cost, _price, _seller in BAZAR_ITEMS
+        ]
+        app._bazar_set_items(items)
+        app.bazar_character_entry.set_text("BotMule")
+        app.bazar_refresh_spin.set_value(30)
+        if not app.bazar_npc_entry.get_text().strip():
+            app.bazar_npc_entry.set_text("9584")
+        app._bazar_start_monitor()
+        app._set_status(
+            f"NosBazar monitor · {len(items)} priced items · "
+            "cheapest listing per item"
+        )
+        return False
 
     def scroll_spells() -> bool:
         sidebar = app.sidebar_scroll.get_child()
@@ -228,6 +374,15 @@ def main() -> int:
             app.notebook.set_current_page(0)
             if app.window is not None:
                 app.window.set_default_size(1440, 900)
+            return False
+        if MODE == "bazar":
+            if app.window is None:
+                return True
+            app.window.set_default_size(1440, 900)
+            app.notebook.set_current_page(3)
+            if not scheduled["bazar"]:
+                scheduled["bazar"] = True
+                GLib.timeout_add(1500, start_bazar)
             return False
         if app.map_grid is None or app.window is None:
             return True

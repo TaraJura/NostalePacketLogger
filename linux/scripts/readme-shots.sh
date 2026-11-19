@@ -1,24 +1,31 @@
 #!/usr/bin/env bash
 # Regenerate the README/docs screenshots from the real GTK4 window.
 #
-#   ./linux/scripts/readme-shots.sh [output-dir]
+#   ./linux/scripts/readme-shots.sh [output-dir] [mode]
 #
+# With no mode, all screenshots are regenerated. A single mode
+# (map|packets|picker|spells|bazar) regenerates just that image.
 # Needs Xvfb, xdotool and ffmpeg. The window runs against a fake packet
 # source with real map/monster data, so no game client or account is shown.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-$ROOT/../docs/assets}"
+ONLY="${2:-all}"
 mkdir -p "$OUT"
 
+should() {
+    [ "$ONLY" = "all" ] || [ "$ONLY" = "$1" ]
+}
+
 capture() {
-    local mode="$1" out="$2" title="$3"
+    local mode="$1" out="$2" title="$3" wait="${4:-10}"
     xvfb-run -a -s "-screen 0 1500x950x24" bash -c '
         export GDK_BACKEND=x11
         PYTHONPATH="'"$ROOT"'/host" NTPL_SHOT_MODE="'"$mode"'" \
             python3 "'"$ROOT"'/test/gui_readme_shots.py" &
         app=$!
-        sleep 10
+        sleep '"$wait"'
         window=$(xdotool search --onlyvisible --name "'"$title"'" 2>/dev/null | head -1)
         if [ -n "$window" ]; then
             eval "$(xdotool getwindowgeometry --shell "$window")"
@@ -35,8 +42,21 @@ capture() {
     '
 }
 
-capture map "$OUT/gui-map.png" "NosTale Packet Logger"
-capture packets "$OUT/gui-packets.png" "NosTale Packet Logger"
-capture picker "$OUT/gui-picker.png" "Select NosTale client"
-capture spells "$OUT/gui-spells.png" "NosTale Packet Logger"
+if should map; then
+    capture map "$OUT/gui-map.png" "NosTale Packet Logger"
+fi
+if should packets; then
+    capture packets "$OUT/gui-packets.png" "NosTale Packet Logger"
+fi
+if should picker; then
+    capture picker "$OUT/gui-picker.png" "Select NosTale client"
+fi
+if should spells; then
+    capture spells "$OUT/gui-spells.png" "NosTale Packet Logger"
+fi
+if should bazar; then
+    # The monitor needs a moment to open Bibi Basar and finish the first
+    # priced pass before the capture.
+    capture bazar "$OUT/gui-bazar.png" "NosTale Packet Logger" 14
+fi
 echo "screenshots written to $OUT"
