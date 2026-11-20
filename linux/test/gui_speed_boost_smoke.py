@@ -1,7 +1,7 @@
-"""Headless smoke test for the **Speed +%** control.
+"""Headless smoke test for the **Speed +** control.
 
-The DLL rewrites the client's `cond` speed; the GUI only has to send the
-configured percentage to the DLL. Checks:
+The DLL adds a flat bonus to the client's `cond` speed; the GUI only has to
+send the configured bonus to the DLL. Checks:
 
 * attaching sends the default `SPEED|0` (no stale boost from an earlier GUI),
 * changing the spin button sends the new value immediately,

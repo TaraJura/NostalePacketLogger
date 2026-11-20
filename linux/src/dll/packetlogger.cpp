@@ -55,6 +55,7 @@ std::atomic<int>           g_speed_boost{0};
 std::atomic<int>           g_cond_base{0};
 std::atomic<int>           g_cond_target{0};
 std::atomic<int>           g_logged_target{0};
+std::atomic<int>           g_logged_skip{0};
 std::atomic<unsigned long> g_self_id{0};
 std::atomic<unsigned long> g_self_id_at{0};
 std::atomic<const char*>   g_last_cond_ptr{nullptr};
@@ -90,8 +91,8 @@ unsigned long local_char_id() {
 // AnsiString buffer and only same-width digits are replaced, so the length
 // field and the terminator stay valid.
 void patch_cond_packet(char* packet) {
-    const int percent = g_speed_boost.load(std::memory_order_relaxed);
-    if (percent <= 0 || packet == nullptr) {
+    const int add = g_speed_boost.load(std::memory_order_relaxed);
+    if (add <= 0 || packet == nullptr) {
         return;
     }
     if (std::strncmp(packet, "cond ", 5) != 0) {
@@ -99,8 +100,8 @@ void patch_cond_packet(char* packet) {
     }
 
     // The refcount call this hook sits on is normally reached once per
-    // packet. Guard a second pass over the same buffer anyway: boosting the
-    // already-boosted value would compound the percentage.
+    // packet. Guard a second pass over the same buffer anyway: adding the
+    // bonus to the already-boosted value would add it twice.
     const unsigned long now = GetTickCount();
     if (packet == g_last_cond_ptr.load(std::memory_order_relaxed) &&
         now - g_last_cond_ms.load(std::memory_order_relaxed) < 50) {
@@ -108,7 +109,7 @@ void patch_cond_packet(char* packet) {
     }
 
     const speedboost::Change change =
-        speedboost::plan_cond(packet, percent);
+        speedboost::plan_cond(packet, add);
     if (!change.valid) {
         return;
     }
@@ -128,17 +129,27 @@ void patch_cond_packet(char* packet) {
         const int previous =
             g_logged_target.exchange(change.to, std::memory_order_relaxed);
         if (previous != change.to) {
-            ntpl::logf("speed boost %d%%: cond %d -> %d", percent,
-                       change.from, change.to);
+            ntpl::logf("speed boost +%d: cond %d -> %d", add, change.from,
+                       change.to);
         }
         return;
     }
 
-    // Off, rounded back to the same value, or too narrow for an in-place
-    // rewrite (a one-digit speed cannot become two digits here). Keep the
-    // pair current so a later walk packet is at least not boosted wrongly.
+    // Off, already at the cap, or too narrow for an in-place rewrite (a
+    // one-digit speed cannot become two digits here). Keep the pair current
+    // so a later walk packet is at least not boosted wrongly, and report a
+    // width failure once per server value.
     g_cond_base.store(change.from, std::memory_order_relaxed);
     g_cond_target.store(change.to, std::memory_order_relaxed);
+    if (change.to != change.from) {
+        const int previous =
+            g_logged_skip.exchange(change.from, std::memory_order_relaxed);
+        if (previous != change.from) {
+            ntpl::logf(
+                "speed boost +%d: cond %d -> %d does not fit the field",
+                add, change.from, change.to);
+        }
+    }
 }
 
 // Keep the client's own walk speed in step with the patched cond. If the
@@ -410,25 +421,26 @@ bool portal_block() {
     return g_block_portal.load(std::memory_order_relaxed);
 }
 
-void set_speed_boost(int percent) {
-    if (percent < 0) {
-        percent = 0;
+void set_speed_boost(int add) {
+    if (add < 0) {
+        add = 0;
     }
-    if (percent > 300) {
-        percent = 300;
+    if (add > 59) {
+        add = 59;
     }
     const int previous =
-        g_speed_boost.exchange(percent, std::memory_order_release);
-    // Forget the last cond value: the next packet must be scaled from the
-    // server's own speed, not from a value patched with the old percentage.
+        g_speed_boost.exchange(add, std::memory_order_release);
+    // Forget the last cond value: the next packet must be built from the
+    // server's own speed, not from a value patched with the old bonus.
     g_cond_base.store(0, std::memory_order_relaxed);
     g_cond_target.store(0, std::memory_order_relaxed);
     g_logged_target.store(0, std::memory_order_relaxed);
+    g_logged_skip.store(0, std::memory_order_relaxed);
     g_last_cond_ptr.store(nullptr, std::memory_order_relaxed);
     g_last_cond_ms.store(0, std::memory_order_relaxed);
-    if (previous != percent) {
-        ntpl::logf("speed boost %d%% (client-side)%s", percent,
-                   percent > 0 ? " -- high ban risk" : "");
+    if (previous != add) {
+        ntpl::logf("speed boost +%d (client-side)%s", add,
+                   add > 0 ? " -- high ban risk" : "");
     }
 }
 

@@ -35,7 +35,7 @@ std::string status_line() {
         buffer, sizeof(buffer),
         "STATUS|ntpl %s | recv=0x%08lX send=0x%08lX tnt=0x%08lX | "
         "hooks recv=%s send=%s skill=%s | drops recv=%lu send=%lu | "
-        "portalblock=%s | speed=%d%%",
+        "portalblock=%s | speed=+%d",
         ntpl::kVersion,
         static_cast<unsigned long>(st.recv_addr),
         static_cast<unsigned long>(st.send_addr),
@@ -292,19 +292,20 @@ void handle_command(const std::string& command) {
         return;
     }
 
-    // SPEED|N -- scale the local player's movement speed by N percent in the
-    // client (0 = normal). The incoming `cond` speed is rewritten before the
-    // client parses it; see speedboost.h. This is a client hack and high ban
-    // risk, which is why the default is 0.
+    // SPEED|N -- add N to the local player's movement speed in the client
+    // (0 = normal), the way a NosTale speed buff works (+1, +2, +3, ...).
+    // The incoming `cond` speed is rewritten before the client parses it;
+    // see speedboost.h. This is a client hack and high ban risk, which is why
+    // the default is 0.
     if (command.compare(0, 6, "SPEED|") == 0) {
-        int percent = 0;
-        if (std::sscanf(command.c_str() + 6, "%d", &percent) != 1) {
-            tcpserver::send_line("STATUS|usage: SPEED|percent(0-300)");
+        int add = 0;
+        if (std::sscanf(command.c_str() + 6, "%d", &add) != 1) {
+            tcpserver::send_line("STATUS|usage: SPEED|add(0-59)");
             return;
         }
-        packetlogger::set_speed_boost(percent);
+        packetlogger::set_speed_boost(add);
         char reply[64] = {0};
-        std::snprintf(reply, sizeof(reply), "STATUS|SPEED +%d%%",
+        std::snprintf(reply, sizeof(reply), "STATUS|SPEED +%d",
                       packetlogger::speed_boost());
         tcpserver::send_line(reply);
         return;

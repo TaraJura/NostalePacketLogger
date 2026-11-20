@@ -45,11 +45,12 @@ void set_enabled(bool enabled);
 void set_portal_block(bool enabled);
 bool portal_block();
 
-// Client-side speed boost: while `percent` > 0, the local player's incoming
-// `cond` speed is scaled by that percentage before the client parses it, and
-// the client's own `walk` speed is kept consistent. 0 turns it off. This is a
-// client hack (high ban risk); the GUI sets it from its Speed +% control.
-void set_speed_boost(int percent);
+// Client-side speed boost: while `add` > 0, the local player's incoming
+// `cond` speed gets that flat bonus (the way a NosTale speed buff works:
+// +1, +2, +3, ...) before the client parses it, and the client's own `walk`
+// speed is kept consistent. 0 turns it off. This is a client hack (high ban
+// risk); the GUI sets it from its Speed + control.
+void set_speed_boost(int add);
 int speed_boost();
 
 // Sends one already-formatted packet through the game's own send function.

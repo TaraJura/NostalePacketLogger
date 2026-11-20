@@ -191,10 +191,11 @@ Level N" wording), and an explicit unknown-vnum option for monsters that
 spawned before injection. **Block portals** (off by default) drops the
 client's own `preq` portal request in the DLL and keeps paths off the warp
 tiles, so a farming loop cannot enter another map even from a tile it is
-already standing on. **Speed +%** (**Malicious** section, default 0 = normal) is a
-client-side movement-speed boost: the DLL scales the local player's incoming
-`cond` speed before the client parses it, and keeps the client's own `walk`
-speed consistent, so walking stays smooth. It applies immediately, and the
+already standing on. **Speed +** (**Malicious** section, default 0 = normal) adds a
+flat bonus to the client's walking speed, the way a NosTale speed buff works
+(+1, +2, +3...): the DLL adds it to the local player's incoming `cond` speed
+before the client parses it, and keeps the client's own `walk` speed
+consistent, so walking stays smooth. It applies immediately, and the
 DLL reverts to normal speed when the GUI disconnects. This is a client hack:
 the game rules prohibit client manipulation, and bot vendors themselves label
 speed hacks high ban risk. A third top-level **Bot log** tab keeps a

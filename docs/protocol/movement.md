@@ -33,9 +33,9 @@ walk 20 139 0 10    (20 + 139 = 159; 159 % 3 == 0 -> checksum 0)
   `tp` correction, which the client renders as a teleport. Packet-only walking
   is therefore not a substitute for the client's own movement.
 - The `speed` field mirrors the character's last `cond` speed (live: both 12).
-  The GUI's **Speed +%** control patches that `cond` in the DLL and, if the
+  The GUI's **Speed +** control patches that `cond` in the DLL and, if the
   client still sends the unboosted value, this field too; a packet already
-  carrying the boosted value is left alone, so the percentage is never applied
+  carrying the boosted value is left alone, so the flat bonus is never added
   twice. The client's boosted speed is what the server sees in `walk`.
 - The character must be **standing**. While sitting (`rest` state 1) the server
   ignores movement. Toggle with `rest 1 1 <charId>` first.

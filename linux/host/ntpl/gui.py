@@ -424,8 +424,8 @@ class Application(Gtk.Application):
         self.follow_player_entry = None
         self.follow_attack_check = None
         self.follow_mirror_check = None
-        # Client-side movement-speed boost in percent (0 = off). Applied by
-        # the DLL to the local player's `cond` speed; see Speed +% control.
+        # Flat client-side movement-speed bonus (0 = off), added by the DLL to
+        # the local player's `cond` speed; see the Speed + control.
         self.speed_boost_spin = None
         # -- cross-client packet mirroring (Follow frame) ------------------
         # Every attached host publishes its own `walk`/`u_s` to the mirror
@@ -2805,25 +2805,26 @@ class Application(Gtk.Application):
         malicious_hint.set_max_width_chars(34)
         malicious_hint.add_css_class("dim-label")
         malicious_box.append(malicious_hint)
-        # Speed +%: the DLL scales the local player's incoming `cond` speed,
-        # which is what the client uses for its own walking and walk packet.
-        self.speed_boost_spin = Gtk.SpinButton.new_with_range(0, 300, 10)
+        # Speed +: the DLL adds this flat value to the local player's incoming
+        # `cond` speed, the way a NosTale speed buff works (+1, +2, +3...).
+        self.speed_boost_spin = Gtk.SpinButton.new_with_range(0, 50, 1)
         self.speed_boost_spin.set_value(0)
         self.speed_boost_spin.set_hexpand(True)
         self.speed_boost_spin.set_tooltip_text(
-            "Increase this client's walking speed by this percentage while "
-            "the window is attached (0 = normal, 100 = double). The DLL "
-            "scales the server's `cond` speed before the client parses it, so "
-            "movement stays smooth. It applies immediately and does not need "
-            "the bot to run. This is a client-side speed hack: it violates "
-            "the game rules and is high ban risk. The DLL reverts to normal "
-            "if the GUI disconnects."
+            "Add this value to the client's walking speed, the same way a "
+            "NosTale speed buff works (+1, +2, +3...). 0 = normal. The "
+            "client caps walking speed at 59. The DLL adds the bonus to the "
+            "server's `cond` speed before the client parses it, so movement "
+            "stays smooth. It applies immediately and does not need the bot "
+            "to run. This is a client-side speed hack: it violates the game "
+            "rules and is high ban risk. The DLL reverts to normal if the "
+            "GUI disconnects."
         )
         self.speed_boost_spin.connect(
             "value-changed", lambda *_: self._on_speed_boost_changed()
         )
         malicious_box.append(
-            self._field_row(Gtk.Label(label="Speed +%"), self.speed_boost_spin)
+            self._field_row(Gtk.Label(label="Speed +"), self.speed_boost_spin)
         )
         sidebar.append(self._frame("Malicious", malicious_box))
 
@@ -5573,7 +5574,7 @@ class Application(Gtk.Application):
         )
 
     def _sync_speed_boost(self, quiet: bool = False) -> None:
-        """Ask the DLL to scale the client's own walking speed.
+        """Ask the DLL to add a flat bonus to the client's walking speed.
 
         The DLL rewrites the local player's incoming `cond` speed before the
         client parses it, so the client walks faster and its own `walk`
@@ -5582,17 +5583,17 @@ class Application(Gtk.Application):
         """
         if self.client is None or not self.client.connected:
             return
-        percent = 0
+        add = 0
         if self.speed_boost_spin is not None:
-            percent = int(self.speed_boost_spin.get_value())
+            add = int(self.speed_boost_spin.get_value())
         try:
-            self.client.send_raw(f"SPEED|{percent}")
+            self.client.send_raw(f"SPEED|{add}")
         except (ConnectionLost, ValueError):
             return
         if not quiet:
             self._set_status(
-                f"speed boost +{percent}% (client-side, high ban risk)"
-                if percent > 0
+                f"speed boost +{add} (client-side, high ban risk)"
+                if add > 0
                 else "speed boost off"
             )
 

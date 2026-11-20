@@ -126,11 +126,12 @@ inline std::size_t digits(int value)
     return count;
 }
 
-// Speed for `base` at `percent` more (100 = double). Returns base when the
-// boost is off; the caller treats to == from as "no change".
-inline int target_speed(int base, int percent)
+// Speed for `base` with a flat `add` bonus, the way a NosTale speed buff
+// works (+1, +2, +3, ...). Returns base when the bonus is off; the caller
+// treats to == from as "no change".
+inline int target_speed(int base, int add)
 {
-    if (base <= 0 || percent <= 0) {
+    if (base <= 0 || add <= 0) {
         return base;
     }
     // The client's own cond speed setter ignores anything above 0x3B (59):
@@ -139,12 +140,8 @@ inline int target_speed(int base, int percent)
     if (base >= 59) {
         return base;
     }
-    const long long scaled =
-        (static_cast<long long>(base) * (100LL + percent) + 50LL) / 100LL;
-    if (scaled >= 59LL) {
-        return 59;
-    }
-    return static_cast<int>(scaled);
+    const int sum = base + add;
+    return sum >= 59 ? 59 : sum;
 }
 
 inline bool write_token(char* text, const Change& change)
@@ -161,7 +158,7 @@ inline bool write_token(char* text, const Change& change)
     return true;
 }
 
-inline Change plan_cond(const char* text, int percent)
+inline Change plan_cond(const char* text, int add)
 {
     Change change;
     Tokens tokens;
@@ -181,7 +178,7 @@ inline Change plan_cond(const char* text, int percent)
     change.valid = true;
     change.id = id;
     change.from = static_cast<int>(base);
-    change.to = target_speed(change.from, percent);
+    change.to = target_speed(change.from, add);
     change.offset = tokens.items[5].offset;
     change.length = tokens.items[5].length;
     // The field is rewritten in place, so the replacement must not need more

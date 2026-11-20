@@ -43,13 +43,13 @@ class BotConfigTests(unittest.TestCase):
     def test_speed_boost_defaults_to_off_and_is_clamped(self):
         self.assertEqual(BotConfig().speed_boost, 0)
         self.assertEqual(
-            BotConfig.from_dict({"speed_boost": 120}).speed_boost, 120
+            BotConfig.from_dict({"speed_boost": 35}).speed_boost, 35
         )
         self.assertEqual(
             BotConfig.from_dict({"speed_boost": -5}).speed_boost, 0
         )
         self.assertEqual(
-            BotConfig.from_dict({"speed_boost": 999}).speed_boost, 300
+            BotConfig.from_dict({"speed_boost": 999}).speed_boost, 50
         )
         config = BotConfig(speed_boost=35)
         self.assertEqual(config.to_dict()["speed_boost"], 35)

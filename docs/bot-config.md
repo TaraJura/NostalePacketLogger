@@ -273,28 +273,30 @@ setting is saved as `block_portals`; the live state is in the DLL's status line
 
 ## Speed boost — client-side movement speed
 
-**Speed +%** (**Malicious** section, 0–300, default 0) increases the character's walking
-speed. It is not a server buff and not an injected movement packet: the DLL
-rewrites the `cond 1 <charId> … <speed>` packet the server sends for the local
-player **before the client parses it**, so the client's own movement
+**Speed +** (**Malicious** section, 0–50, default 0) adds a flat bonus to the
+character's walking speed, the same way a NosTale speed buff works (+1, +2,
++3...). It is not a server buff and not an injected movement packet: the DLL
+adds the bonus to the `cond 1 <charId> … <speed>` packet the server sends for
+the local player **before the client parses it**, so the client's own movement
 controller, its animation and its `walk` packets all use the boosted value. If
 the client still sends the server's original speed in `walk`, the DLL replaces
-that field too; the value is never boosted twice. The boost applies as soon as
-the spin button changes — also for manual play, not only while the bot runs —
-and is saved as `speed_boost` in the JSON configuration. Closing the GUI sends
+that field too; the bonus is never added twice. The boost applies as soon as
+the spin changes — also for manual play, not only while the bot runs — and is
+saved as `speed_boost` in the JSON configuration. Closing the GUI sends
 `SPEED|0`, and the DLL also reverts on its own when the host disconnects, so a
 crashed GUI cannot leave the client fast. The live value is in the DLL status
-line (`speed=N%`).
+line (`speed=+N`).
 
 Limits and risks:
 
 - The rewrite is in place, so the boosted speed must have the same number of
-  digits as the server's value (`10`→`20` works, `9`→`18` does not). Normal
-  characters walk at 10–12, so the whole 0–300 % range fits; if a speed has a
-  different width the DLL logs a line and leaves the packet alone.
+  digits as the server's value (`12`→`15` works; `9`→`10` does not). Normal
+  characters walk at 10–12 and the client cap is 59, so the whole 0–50 range
+  fits the two-digit field; if a speed has a different width the DLL logs a
+  line and leaves the packet alone.
 - The client's own `cond` speed setter ignores values above **59**
-  (`cmp dl,0x3b / ja`), so the DLL clamps the target at 59; a higher
-  percentage simply stops there.
+  (`cmp dl,0x3b / ja`), so the DLL clamps the target at 59; a higher bonus
+  simply stops there.
 - The game hands the hooks CRLF-terminated strings (`… 12\r\n`); the parser
   trims the terminator before reading the speed (this was the 2026-11-20
   live bug: the first version silently refused every packet).

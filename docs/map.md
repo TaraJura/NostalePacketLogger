@@ -249,11 +249,11 @@ grouped by function:
   picks them up when adjacent, then resumes the path.
 - **Recovery** — Auto-recover HP/MP and the low-HP/MP thresholds.
 - **Malicious** — client-side changes that take effect immediately, whether
-  or not the bot is running. **Speed +%** (0–300, default 0) is a
-  client-side movement-speed boost: the DLL scales the local player's
-  incoming `cond` speed before the client parses it and keeps the client's
-  own `walk` speed consistent, so the character walks faster with normal
-  animation. It applies as soon as the spin changes; closing the GUI (or the
+  or not the bot is running. **Speed +** (0–50, default 0) is a
+  client-side movement-speed bonus: the DLL adds a flat value (+1, +2, +3...)
+  to the local player's incoming `cond` speed before the client parses it and
+  keeps the client's own `walk` speed consistent, so the character walks
+  faster with normal animation. It applies as soon as the spin changes; closing the GUI (or the
   DLL losing the host) restores normal speed. This is a client hack, high ban
   risk — see
   [bot-config.md](bot-config.md#speed-boost--client-side-movement-speed).
