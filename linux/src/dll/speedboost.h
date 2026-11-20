@@ -6,8 +6,8 @@
 // packet to learn the local player's base speed. It never rewrites a packet:
 // the worker thread adds the configured flat bonus and calls the client's own
 // entity speed setter. The client's walk builder reads that same entity, so
-// the wire is not independently inflated; a server correction at the first
-// teleport turns the boost off (the 2026-11-20 teleports and kick).
+// the wire is not independently inflated; a server correction settles at +1
+// (or turns the boost off if even +1 was rejected), the 2026-11-20 safety.
 //
 // Deliberately header-only and free of Windows headers so the host build can
 // unit-test it (`make speed-test`) without Wine or the game.

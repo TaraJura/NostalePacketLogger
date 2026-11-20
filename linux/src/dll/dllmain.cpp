@@ -304,9 +304,14 @@ void handle_command(const std::string& command) {
             return;
         }
         packetlogger::set_speed_boost(add);
-        char reply[64] = {0};
-        std::snprintf(reply, sizeof(reply), "STATUS|SPEED +%d",
-                      packetlogger::speed_boost());
+        const int requested = packetlogger::speed_request();
+        char reply[96] = {0};
+        if (requested > 1) {
+            std::snprintf(reply, sizeof(reply),
+                          "STATUS|SPEED +%d (testing +1 first)", requested);
+        } else {
+            std::snprintf(reply, sizeof(reply), "STATUS|SPEED +%d", requested);
+        }
         tcpserver::send_line(reply);
         return;
     }
@@ -403,6 +408,7 @@ DWORD WINAPI main_thread(LPVOID module) {
         // carries a speed the player is actually moving at.
         if (now - last_speed_tick >= 25) {
             last_speed_tick = now;
+            packetlogger::speed_maybe_promote(now);
             const int target = packetlogger::speed_target();
             if (target > 0) {
                 int previous = 0;
@@ -417,10 +423,22 @@ DWORD WINAPI main_thread(LPVOID module) {
                 }
             }
         }
-        if (packetlogger::take_speed_correction()) {
-            ntpl::logf("speed boost turned off after a server correction");
-            if (tcpserver::is_connected()) {
-                tcpserver::send_line("STATUS|SPEED CORRECTED");
+        int settle = 0;
+        if (packetlogger::take_speed_correction(settle)) {
+            if (settle > 0) {
+                ntpl::logf(
+                    "speed boost settled at +%d after a server correction",
+                    settle);
+                if (tcpserver::is_connected()) {
+                    tcpserver::send_line("STATUS|SPEED TUNED " +
+                                         std::to_string(settle));
+                }
+            } else {
+                ntpl::logf(
+                    "speed boost turned off after a server correction");
+                if (tcpserver::is_connected()) {
+                    tcpserver::send_line("STATUS|SPEED CORRECTED");
+                }
             }
         }
         if (now - last_status_tick >= 5000) {

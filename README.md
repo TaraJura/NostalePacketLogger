@@ -197,8 +197,10 @@ works (+1, +2, +3...). No packet is modified: the DLL reads the server's
 `cond` speed and calls the client's own entity speed setter on the local
 player actor, the same field the client's walk builder reads. It applies
 immediately without the bot, and the client's walk packets always report the
-speed the client's entity actually has. If the server corrects the player
-while a boost is on, the DLL turns it off and the GUI resets the control.
+speed the client's entity actually has. The boost probes +1 first and,
+after 8 s without a server correction, applies the requested value; if the
+server corrects the player, it settles at the highest accepted value (+1)
+instead of dropping to 0, or turns off if even +1 is rejected.
 This is a client hack: the game rules prohibit client manipulation, and bot
 vendors themselves label speed hacks high ban risk. A third top-level **Bot log** tab keeps a
 timestamped, selectable record of every action (attacks, TARGET selections and

@@ -175,13 +175,31 @@ def main() -> int:
             result["correction_zero"] = (
                 int(app.speed_boost_spin.get_value()) == 0
             )
-            result["correction_sent_zero"] = (
-                speed_lines(server.received)[-1:] == ["SPEED|0"]
+            # The DLL already turned the boost off; the silent spin update
+            # must not send a new SPEED command.
+            result["correction_no_send"] = (
+                speed_lines(server.received)[-1:] == ["SPEED|35"]
             )
             status = app.status.get_text() if app.status is not None else ""
             result["correction_status"] = "server corrected" in status
+            server.send("STATUS|SPEED TUNED 1\n")
+            GLib.timeout_add(500, phase6)
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"phase5 exception: {exc!r}"
+            app.quit()
+        return False
+
+    def phase6() -> bool:
+        try:
+            result["tuned_spin"] = int(app.speed_boost_spin.get_value()) == 1
+            # The silent update must not restart the probe with SPEED|1.
+            result["tuned_no_send"] = (
+                speed_lines(server.received)[-1:] == ["SPEED|35"]
+            )
+            status = app.status.get_text() if app.status is not None else ""
+            result["tuned_status"] = "limited the speed boost to +1" in status
+        except Exception as exc:  # noqa: BLE001
+            result["detail"] = f"phase6 exception: {exc!r}"
         app.quit()
         return False
 
@@ -208,8 +226,11 @@ def main() -> int:
         and result.get("collected")
         and result.get("sent35")
         and result.get("correction_zero")
-        and result.get("correction_sent_zero")
+        and result.get("correction_no_send")
         and result.get("correction_status")
+        and result.get("tuned_spin")
+        and result.get("tuned_no_send")
+        and result.get("tuned_status")
         and result.get("shutdown_zero")
     )
     if not result.get("detail") or result["detail"] == "not checked":
@@ -222,8 +243,11 @@ def main() -> int:
             f"collected={result.get('collected')} "
             f"sent35={result.get('sent35')} "
             f"correction_zero={result.get('correction_zero')} "
-            f"correction_sent_zero={result.get('correction_sent_zero')} "
+            f"correction_no_send={result.get('correction_no_send')} "
             f"correction_status={result.get('correction_status')} "
+            f"tuned_spin={result.get('tuned_spin')} "
+            f"tuned_no_send={result.get('tuned_no_send')} "
+            f"tuned_status={result.get('tuned_status')} "
             f"shutdown_zero={result.get('shutdown_zero')} "
             f"speeds={speeds} tail={lines[-8:]}"
         )

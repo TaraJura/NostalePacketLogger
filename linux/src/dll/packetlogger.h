@@ -53,12 +53,18 @@ bool portal_block();
 // independently patched field. 0 turns it off. This is a client hack (high
 // ban risk); the GUI sets it from its Speed + control.
 void set_speed_boost(int add);
-int speed_boost();
+int speed_boost();      // effective bonus currently applied
+int speed_request();    // bonus the host asked for
 
 // True once after the server corrected the player's position while a speed
-// boost was active; the boost has already been turned off. The worker reports
-// it to the host so the GUI can reset the control.
-bool take_speed_correction();
+// boost was active. `settle` is the bonus to keep: +1 when a higher value was
+// rejected (the +1 probe had passed), 0 when even +1 was rejected. The worker
+// reports it to the host so the GUI can show the limit.
+bool take_speed_correction(int& settle);
+
+// Promote the +1 probe to the requested value after the 8 s probe window.
+// Called from the worker thread.
+void speed_maybe_promote(unsigned long now);
 
 // The speed to apply to the local player entity: the last server cond speed
 // plus the configured flat bonus, or 0 when no boost/cond is known. The

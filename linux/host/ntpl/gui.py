@@ -427,6 +427,9 @@ class Application(Gtk.Application):
         # Flat client-side movement-speed bonus (0 = off), added by the DLL to
         # the local player's `cond` speed; see the Speed + control.
         self.speed_boost_spin = None
+        # True while the DLL reports the server's accepted limit and the spin
+        # is updated from it: that must not send a new SPEED command.
+        self._speed_tuning = False
         # -- cross-client packet mirroring (Follow frame) ------------------
         # Every attached host publishes its own `walk`/`u_s` to the mirror
         # bus; a follower replays the followed character's actions with its
@@ -2868,11 +2871,12 @@ class Application(Gtk.Application):
         self.speed_boost_spin.set_tooltip_text(
             "Add this value to the client's walking speed, the same way a "
             "NosTale speed buff works (+1, +2, +3...). 0 = normal. The "
-            "client caps walking speed at 59. The DLL adds the bonus to the "
-            "server's `cond` speed and sets the local player entity directly, "
-            "so the player (not a NosMate) moves faster. It applies "
-            "immediately and does not need the bot to run. The DLL reverts "
-            "to normal if the GUI disconnects."
+            "client caps walking speed at 59. The DLL sets the local player "
+            "entity directly, so the player (not a NosMate) moves faster. "
+            "It applies immediately and does not need the bot to run. The "
+            "DLL tests +1 first and keeps the highest value the server "
+            "accepts (a rejected value settles at +1, or off if even +1 is "
+            "rejected). The DLL reverts to normal if the GUI disconnects."
         )
         self.speed_boost_spin.connect(
             "value-changed", lambda *_: self._on_speed_boost_changed()
@@ -5624,6 +5628,8 @@ class Application(Gtk.Application):
             )
 
     def _on_speed_boost_changed(self) -> None:
+        if self._speed_tuning:
+            return
         self._sync_speed_boost()
 
     def _on_page_switch(self, _notebook, _page, _page_num) -> None:
@@ -6219,10 +6225,30 @@ class Application(Gtk.Application):
                     # The DLL turned the boost off after the server corrected
                     # the player's position (the 2026-11-20 teleport/kick).
                     if self.speed_boost_spin is not None:
+                        self._speed_tuning = True
                         self.speed_boost_spin.set_value(0)
+                        self._speed_tuning = False
                     self._set_status(
                         "speed boost disabled: the server corrected the "
                         "player's position"
+                    )
+                elif message.payload.startswith("SPEED TUNED"):
+                    # The server rejected a higher value but accepted +N; the
+                    # DLL settled on it. Show the accepted value without
+                    # sending a new SPEED command (that would restart the
+                    # probe).
+                    parts = message.payload.split()
+                    try:
+                        value = int(parts[2])
+                    except (IndexError, ValueError):
+                        value = 0
+                    self._speed_tuning = True
+                    if self.speed_boost_spin is not None:
+                        self.speed_boost_spin.set_value(value)
+                    self._speed_tuning = False
+                    self._set_status(
+                        f"server limited the speed boost to +{value} "
+                        "(highest it accepts)"
                     )
                 elif message.payload.startswith(
                     "unknown command: TARGET"

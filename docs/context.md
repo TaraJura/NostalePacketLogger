@@ -12,8 +12,9 @@ the data layer in [database.md](database.md).
   test-host`, tests above.
 - **Speed +** (**Malicious** tab, default 0): the DLL reads the server's
   `cond` speed and calls the client's own entity speed setter on the local
-  player actor; no packet is modified. A server `tp` correction while a
-  boost is active turns it off and resets the GUI control. Client hack, high ban risk; reverts when the GUI disconnects.
+  player actor; no packet is modified. The boost probes +1 first, then the
+  requested value; a server `tp` correction settles at +1 (or off if +1
+  itself is rejected) and the GUI shows the limit. Client hack, high ban risk; reverts when the GUI disconnects.
   Needs the 2026-11-20 DLL (a game-client restart/injection), not just a GUI
   restart.
 - **NosBazar tab** (fourth GUI page): monitor + floor-protected relist ported

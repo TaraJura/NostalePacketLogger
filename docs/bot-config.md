@@ -293,11 +293,15 @@ Limits and safety:
 
 - The client's own `cond` speed setter ignores values above **59**
   (`cmp dl,0x3b / ja`), so the DLL clamps the target at 59.
-- If the server corrects the player's position (`tp 1 <charId> …`) while the
-  boost is active, the DLL turns it off immediately and sends
-  `STATUS|SPEED CORRECTED`; the GUI resets the spin to 0 and shows the reason.
-  This is the safety net against the teleport/kick loop seen on 2026-11-20;
-  a speed the server does not accept cannot keep correcting the character.
+- The boost always starts at **+1**. After 8 s without a server correction
+  it is raised to the requested value. If the server then corrects the player
+  (`tp 1 <charId> …`), the DLL settles at **+1** (the +1 probe had passed) and
+  sends `STATUS|SPEED TUNED 1`; the GUI shows "server limited the speed boost
+  to +1" and sets the spin silently. If even +1 is corrected, it turns off
+  (`STATUS|SPEED CORRECTED`, spin 0). This is the safety net against the
+  teleport/kick loop seen on 2026-11-20: a value the server does not accept
+  cannot keep correcting the character, and the highest accepted value is
+  kept instead of dropping straight to 0.
 - **This is a client hack.** The game rules prohibit client manipulation, and
   bot vendors themselves label speed hacks "high ban risk"; the account risk
   is the owner's. The default 0 keeps it off.
