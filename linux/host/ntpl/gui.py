@@ -7291,10 +7291,16 @@ class Application(Gtk.Application):
                     self._update_window_title()
                     self._set_status(message.payload)
                     if version and version < (0, 2, 6):
-                        self._set_status(
-                            "client DLL is older than 0.2.6 — restart the "
-                            "game client to load the uncapped Speed + build"
+                        warning = (
+                            "client DLL is older than 0.2.6 — the running "
+                            "game still has the old module; restart the game "
+                            "client (not just the GUI) to load the uncapped "
+                            "Speed + build"
                         )
+                        self._set_status(warning)
+                        # The status bar is overwritten by map auto-selection
+                        # a moment later, so keep the warning in the log.
+                        self._log_line(warning)
                 elif message.payload.startswith("SPEED APPLIED"):
                     parts = message.payload.split()
                     try:
