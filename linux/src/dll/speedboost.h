@@ -13,6 +13,7 @@
 // unit-test it (`make speed-test`) without Wine or the game.
 
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 
 namespace speedboost {
@@ -122,6 +123,38 @@ inline int target_speed(int base, int add)
     }
     const int sum = base + add;
     return sum >= 59 ? 59 : sum;
+}
+
+// Report the server's own base speed in an outgoing walk packet while the
+// client entity moves faster. Only same-width digits are replaced, so the
+// AnsiString length/terminator stay valid.
+inline bool clamp_walk(char* text, int base)
+{
+    if (text == nullptr || base <= 0) {
+        return false;
+    }
+    Tokens tokens;
+    if (!split(text, tokens) || tokens.count != 5) {
+        return false;
+    }
+    if (!token_is(text, tokens.items[0], "walk")) {
+        return false;
+    }
+    unsigned long speed = 0;
+    if (!parse_uint(text, tokens.items[4], speed) ||
+        speed <= static_cast<unsigned long>(base)) {
+        return false;
+    }
+    char digits[16] = {0};
+    const int written =
+        std::snprintf(digits, sizeof(digits), "%d", base);
+    if (written <= 0 ||
+        static_cast<std::size_t>(written) != tokens.items[4].length) {
+        return false;
+    }
+    std::memcpy(text + tokens.items[4].offset, digits,
+                static_cast<std::size_t>(written));
+    return true;
 }
 
 // Parse `cond 1 <id> <unknown> <unknown> <speed>` for the local player.

@@ -27,7 +27,9 @@ shared: the transport differs, the game's packets do not.
 
 The **Map / Bot** tab draws the A\* route, monsters, portals and the bot
 controls. The picker gives each running game client its own window; a client
-already attached by another window is disabled.
+already attached by another window is disabled. Each row shows the client's
+DLL version read from its log, and the window title shows the host version
+plus the attached client's DLL version.
 
 ## NosBazar
 
@@ -76,8 +78,8 @@ the catalog/database side is in [docs/database.md](docs/database.md).
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 279 Python unit tests
-make -C linux speed-test                     # DLL speed-boost packet rewriting
+make -C linux host-test                      # 280 Python unit tests
+make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux gui-test                       # headless GTK4 smokes (xvfb)
 make -C linux bot-test                       # 37 fake-server bot smokes
 
@@ -142,7 +144,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 279 unit tests pass, the three GTK4 window smokes
+The Linux port builds, its 280 unit tests pass, the three GTK4 window smokes
 and 37 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 
@@ -193,11 +195,11 @@ client's own `preq` portal request in the DLL and keeps paths off the warp
 tiles, so a farming loop cannot enter another map even from a tile it is
 already standing on. **Speed +** (**Malicious** tab, default 0 = normal) adds a
 flat bonus to the character's walking speed, the way a NosTale speed buff
-works (+1, +2, +3...). No packet is modified: the DLL reads the server's
-`cond` speed and calls the client's own entity speed setter on the local
-player actor, the same field the client's walk builder reads. It applies
-immediately without the bot, and the client's walk packets always report the
-speed the client's entity actually has. The boost probes +1 first and,
+works (+1, +2, +3...). The DLL reads the server's `cond` speed, calls the
+client's own entity speed setter on the local player actor (the field its
+walk builder reads), and clamps the outgoing `walk` speed back to the
+server's `cond` value — the server sees a normal walk while the client moves
+faster. It applies immediately without the bot. The boost probes +1 first and,
 after 8 s without a server correction, applies the requested value; if the
 server corrects the player, it settles at the highest accepted value (+1)
 instead of dropping to 0, or turns off if even +1 is rejected.

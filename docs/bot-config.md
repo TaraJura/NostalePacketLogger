@@ -279,9 +279,11 @@ character's walking speed, the same way a NosTale speed buff works (+1, +2,
 packet: the DLL reads the server's `cond 1 <charId> … <speed>` packet to learn
 the player's base speed, then calls the client's own entity speed setter on
 the local player actor (`[player+0x20]+0xAA`, the exact field the walk packet
-builder reads). **No packet bytes are changed.** The client's `walk` packets
-therefore report whatever speed the client's entity actually has, so the
-server is never told a speed the client is not using. A 25 ms worker watchdog
+builder reads). The **outgoing `walk` speed is clamped back to the server's
+`cond` value**, so the server sees a normal walk while the client moves
+faster; the `cond` packet itself is never modified. This is the
+Phoenix-style shape: the local movement is faster, the reported walk speed
+stays normal. A 25 ms worker watchdog
 re-applies the value because the client's own `cond` handler resets the entity
 to the server's value on each packet; if no cond has arrived yet, the entity's
 current speed is used as the base. The boost applies as soon as the spin

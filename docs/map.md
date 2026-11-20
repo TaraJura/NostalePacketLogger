@@ -252,10 +252,10 @@ grouped by function:
 
 A fifth top-level **Malicious** tab holds client-side tricks that apply
 immediately and do not need the bot. **Speed +** (0–50, default 0) adds a
-flat bonus (+1, +2, +3...) to the character's walking speed. No packet is
-modified: the DLL reads the server's `cond` speed and calls the client's own
-entity speed setter on the local player actor, the same field the walk builder
-reads. The NosMate (`cond 2`) is not touched. It applies as soon as the spin
+flat bonus (+1, +2, +3...) to the character's walking speed. The DLL reads
+the server's `cond` speed, calls the client's own entity speed setter on the
+local player actor (the field the walk builder reads), and clamps the
+outgoing `walk` speed back to the server's cond value. The NosMate (`cond 2`) is not touched. It applies as soon as the spin
 changes; if the server corrects the player while a boost is active, the DLL
 turns it off and the GUI resets the spin to 0. This is a client hack, high ban
 risk — see

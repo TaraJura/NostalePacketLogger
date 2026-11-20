@@ -20,6 +20,7 @@ from ntpl.clients import (
     acquire_client_lock,
     client_lock_owner,
     client_lock_path,
+    dll_version_from_log,
     list_clients,
     parse_injector_list,
     port_file,
@@ -112,11 +113,40 @@ class PortFileTest(unittest.TestCase):
             self.assertIsNone(read_port(prefix, 1))
             self.assertIsNone(read_port(prefix, 2))
 
+    def test_dll_version_from_log(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory)
+            drive = prefix / "drive_c"
+            drive.mkdir()
+            (drive / "NosTalePacketLog-624.txt").write_text(
+                "10:00:00.000 [STATUS] NosTale Packet Logger 0.2.4 "
+                "starting\n"
+                "10:00:00.001 [STATUS] signatures: x\n",
+                encoding="utf-8",
+            )
+            context = WineContext(wine="wine", prefix=prefix, env={})
+            self.assertEqual(
+                dll_version_from_log(context, 624), "0.2.4"
+            )
+            self.assertIsNone(dll_version_from_log(context, 999))
+
     def test_client_status_text(self) -> None:
         context = WineContext(wine="wine", prefix=Path("/p"), env={})
         self.assertEqual(
             ClientInfo(context, 624, "NosTale", None).status,
             "logger not injected",
+        )
+        self.assertEqual(
+            ClientInfo(
+                context, 624, "NosTale", 47822, "0.2.4"
+            ).status,
+            "logger on 127.0.0.1:47822 · DLL 0.2.4",
+        )
+        self.assertEqual(
+            ClientInfo(
+                context, 624, "NosTale", None, "0.2.3"
+            ).status,
+            "logger not injected · DLL 0.2.3",
         )
         self.assertEqual(
             ClientInfo(context, 624, "NosTale", 47822).status,

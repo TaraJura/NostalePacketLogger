@@ -46,6 +46,9 @@ INJECTOR_PATH = BUILD_DIR / "Injector.exe"
 DLL_PATH = BUILD_DIR / "PacketLogger.dll"
 
 _LIST_ROW = re.compile(r"^\s*\[\d+\]\s+PID\s+(\d+)\s+(\S+)\s+(.*)$")
+_LOG_VERSION = re.compile(
+    r"NosTale Packet Logger (\d+\.\d+\.\d+) starting"
+)
 
 
 @dataclass
@@ -74,6 +77,7 @@ class ClientInfo:
     winpid: int
     title: str
     port: int | None = None
+    dll_version: str | None = None
 
     @property
     def label(self) -> str:
@@ -82,8 +86,12 @@ class ClientInfo:
     @property
     def status(self) -> str:
         if self.port:
-            return f"logger on 127.0.0.1:{self.port}"
-        return "logger not injected"
+            text = f"logger on 127.0.0.1:{self.port}"
+        else:
+            text = "logger not injected"
+        if self.dll_version:
+            text += f" · DLL {self.dll_version}"
+        return text
 
 
 @dataclass
@@ -148,7 +156,13 @@ def _wine_binary(proc_root: str, pid: str) -> str | None:
 
 def _wine_env(proc_env: dict[str, str], wine: str) -> dict[str, str]:
     env = dict(os.environ)
-    for key in ("WINEPREFIX", "WINEARCH", "WINEDLLOVERRIDES", "NTPL_PORT"):
+    for key in (
+        "WINEPREFIX",
+        "WINEARCH",
+        "WINEDLLOVERRIDES",
+        "NTPL_PORT",
+        "NTPL_LOG",
+    ):
         if key in proc_env:
             env[key] = proc_env[key]
     # The injector is a short-lived helper; its Wine chatter is never useful.
@@ -301,6 +315,46 @@ def _run_injector(
     )
 
 
+def _windows_to_linux(context: WineContext, raw: str) -> Path | None:
+    """Resolve a simple ``C:``/``Z:`` Windows path to a Linux path."""
+    drive, _, rest = raw.partition(":")
+    rest = rest.replace("\\", "/").lstrip("/")
+    if not rest:
+        return None
+    if drive.upper() == "Z":
+        return Path("/") / rest
+    if drive.upper() == "C":
+        return context.prefix / "drive_c" / rest
+    return None
+
+
+def dll_version_from_log(
+    context: WineContext, winpid: int
+) -> str | None:
+    """The version the client's DLL wrote to its own log, if it is there.
+
+    The DLL truncates its log when it starts, so the first start line is the
+    currently loaded (or last loaded) build. This is the only way to show the
+    DLL version in the picker before attaching.
+    """
+    raw = context.env.get("NTPL_LOG") or f"C:\\NosTalePacketLog-{winpid}.txt"
+    path = _windows_to_linux(context, raw)
+    if path is None:
+        return None
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for _ in range(8):
+                line = handle.readline()
+                if not line:
+                    break
+                match = _LOG_VERSION.search(line)
+                if match is not None:
+                    return match.group(1)
+    except OSError:
+        return None
+    return None
+
+
 def list_clients(
     context: WineContext, injector: Path, timeout: float = LIST_TIMEOUT
 ) -> list[ClientInfo]:
@@ -325,6 +379,7 @@ def list_clients(
                 winpid=winpid,
                 title=title,
                 port=port,
+                dll_version=dll_version_from_log(context, winpid),
             )
         )
     return clients

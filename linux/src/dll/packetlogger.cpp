@@ -116,6 +116,21 @@ void note_cond_packet(const char* packet) {
     g_cond_base.store(cond.base, std::memory_order_relaxed);
 }
 
+// Keep the outgoing walk speed at the server's own cond value while the
+// client entity moves faster locally. This is the classic speed-hack shape:
+// the server sees a normal walk field, the client renders/animates faster.
+void clamp_walk_packet(char* packet) {
+    if (packet == nullptr ||
+        g_speed_boost.load(std::memory_order_relaxed) <= 0) {
+        return;
+    }
+    const int base = g_cond_base.load(std::memory_order_relaxed);
+    if (base <= 0 || std::strncmp(packet, "walk ", 5) != 0) {
+        return;
+    }
+    speedboost::clamp_walk(packet, base);
+}
+
 // `preq` (portal request) is what the client sends when the character steps
 // on a warp tile; the server answers with sp/c_map and moves it to another
 // map. There is no server-side "decline": the only way to stay is not to send
@@ -179,6 +194,10 @@ void ntpl_on_packet_recv(const char* packet) {
 extern "C" int ntpl_on_packet_send(const char* packet) {
     if (!g_enabled.load(std::memory_order_relaxed) || packet == nullptr) {
         return 1;
+    }
+    // Report the server's own walk speed while the entity moves faster.
+    if (g_speed_boost.load(std::memory_order_relaxed) > 0) {
+        clamp_walk_packet(const_cast<char*>(packet));
     }
     // Keep the packet in the stream/log even when dropping it: the host can
     // then show "preq blocked" instead of a silent stop.

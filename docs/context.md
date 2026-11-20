@@ -7,12 +7,13 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 279 unittest cases, 3 GTK4 smokes, 37 fake-server bot
+- **Linux host**: 280 unittest cases, 3 GTK4 smokes, 37 fake-server bot
   smokes, and the native `speed-test` pass. Build: `make -C linux all
   test-host`, tests above.
 - **Speed +** (**Malicious** tab, default 0): the DLL reads the server's
-  `cond` speed and calls the client's own entity speed setter on the local
-  player actor; no packet is modified. The boost probes +1 first, then the
+  `cond` speed, calls the client's own entity speed setter on the local
+  player actor, and clamps the outgoing `walk` speed back to the server's
+  cond. The boost probes +1 first, then the
   requested value; a server `tp` correction settles at +1 (or off if +1
   itself is rejected) and the GUI shows the limit. Client hack, high ban risk; reverts when the GUI disconnects.
   Needs the 2026-11-20 DLL (a game-client restart/injection), not just a GUI

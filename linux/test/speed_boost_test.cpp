@@ -35,6 +35,31 @@ void test_target_speed()
     check(speedboost::target_speed(59, 1) == 59, "59 stays 59");
 }
 
+void test_clamp_walk()
+{
+    char buffer[64] = {0};
+
+    std::strcpy(buffer, "walk 25 117 0 16");
+    check(speedboost::clamp_walk(buffer, 12), "walk 16 clamps to 12");
+    check(std::strcmp(buffer, "walk 25 117 0 12") == 0,
+          "clamped walk text");
+
+    std::strcpy(buffer, "walk 25 117 0 12");
+    check(!speedboost::clamp_walk(buffer, 12), "walk at base is unchanged");
+
+    std::strcpy(buffer, "walk 25 117 0 16\r\n");
+    check(speedboost::clamp_walk(buffer, 12), "CRLF walk clamps");
+    check(std::strcmp(buffer, "walk 25 117 0 12\r\n") == 0,
+          "clamped CRLF walk text");
+
+    // Width must not change in place.
+    std::strcpy(buffer, "walk 25 117 0 10");
+    check(!speedboost::clamp_walk(buffer, 9), "10 -> 9 is refused");
+
+    std::strcpy(buffer, "mv 1 7349 25 117 16");
+    check(!speedboost::clamp_walk(buffer, 12), "mv is not a walk");
+}
+
 void test_parse_cond()
 {
     speedboost::Cond cond =
@@ -84,6 +109,7 @@ void test_parse_cond()
 int main()
 {
     test_target_speed();
+    test_clamp_walk();
     test_parse_cond();
     if (g_failures != 0) {
         std::fprintf(stderr, "%d speed-boost test(s) failed\n", g_failures);

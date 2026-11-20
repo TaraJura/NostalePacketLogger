@@ -98,8 +98,8 @@ The client takes its own movement speed from this packet: the live logs show
 speed, then calls the client's own entity speed setter on the local player
 actor (see
 [bot-config.md](../bot-config.md#speed-boost--client-side-movement-speed)).
-The packet itself is never modified; the host's stream and the client both
-keep the server's value.
+The `cond` packet itself is never modified; the outgoing `walk` speed is
+clamped to this value. The host's stream keeps the server's value.
 
 ---
 

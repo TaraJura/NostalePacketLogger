@@ -34,8 +34,9 @@ walk 20 139 0 10    (20 + 139 = 159; 159 % 3 == 0 -> checksum 0)
   is therefore not a substitute for the client's own movement.
 - The `speed` field mirrors the character's current entity speed (live: both
   12). The GUI's **Speed +** control changes the client's entity speed through
-  its own setter; neither this field nor `cond` is rewritten, so the packet
-  always reports the speed the client is actually using.
+  its own setter and clamps this field back to the server's `cond`, so the
+  server sees a normal walk while the client moves faster. The `cond` packet
+  is never rewritten.
 - The character must be **standing**. While sitting (`rest` state 1) the server
   ignores movement. Toggle with `rest 1 1 <charId>` first.
 - Accepted walks are **not** echoed to the client. Only a rejected or

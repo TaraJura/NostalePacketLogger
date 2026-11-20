@@ -23,6 +23,7 @@ gi.require_version("Gdk", "4.0")
 
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango
 
+from . import __version__
 from .bazar import (
     BazarController,
     BazarError,
@@ -317,6 +318,7 @@ class Application(Gtk.Application):
         # default port. Off by default so headless tests stay deterministic.
         self.select_client = select_client
         self.client_label: str | None = None
+        self.dll_version: str | None = None
         # The game window this GUI attached to; its attach lock keeps a second
         # GUI from dialing the same DLL (the logger serves one host).
         self.attached_client: ClientInfo | None = None
@@ -665,7 +667,10 @@ class Application(Gtk.Application):
             self._start_client()
 
     def _build_ui(self) -> None:
-        window = Gtk.ApplicationWindow(application=self, title="NosTale Packet Logger")
+        window = Gtk.ApplicationWindow(
+            application=self,
+            title=f"NosTale Packet Logger {__version__}",
+        )
         window.set_default_size(1280, 820)
         self.window = window
 
@@ -6058,6 +6063,17 @@ class Application(Gtk.Application):
             self._client_dialog_action.set_sensitive(True)
         return False
 
+    def _update_window_title(self) -> None:
+        """Host version, attached client and the DLL version when known."""
+        if self.window is None:
+            return
+        title = f"NosTale Packet Logger {__version__}"
+        if self.client_label:
+            title += f" — {self.client_label}"
+        if self.dll_version:
+            title += f" · DLL {self.dll_version}"
+        self.window.set_title(title)
+
     def _attach_client(self, client: ClientInfo, port: int) -> None:
         """Point the reader thread at one client and reset the old world."""
         if not acquire_client_lock(client.winpid):
@@ -6103,10 +6119,8 @@ class Application(Gtk.Application):
         self._bazar_reset_for_attach(client.winpid)
         self._bazar_seed_from_log()
         self.client_label = f"{client.title} · PID {client.winpid}"
-        if self.window is not None:
-            self.window.set_title(
-                f"NosTale Packet Logger — {self.client_label}"
-            )
+        self.dll_version = None
+        self._update_window_title()
         self._set_status(
             f"attaching to {self.client_label} on 127.0.0.1:{port}…"
         )
@@ -6245,6 +6259,8 @@ class Application(Gtk.Application):
                         )
                     except ValueError:
                         version = ()
+                    self.dll_version = version_text or None
+                    self._update_window_title()
                     self._set_status(message.payload)
                     if version and version < (0, 2, 4):
                         self._set_status(
