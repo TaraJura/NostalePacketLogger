@@ -6791,13 +6791,23 @@ class Application(Gtk.Application):
             pass
 
     def _on_cast_speed_changed(self) -> None:
-        if self._cast_boost_on():
+        if not self._cast_boost_on():
+            self._set_status("cast speed normal")
+            return
+        if self.bot_running:
             self._set_status(
-                "cast speed ON: the bot casts the moment the server is "
-                "ready (the client cooldown display stays)"
+                "cast speed ON: chaining every spell/attack at the "
+                "server's answer (client cooldowns stay visible)"
             )
         else:
-            self._set_status("cast speed normal")
+            # The switch paces the bot; manual key presses are limited by
+            # the server's own cast time and cannot be shortened.
+            message = (
+                "cast speed ON — press Start: it paces the bot's spells; "
+                "manual casts are limited by the server"
+            )
+            self._set_status(message)
+            self._log_line(message)
 
     def _on_page_switch(self, _notebook, _page, _page_num) -> None:
         self._ensure_map_loaded()
