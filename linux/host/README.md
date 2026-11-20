@@ -58,7 +58,7 @@ sudo apt install python3-gi gir1.2-gtk-4.0
 | `mirror.py` | cross-client Follow mirror bus: per-host `walk`/`u_s` publisher and reader |
 | `database.py` | SQLite game/packet database: client archives, protocol wiki, public packet repos |
 | `cli.py` | `monitor`, `walk`, `cast`, `send`, `status`, `map`, `db`, `replay`, `gui` |
-| `gui.py` | GTK4 window: packet table + Map/Bot + Bot log + NosBazar tabs; optional import |
+| `gui.py` | GTK4 window: packet table + Map/Bot + Bot log + NosBazar + Family + Malicious tabs; optional import |
 
 ## Tests
 
@@ -67,7 +67,7 @@ From `linux/`:
 ```bash
 make host-test      # 280 unittest cases
 make speed-test     # DLL speed-boost parsing/clamp (native C++, no Wine)
-make gui-test       # 3 headless GTK4 smokes: packet window + help standard, picker, multi-client
+make gui-test       # 4 headless GTK4 smokes: packet window + help standard, picker, multi-client, family invite
 make bot-test       # 37 smokes: combat, rules/config, recovery, follow, follow mirror, follow nameless/char id, speed boost control, NosBazar monitor/relist/copy, NosMall import filters
 ```
 

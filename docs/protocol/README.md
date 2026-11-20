@@ -58,6 +58,12 @@ See [../ipc.md](../ipc.md).
 | `say` | SEND | Send chat message | [chat.md](chat.md) |
 | `msgi` | RECV | System message | [chat.md](chat.md) |
 
+### Family
+| Opcode | Dir | Description | Doc |
+|--------|-----|-------------|-----|
+| `%Familyinvite` | SEND | Invite a player to the family; one character name | [family.md](../family.md) |
+| `infoi2` | RECV | Info message; value 234 confirms a family invite | [family.md](../family.md) |
+
 ### NPC & Shops
 | Opcode | Dir | Description | Doc |
 |--------|-----|-------------|-----|

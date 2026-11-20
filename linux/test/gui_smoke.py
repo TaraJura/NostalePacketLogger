@@ -197,7 +197,10 @@ def main() -> int:
                 for page in pages
                 if any(is_help_button(w) for w in descendants(page))
             ]
-            malicious_page = pages[4]
+            tab_titles = [
+                app.notebook.get_tab_label(page).get_text() for page in pages
+            ]
+            malicious_page = pages[tab_titles.index("Malicious")]
             malicious_long_labels = [
                 w.get_text()
                 for w in descendants(malicious_page)

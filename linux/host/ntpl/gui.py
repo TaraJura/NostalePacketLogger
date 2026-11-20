@@ -593,6 +593,11 @@ class Application(Gtk.Application):
         self._bazar_npc_autofilled = False
         self._bazar_npc_autofill_value = ""
         self._bazar_config_loaded = False
+        # Family tab: the invite form and the last server confirmation.
+        self.family_name_entry = None
+        self.family_invite_button = None
+        self.family_status = None
+        self._family_pending: tuple[str, float] | None = None
         # Right-click "Copy item name" in the NosBazar items/results lists.
         self._install_copy_action()
 
@@ -694,15 +699,17 @@ class Application(Gtk.Application):
         map_page = self._build_map_page()
         log_page = self._build_log_page()
         bazar_page = self._build_bazar_page()
+        family_page = self._build_family_page()
         malicious_page = self._build_malicious_page()
 
         self.notebook = Gtk.Notebook()
         self.notebook.append_page(packet_page, Gtk.Label(label="Packets"))
         self.notebook.append_page(map_page, Gtk.Label(label="Map / Bot"))
         self.notebook.append_page(log_page, Gtk.Label(label="Bot log"))
-        # Appended last: the GUI smokes and the README shots assume Map / Bot
-        # is page 1 (Packets is 0).
+        # Appended after the core tabs: the GUI smokes and the README shots
+        # assume Map / Bot is page 1 (Packets is 0).
         self.notebook.append_page(bazar_page, Gtk.Label(label="NosBazar"))
+        self.notebook.append_page(family_page, Gtk.Label(label="Family"))
         self.notebook.append_page(malicious_page, Gtk.Label(label="Malicious"))
         self.notebook.set_vexpand(True)
         self.notebook.connect("switch-page", self._on_page_switch)
@@ -2959,6 +2966,139 @@ class Application(Gtk.Application):
         self.map_box = map_box
         self.sidebar_scroll = sidebar_scroll
         return page
+
+    def _build_family_page(self) -> Gtk.Widget:
+        """Family tools; the first feature is inviting a member."""
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        page.set_margin_top(18)
+        page.set_margin_bottom(18)
+        page.set_margin_start(18)
+        page.set_margin_end(18)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        heading = Gtk.Label()
+        heading.set_markup("<b>Family</b>")
+        heading.set_xalign(0)
+        header.append(heading)
+        header.append(
+            self._help_button(
+                "Family",
+                "Family tools that work while the bot is stopped. The first "
+                "one invites a player: it sends the client's own "
+                "%Familyinvite <name> command. The player must be online and "
+                "accept the invitation, and your character needs permission "
+                "to invite. Manual %Familyinvite commands typed in game are "
+                "picked up here too.",
+            )
+        )
+        page.append(header)
+
+        invite_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.family_name_entry = Gtk.Entry()
+        self.family_name_entry.set_placeholder_text("player name")
+        self.family_name_entry.set_max_length(25)
+        self.family_name_entry.set_hexpand(True)
+        self.family_name_entry.connect(
+            "activate", lambda *_: self._on_family_invite()
+        )
+        row.append(self.family_name_entry)
+        self.family_invite_button = Gtk.Button(label="Invite")
+        self.family_invite_button.add_css_class("suggested-action")
+        self.family_invite_button.connect(
+            "clicked", lambda *_: self._on_family_invite()
+        )
+        row.append(self.family_invite_button)
+        invite_box.append(row)
+
+        self.family_status = Gtk.Label(label="No invite sent.")
+        self.family_status.set_xalign(0)
+        self.family_status.set_wrap(True)
+        self.family_status.set_max_width_chars(70)
+        self.family_status.add_css_class("dim-label")
+        invite_box.append(self.family_status)
+
+        page.append(
+            self._frame(
+                "Invite member",
+                invite_box,
+                help_text=(
+                    "Type the exact character name and press Invite (or "
+                    "Enter). The tab sends the client's own "
+                    "%Familyinvite <name> packet, the same one the game "
+                    "sends when you type the command. The server's "
+                    "confirmation appears below; the Bot log records it."
+                ),
+            )
+        )
+        return page
+
+    def _set_family_status(self, text: str, css: str | None = None) -> None:
+        if self.family_status is None:
+            return
+        self.family_status.set_text(text)
+        for name in ("bazar-ok", "bazar-bad", "bazar-warn"):
+            self.family_status.remove_css_class(name)
+        if css is not None:
+            self.family_status.add_css_class(css)
+
+    def _on_family_invite(self) -> None:
+        if self.family_name_entry is None:
+            return
+        name = self.family_name_entry.get_text().strip()
+        if not name or any(character.isspace() for character in name):
+            self._set_family_status(
+                "Enter one player name.", "bazar-bad"
+            )
+            return
+        if self.client is None or not self.client.connected:
+            self._set_family_status(
+                "Not connected to a game client.", "bazar-bad"
+            )
+            return
+        try:
+            self.client.send_packet(f"%Familyinvite {name}")
+        except (ConnectionLost, ValueError) as exc:
+            self._set_family_status(f"Invite failed: {exc}", "bazar-bad")
+            return
+        self._family_pending = (name, time.monotonic())
+        self._set_family_status(
+            f"Invite sent to {name}; waiting for the server…", "bazar-warn"
+        )
+        self._log_line(f"family invite -> {name}")
+
+    def _family_on_packet(self, packet: Packet) -> None:
+        """Mirror manual invites and show the server's confirmation."""
+        text = packet.text.strip()
+        if packet.direction is Kind.SEND and text.startswith("%Familyinvite"):
+            parts = text.split(maxsplit=1)
+            name = parts[1].strip() if len(parts) == 2 else ""
+            if name:
+                self._family_pending = (name, time.monotonic())
+                self._set_family_status(
+                    f"Invite sent to {name}; waiting for the server…",
+                    "bazar-warn",
+                )
+            return
+        if packet.direction is not Kind.RECV or packet.opcode != "infoi2":
+            return
+        parts = text.split()
+        # Live capture: infoi2 234 1 <name> follows %Familyinvite <name>.
+        if len(parts) < 4 or parts[1] != "234":
+            return
+        name = " ".join(parts[3:]).strip()
+        pending = self._family_pending
+        if (
+            pending is None
+            or time.monotonic() - pending[1] > 60.0
+            or name.casefold() != pending[0].casefold()
+        ):
+            return
+        self._family_pending = None
+        self._set_family_status(
+            f"Server: invited {name} to the family.", "bazar-ok"
+        )
+        self._log_line(f"family invite confirmed: {name}")
 
     def _build_malicious_page(self) -> Gtk.Widget:
         """Client-side tricks that apply immediately and need no bot run."""
@@ -6415,6 +6555,7 @@ class Application(Gtk.Application):
                 self.engine.feed(packet)
                 self._track_packet(packet)
                 self._bazar_on_packet(packet)
+                self._family_on_packet(packet)
                 self._learn_char_id(self.engine.world.self_id)
                 # Switch the map as soon as the server announces it instead of
                 # waiting for the next 2 s auto-map tick.

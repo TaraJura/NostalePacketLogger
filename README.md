@@ -115,6 +115,8 @@ Start with [docs/architecture.md](docs/architecture.md), then:
   the Map/Bot tab, path loop, auto-attack and tooltips
 - [docs/bot-config.md](docs/bot-config.md) — monster target filters,
   conditional spell rules and JSON export/import
+- [docs/family.md](docs/family.md) — the **Family** tab: `%Familyinvite`
+  packet, server confirmation and live test accounts
 - [docs/bazar.md](docs/bazar.md) — the **NosBazar** tab: cheapest-listing
   monitor with gold/ND and NPC markup, plus floor-protected relisting
   (ported from `TaraJura/Nostale-NB`); packet formats in
@@ -176,6 +178,11 @@ The **NosBazar** tab (fourth page) is described in
 floor-protected relisting and the priced, non-pet NosMall importer. Each
 client keeps its own `~/.config/ntpl/bazar-<pid>.json`; see
 [docs/bazar.md](docs/bazar.md).
+
+The **Family** tab (fifth page) invites members with the client's own
+`%Familyinvite <name>` command, mirrors the same command when it is typed in
+game, and shows the server's `infoi2 234` confirmation. Live-tested on
+`redenkor` and `sjkrimer`; see [docs/family.md](docs/family.md).
 
 The client's own map grids are parsed from `NostaleData/NStcData.NOS`; live
 maps so far include **2, 3, 4, 20, 98, 103** and **104**, and every observed

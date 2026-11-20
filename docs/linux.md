@@ -283,7 +283,7 @@ both.
 make host-test          # 280 stdlib unit tests: protocol, engine, map, config, spells, bazar, database, mirror
 make speed-test         # DLL speed-boost parsing/clamp (native C++, no Wine)
 
-make gui-test           # headless GTK4 window + map surface against a fake stream
+make gui-test           # headless GTK4: map, help standard, picker, multi-client, family invite
 make bot-test           # 37 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, follow nameless/char id, portal blocking, speed boost control, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, follow mirror, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
 make all test-host
 ./scripts/dev-test-wine.sh 25
@@ -293,7 +293,9 @@ make all test-host
 loopback. It checks the packet rows and STATUS line, the map surface, the live
 map switch (the 20→85→20 `c_map` sequence), map tooltips (including a vnum
 backfilled from the DLL log), green/red toggle classes, the recovery banner,
-and the unknown-position path guard. Install `xvfb` if it is missing.
+the unknown-position path guard, the ? help standard, the client picker,
+multi-client locks and the Family invite (`%Familyinvite`, `infoi2 234`).
+Install `xvfb` if it is missing.
 
 `bot-test` drives the real GTK window against fake servers. The nine smokes
 cover auto-attack + path movement (`TARGET`, `u_s`, `MOVE`), target filtering +

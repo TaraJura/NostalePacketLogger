@@ -250,7 +250,13 @@ grouped by function:
 - **Recovery** — Auto-recover HP/MP and the low-HP/MP thresholds.
 - **Configuration** — Save/Load the whole bot configuration as JSON.
 
-A fifth top-level **Malicious** tab holds client-side tricks that apply
+The fifth top-level **Family** tab holds family tools. The first one is
+**Invite member**: it sends the client's own `%Familyinvite <name>` command,
+also picks up the same command typed in game from the DLL's SEND stream, and
+shows the server's `infoi2 234 1 <name>` confirmation. Live-verified on
+2026-11-20 for `sjkrimer` and `redenkor`. See [family.md](family.md).
+
+The sixth top-level **Malicious** tab holds client-side tricks that apply
 immediately and do not need the bot. **Speed +** (0–50, default 0) adds a
 flat bonus (+1, +2, +3...) to the character's walking speed. The DLL reads
 the server's `cond` speed, calls the client's own entity speed setter on the
@@ -267,8 +273,8 @@ and the export/import schema.
 ### UI help standard
 
 Every section explains itself through a small **?** button next to its title:
-sidebar frames, tab toolbars, the map bar, the Malicious tab, and the client /
-NosMall / spell dialogs. The popover says what the section does and how it
+sidebar frames, tab toolbars, the map bar, the Family and Malicious tabs, and
+the client / NosMall / spell dialogs. The popover says what the section does and how it
 works. The layout itself carries no explanatory paragraphs or hint labels;
 only live values, status lines and short empty states remain, and control
 tooltips are one line. `gui.py` implements this with `_help_button()` and
