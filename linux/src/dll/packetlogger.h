@@ -67,13 +67,6 @@ bool take_speed_correction(int& settle);
 // this as a definitive "not usable here" message.
 bool take_speed_unsupported();
 
-// True once when the +1 probe passed and the requested value was applied.
-bool take_speed_applied(int& value);
-
-// Promote the +1 probe to the requested value after the 8 s probe window.
-// Called from the worker thread.
-void speed_maybe_promote(unsigned long now);
-
 // A forced re-apply is pending: boost turned off, a new request started, or
 // the server settled on a lower value. The worker must set the entity even
 // when the new value is lower (the client's entity otherwise stays at the

@@ -9,7 +9,7 @@
 
 namespace ntpl {
 
-constexpr const char* kVersion = "0.2.4";
+constexpr const char* kVersion = "0.2.5";
 
 // The DLL listens on loopback only. A signed 16-bit port is plenty; the host
 // connects with a retry loop, so nothing has to be started in a fixed order.

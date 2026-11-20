@@ -305,13 +305,8 @@ void handle_command(const std::string& command) {
         }
         packetlogger::set_speed_boost(add);
         const int requested = packetlogger::speed_request();
-        char reply[96] = {0};
-        if (requested > 1) {
-            std::snprintf(reply, sizeof(reply),
-                          "STATUS|SPEED +%d (testing +1 first)", requested);
-        } else {
-            std::snprintf(reply, sizeof(reply), "STATUS|SPEED +%d", requested);
-        }
+        char reply[64] = {0};
+        std::snprintf(reply, sizeof(reply), "STATUS|SPEED +%d", requested);
         tcpserver::send_line(reply);
         return;
     }
@@ -408,7 +403,6 @@ DWORD WINAPI main_thread(LPVOID module) {
         // carries a speed the player is actually moving at.
         if (now - last_speed_tick >= 25) {
             last_speed_tick = now;
-            packetlogger::speed_maybe_promote(now);
             if (packetlogger::take_speed_reset()) {
                 const int reset_target = packetlogger::speed_reset_target();
                 if (reset_target > 0) {
@@ -429,19 +423,18 @@ DWORD WINAPI main_thread(LPVOID module) {
                 int applied = 0;
                 std::string error;
                 if (client_speed_set(target, previous, applied, error) &&
-                    target != logged_speed_target) {
+                    applied == target && target != logged_speed_target) {
                     logged_speed_target = target;
                     ntpl::logf(
                         "speed: player actor %d -> %d (target %d)", previous,
                         applied, target);
+                    if (tcpserver::is_connected()) {
+                        tcpserver::send_line(
+                            "STATUS|SPEED APPLIED " +
+                            std::to_string(target));
+                    }
                 }
             }
-        }
-        int applied_add = 0;
-        if (packetlogger::take_speed_applied(applied_add) &&
-            tcpserver::is_connected()) {
-            tcpserver::send_line("STATUS|SPEED APPLIED " +
-                                 std::to_string(applied_add));
         }
         if (packetlogger::take_speed_unsupported()) {
             ntpl::logf(

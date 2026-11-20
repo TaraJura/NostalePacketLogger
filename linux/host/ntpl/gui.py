@@ -2879,9 +2879,10 @@ class Application(Gtk.Application):
             "client caps walking speed at 59. The DLL sets the local player "
             "entity directly, so the player (not a NosMate) moves faster. "
             "It applies immediately and does not need the bot to run. The "
-            "DLL tests +1 first and keeps the highest value the server "
-            "accepts (a rejected value settles at +1, or off if even +1 is "
-            "rejected). The DLL reverts to normal if the GUI disconnects."
+            "DLL clamps the outgoing walk speed to the server's normal value "
+            "and keeps the client faster. If the server corrects the player, "
+            "the DLL turns the value down or off. The DLL reverts to normal "
+            "if the GUI disconnects."
         )
         self.speed_boost_spin.connect(
             "value-changed", lambda *_: self._on_speed_boost_changed()
@@ -6249,7 +6250,7 @@ class Application(Gtk.Application):
                 elif message.payload.startswith("ntpl "):
                     # The initial DLL status line. Show a clear warning when
                     # the game client still runs an old DLL: a host update
-                    # alone cannot add the speed-probe logic.
+                    # alone cannot add the immediate Speed + logic.
                     version_text = message.payload.split()[1] \
                         if len(message.payload.split()) > 1 else ""
                     try:
@@ -6262,10 +6263,10 @@ class Application(Gtk.Application):
                     self.dll_version = version_text or None
                     self._update_window_title()
                     self._set_status(message.payload)
-                    if version and version < (0, 2, 4):
+                    if version and version < (0, 2, 5):
                         self._set_status(
-                            "client DLL is older than 0.2.4 — restart the "
-                            "game client to load the Speed + probe"
+                            "client DLL is older than 0.2.5 — restart the "
+                            "game client to load the immediate Speed + build"
                         )
                 elif message.payload.startswith("SPEED APPLIED"):
                     parts = message.payload.split()
@@ -6278,8 +6279,8 @@ class Application(Gtk.Application):
                         "normal walk speed)"
                     )
                 elif message.payload.startswith("SPEED UNSUPPORTED"):
-                    # Even the +1 probe was corrected. No client-side speed
-                    # above the server's cond is accepted here.
+                    # Even the lowest boost was corrected. No client-side
+                    # speed above the server's cond is accepted here.
                     self._speed_tuning = True
                     if self.speed_boost_spin is not None:
                         self.speed_boost_spin.set_value(0)
@@ -6291,8 +6292,7 @@ class Application(Gtk.Application):
                 elif message.payload.startswith("SPEED TUNED"):
                     # The server rejected a higher value but accepted +N; the
                     # DLL settled on it. Show the accepted value without
-                    # sending a new SPEED command (that would restart the
-                    # probe).
+                    # sending a new SPEED command.
                     parts = message.payload.split()
                     try:
                         value = int(parts[2])

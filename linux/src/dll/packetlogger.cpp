@@ -57,7 +57,6 @@ std::atomic<bool>    g_block_portal{false};
 // active, the boost is turned off at once to stop a correction/kick loop.
 std::atomic<int>           g_speed_boost{0};      // effective add
 std::atomic<int>           g_speed_request{0};    // what the host asked for
-std::atomic<unsigned long> g_speed_probe_until{0};
 std::atomic<int>           g_cond_base{0};
 std::atomic<int>           g_logged_actor{-1};
 // -1 = no correction; otherwise the add to settle on. The worker reports it
@@ -66,7 +65,6 @@ std::atomic<int>           g_logged_actor{-1};
 std::atomic<int>           g_speed_correction{-1};
 std::atomic<bool>          g_speed_reset{false};
 std::atomic<bool>          g_speed_unsupported{false};
-std::atomic<int>           g_speed_applied{-1};
 std::atomic<unsigned long> g_self_id{0};
 std::atomic<unsigned long> g_self_id_at{0};
 
@@ -181,7 +179,6 @@ void ntpl_on_packet_recv(const char* packet) {
             }
             g_speed_request.store(settle, std::memory_order_relaxed);
             g_speed_boost.store(settle, std::memory_order_release);
-            g_speed_probe_until.store(0, std::memory_order_relaxed);
             g_speed_correction.store(settle, std::memory_order_release);
             g_speed_reset.store(true, std::memory_order_release);
             ntpl::logf("speed boost limited to +%d by the server", settle);
@@ -407,22 +404,17 @@ void set_speed_boost(int add) {
     g_logged_actor.store(-1, std::memory_order_relaxed);
     if (add <= 0) {
         g_speed_boost.store(0, std::memory_order_release);
-        g_speed_probe_until.store(0, std::memory_order_relaxed);
         g_speed_reset.store(true, std::memory_order_release);
         if (previous != 0) {
             ntpl::logf("speed boost off");
         }
         return;
     }
-    // Always start at +1: jumping straight to a high value is what made the
-    // server correct the position and kick. The probe promotes to the
-    // requested value after 8 s without a correction.
-    g_speed_boost.store(1, std::memory_order_release);
-    g_speed_probe_until.store(GetTickCount() + 8000,
-                              std::memory_order_relaxed);
+    // Apply the requested value immediately. The walk layer clamps the
+    // outgoing speed back to the server's cond, so there is no probe delay.
+    g_speed_boost.store(add, std::memory_order_release);
     g_speed_reset.store(true, std::memory_order_release);
-    ntpl::logf("speed +%d requested; testing +1 (client-side)%s", add,
-               " -- high ban risk");
+    ntpl::logf("speed +%d (client-side)%s", add, " -- high ban risk");
 }
 
 int speed_boost() {
@@ -439,15 +431,6 @@ bool take_speed_correction(int& settle) {
         return false;
     }
     settle = value;
-    return true;
-}
-
-bool take_speed_applied(int& value) {
-    const int applied = g_speed_applied.exchange(-1, std::memory_order_acq_rel);
-    if (applied < 0) {
-        return false;
-    }
-    value = applied;
     return true;
 }
 
@@ -470,19 +453,6 @@ int speed_reset_target() {
     }
     return speedboost::target_speed(
         base, g_speed_boost.load(std::memory_order_relaxed));
-}
-
-void speed_maybe_promote(unsigned long now) {
-    const int request = g_speed_request.load(std::memory_order_relaxed);
-    const int effective = g_speed_boost.load(std::memory_order_relaxed);
-    const unsigned long until =
-        g_speed_probe_until.load(std::memory_order_relaxed);
-    if (request > 1 && effective == 1 && until != 0 && now >= until) {
-        g_speed_boost.store(request, std::memory_order_release);
-        g_speed_probe_until.store(0, std::memory_order_relaxed);
-        g_speed_applied.store(request, std::memory_order_release);
-        ntpl::logf("speed probe passed; applying +%d", request);
-    }
 }
 
 int speed_target() {

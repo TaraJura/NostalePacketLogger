@@ -295,16 +295,13 @@ Limits and safety:
 
 - The client's own `cond` speed setter ignores values above **59**
   (`cmp dl,0x3b / ja`), so the DLL clamps the target at 59.
-- The boost always starts at **+1**. After 8 s without a server correction
-  it is raised to the requested value. If the server then corrects the player
-  (`tp 1 <charId> …`), the DLL settles at **+1** (the +1 probe had passed) and
-  sends `STATUS|SPEED TUNED 1`; the GUI shows "server limited the speed boost
-  to +1" and sets the spin silently. If even +1 is corrected, it turns off
-  (`STATUS|SPEED CORRECTED`, spin 0). This is the safety net against the
-  teleport/kick loop seen on 2026-11-20: a value the server does not accept
-  cannot keep correcting the character, and the highest accepted value is
-  kept instead of dropping straight to 0. Turning the boost off forces the
-  entity back to the server base even while idle.
+- The value applies **immediately** (no probe). The walk clamp normally
+  prevents the server from seeing the boost at all. If a server still
+  corrects the player (`tp 1 <charId> …`), the DLL settles at **+1** or turns
+  off if the correction hits +1, and sends `STATUS|SPEED TUNED 1` /
+  `STATUS|SPEED CORRECTED`; the GUI shows the limit and sets the spin
+  silently. Turning the boost off forces the entity back to the server base
+  even while idle. This is the safety net against a teleport/kick loop.
 - **Live verification (2026-11-20, client PID 1948, base 11):** the walk
   clamp works. A `+3` request logged `testing +1` (actor 11→12), then the
   probe passed and applied +3 (actor 12→14); every outgoing `walk` stayed at
