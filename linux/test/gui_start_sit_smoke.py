@@ -183,7 +183,15 @@ def main() -> int:
         app.quit()
         return False
 
-    GLib.timeout_add(1300, start)
+    def start_when_ready() -> bool:
+        # Map auto-selection clears waypoints; wait for it so the test route
+        # survives until Start.
+        if app.map_grid is None or app._player_cell() is None:
+            return True
+        start()
+        return False
+
+    GLib.timeout_add(200, start_when_ready)
     app.run([])
     server.close()
 

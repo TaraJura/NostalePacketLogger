@@ -9,7 +9,9 @@ Run through scripts/dev-test-gui.sh (Xvfb).
 
 from __future__ import annotations
 
+import os
 import socket
+import tempfile
 import threading
 import time
 
@@ -94,6 +96,11 @@ def invites(lines: list[str]) -> list[str]:
 
 
 def main() -> int:
+    state = tempfile.NamedTemporaryFile(
+        "w", suffix=".json", delete=False, encoding="utf-8"
+    )
+    state.close()
+    os.environ["NTPL_FAMILY_STATE"] = state.name
     server = FakeServer()
     app = Application("127.0.0.1", server.port, unique=False)
     result: dict[str, object] = {"ok": False, "detail": "not checked"}
@@ -154,6 +161,11 @@ def main() -> int:
                 buffer.get_start_iter(), buffer.get_end_iter(), False
             )
             result["logged"] = "family invite confirmed: Tester" in text
+            app.family_name_entry.set_text("ListOnly")
+            app._on_family_add_to_list()
+            result["manual_add"] = "listonly" in app._family_invited
+            app._family_remove("ListOnly")
+            result["manual_remove"] = "listonly" not in app._family_invited
             before = len(invites(server.received))
             app.family_name_entry.set_text("Bad Name")
             app.family_invite_button.emit("clicked")
@@ -213,6 +225,11 @@ def main() -> int:
     GLib.timeout_add(300, phase1)
     app.run([])
     server.close()
+    try:
+        os.unlink(state.name)
+    except OSError:
+        pass
+    os.environ.pop("NTPL_FAMILY_STATE", None)
 
     result["ok"] = all(
         result.get(key)
@@ -223,6 +240,8 @@ def main() -> int:
             "confirmed",
             "confirmed_color",
             "logged",
+            "manual_add",
+            "manual_remove",
             "invalid_blocked",
             "manual_seen",
             "manual_confirmed",
@@ -238,6 +257,8 @@ def main() -> int:
             "confirmed",
             "confirmed_color",
             "logged",
+            "manual_add",
+            "manual_remove",
             "invalid_blocked",
             "manual_seen",
             "manual_confirmed",

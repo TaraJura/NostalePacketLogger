@@ -1,7 +1,8 @@
 # Family tab
 
-The **Family** page holds family tools. The first feature is inviting a
-member. It works while the bot is stopped and needs no route or combat state.
+The **Family** page holds family tools: invite one player by name, or
+auto-invite map players who have no family. It works while the bot is stopped
+and needs no route or combat state.
 
 ## Invite a member
 
@@ -26,18 +27,68 @@ confirmation. The Family tab matches the argument against the name it just
 invited (60 s window) before showing it as a family confirmation, so an
 unrelated group-invite message is not mislabelled.
 
+The same server refuses invites sent too soon:
+
+```
+[RECV] infoi 2359 0 4 3
+```
+
+`CannotSendInvite = 2359`; the client renders "You cannot send the invitation.
+Please try again in %d seconds." The live server did not substitute a useful
+number, so the tab uses its own 15 s countdown (successful test invites were
+accepted 12.45 s apart). A 2359 clears the pending invite and starts the
+countdown; the name is not added to the invited list, so it can be retried
+after the timer.
+
 ## GUI behaviour
 
-- The tab has one compact row: a **Player** entry and an **Invite** button.
-  Enter sends too.
+- The tab has one compact row: a **Player** entry, **Invite** and **Add to
+  list**. Enter sends too.
+- Below it, a full-height split view shows **Players on map** (name and
+  family, with Invite on a known no-family player) on the left and **Invited
+  players** (with Remove) on the right.
 - Names are sent as one token; empty names and names containing whitespace
   are refused locally.
 - The tab sends the command through the same raw-packet path as the Packets
-  tab. The server reply appears in the frame and in the Bot log.
+  tab. The server reply appears under the row and in the Bot log.
 - A `%Familyinvite` packet typed in game is picked up from the DLL's SEND
   stream, so the tab mirrors manual invites as well.
-- The whole tab follows the **?** help standard; the popover explains the
-  invite and family rules, and no explanatory paragraph sits in the layout.
+- The whole tab follows the **?** help standard; the popovers explain the
+  invite, auto-invite and family rules, and no explanatory paragraph sits in
+  the layout.
+
+## Auto-invite players without a family
+
+The **Auto-invite players with no family** toggle scans the map and invites
+players whose family state is known and who have none.
+
+- Family data comes from the player's `in 1` packet (`familyId` and
+  `familyName` after the char id; `-1 -` means no family) and from `gidx`
+  updates (`gidx 1 <entityId> <familyId>.<rank> <familyName> ...`).
+- A player whose family state was never sent is **skipped**, not guessed.
+- Candidates are invited nearest first, one at a time. The tab waits for the
+  server's `infoi2 234` confirmation before the next one (2.5 s pacing).
+- The live server also has an invite cooldown. Sending too early returns
+  `infoi 2359` (`CannotSendInvite`, rendered as "You cannot send the
+  invitation. Please try again in %d seconds."). Successful test invites
+  were accepted 12.45 s apart, so the tab uses a conservative **15 s
+  cooldown** and shows a visible **Next invite in Ns** countdown; auto-invite
+  waits for it. A `2359` reply starts the countdown and leaves the name
+  retryable.
+- A name is added to the invited list only after the server confirms it with
+  `infoi2 234`. The list is displayed on the right and saved to
+  `~/.config/ntpl/family-<winpid>.json` (`NTPL_FAMILY_STATE` overrides the
+  path). A name is never invited again, even if the player declines or never
+  answers.
+- The list is editable: **Add to list** records a typed name without sending
+  anything; **Remove** (on an invited row) deletes it so auto-invite can try
+  it again. A row on the map list can be invited with **Invite**.
+- If the server stops confirming (for example the client has no family
+  permission), auto-invite stops instead of spamming.
+
+`gui_family_auto_smoke.py` covers the scan: one no-family player is invited,
+a player in a family and a player with unknown family are skipped, the list
+is persisted, and the invited name is not retried.
 
 ## Live verification
 
@@ -51,9 +102,10 @@ SEND %Familyinvite redenkor  ->  RECV infoi2 234 1 redenkor
 Both testing accounts received the confirmation path. The sender in PID 2408
 also produced the same pair for `redenkor` at 15:14:33.
 
-`gui_family_smoke.py` covers the tab end to end: send, waiting state, server
-confirmation, Bot-log entry, invalid/empty-name blocking, and a manual
-`SEND|%Familyinvite` picked up from the packet stream.
+`gui_family_smoke.py` covers the manual path end to end: send, waiting
+state, server confirmation, Bot-log entry, invalid/empty-name blocking, and a
+manual `SEND|%Familyinvite` picked up from the packet stream. The auto path is
+covered by `gui_family_auto_smoke.py` as described above.
 
 ## Upstream reference
 

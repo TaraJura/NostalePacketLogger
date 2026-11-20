@@ -32,7 +32,7 @@ the host differ, the game's packets do not.
 - **Windows tree (`windows/`)** — the original working implementation. Injector
   + DLL + WinForms GUI, named pipes.
 - **Linux tree (`linux/`)** — MinGW DLL + TCP loopback + Python CLI + GTK4 GUI
-  + state engine. Builds cleanly, **280 host tests pass**, the GTK4 window
+  + state engine. Builds cleanly, **285 host tests pass**, the GTK4 window
   passes three headless smokes (packet window, client picker, multi-client
   locks), and the DLL has
   been verified against the **live NosTale client** under Wine 11: both hooks

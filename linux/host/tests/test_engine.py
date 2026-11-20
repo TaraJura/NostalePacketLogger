@@ -117,6 +117,68 @@ class EngineTests(unittest.TestCase):
         entity = world.entities[4165102]
         self.assertEqual(entity.name, "Guder")
         self.assertEqual((entity.kind, entity.x, entity.y), (1, 105, 23))
+        # This short synthetic packet has no family fields: do not guess.
+        self.assertFalse(entity.family_known)
+
+    def test_player_spawn_reads_family(self):
+        # Live map 20 line: family id 70.918 and family name at the end.
+        world = self.engine.feed(
+            packet(
+                Kind.RECV,
+                "in 1 S3nat - 26 34 52 2 0 1 0 9 2 "
+                "-1.4478.4450.4466.-1.885.4577.4579.-1.8568.8908 "
+                "100 100 0 -1 0 2 0 0 0 1000009 75 75 "
+                "70.918 6ix7even 14 0 0 0 0 85 1 0|0|0 0 0 100 10 0",
+            )
+        )
+        entity = world.entities[26]
+        self.assertTrue(entity.family_known)
+        self.assertEqual(entity.family_id, 70)
+        self.assertEqual(entity.family_name, "6ix7even")
+
+    def test_player_spawn_without_family(self):
+        world = self.engine.feed(
+            packet(
+                Kind.RECV,
+                "in 1 Retye - 3913 25 43 2 0 1 0 9 2 "
+                "-1.769.404.763.-1.885.-1.-1.-1.-1.-1 "
+                "100 100 0 -1 0 2 0 0 0 1000009 75 75 "
+                "-1 - -2 0 0 0 0 81 0 0|0|0 0 0 100 0 0",
+            )
+        )
+        entity = world.entities[3913]
+        self.assertTrue(entity.family_known)
+        self.assertEqual(entity.family_id, -1)
+        self.assertEqual(entity.family_name, "")
+
+    def test_gidx_updates_player_family(self):
+        self.engine.feed(
+            packet(
+                Kind.RECV,
+                "in 1 Retye - 3913 25 43 2 0 1 0 9 2 "
+                "-1.769.404.763.-1.885.-1.-1.-1.-1.-1 "
+                "100 100 0 -1 0 2 0 0 0 1000009 75 75 "
+                "-1 - -2 0 0 0 0 81 0 0|0|0 0 0 100 0 0",
+            )
+        )
+        world = self.engine.feed(
+            packet(Kind.RECV, "gidx 1 3913 163.918 Kartushka 1 0|0|0")
+        )
+        entity = world.entities[3913]
+        self.assertTrue(entity.family_known)
+        self.assertEqual(entity.family_id, 163)
+        self.assertEqual(entity.family_name, "Kartushka")
+        world = self.engine.feed(
+            packet(Kind.RECV, "gidx 1 3913 -1 - 0 0|0|0")
+        )
+        self.assertEqual(world.entities[3913].family_id, -1)
+        self.assertEqual(world.entities[3913].family_name, "")
+
+    def test_gidx_does_not_create_unknown_entities(self):
+        world = self.engine.feed(
+            packet(Kind.RECV, "gidx 1 9999 -1 - 0 0|0|0")
+        )
+        self.assertNotIn(9999, world.entities)
 
     def test_skill_list_maps_u_s_slots(self):
         # Live: ski 0 866 866 866 867 ... 876; u_s 10 -> server su 876,

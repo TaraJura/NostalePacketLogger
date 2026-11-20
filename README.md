@@ -78,7 +78,7 @@ the catalog/database side is in [docs/database.md](docs/database.md).
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 280 Python unit tests
+make -C linux host-test                      # 285 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux gui-test                       # headless GTK4 smokes (xvfb)
 make -C linux bot-test                       # 37 fake-server bot smokes
@@ -146,7 +146,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 280 unit tests pass, the three GTK4 window smokes
+The Linux port builds, its 285 unit tests pass, the five GTK4 window smokes
 and 37 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 
@@ -181,8 +181,12 @@ client keeps its own `~/.config/ntpl/bazar-<pid>.json`; see
 
 The **Family** tab (fifth page) invites members with the client's own
 `%Familyinvite <name>` command, mirrors the same command when it is typed in
-game, and shows the server's `infoi2 234` confirmation. Live-tested on
-`redenkor` and `sjkrimer`; see [docs/family.md](docs/family.md).
+game, and shows the server's `infoi2 234` confirmation. **Auto-invite** scans
+map players whose family state is known and empty, invites each name once
+(nearest first), waits out the server's 15 s invite cooldown with a visible
+countdown, and keeps an editable persisted list so a decline is never retried.
+Live-tested on `redenkor` and `sjkrimer`; see
+[docs/family.md](docs/family.md).
 
 The client's own map grids are parsed from `NostaleData/NStcData.NOS`; live
 maps so far include **2, 3, 4, 20, 98, 103** and **104**, and every observed

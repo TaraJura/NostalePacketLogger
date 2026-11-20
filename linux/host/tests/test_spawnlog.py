@@ -53,6 +53,19 @@ class SpawnLogTests(unittest.TestCase):
             load_player_spawns(log), {4165102: ("Guder", 106, 24)}
         )
 
+    def test_player_name_does_not_swallow_later_dash_fields(self):
+        # Live map-20 line: the stat/equipment tail contains spaces and -1
+        # fields; a greedy name match used to capture almost the whole packet.
+        log = self._write(
+            "17:07:20.798 [RECV] in 1 Goddess - 12771 116 109 2 0 1 0 6 2 "
+            "-1.769.404.763.-1.885.-1.-1.-1.-1.-1 100 100 0 50 4 2 0 0 1 4 "
+            "75 75 -1 - -2 0 0 0 0 81 0 0|0|0 0 0 100 0 0\r\n"
+            "17:07:21.000 [RECV] mv 1 12771 5 6 6\r\n"
+        )
+        self.assertEqual(
+            load_player_spawns(log), {12771: ("Goddess", 5, 6)}
+        )
+
     def test_player_move_without_spawn_keeps_an_empty_name(self):
         log = self._write("17:07:21.000 [RECV] mv 1 424242 10 11 6\r\n")
         self.assertEqual(

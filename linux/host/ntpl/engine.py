@@ -31,6 +31,12 @@ class Entity:
     x: int = 0
     y: int = 0
     speed: int = 0
+    # Family membership from `in 1` and `gidx`. `family_known` separates a
+    # player observed without a family from one whose family was never sent,
+    # so auto-invite never guesses. The wire token is `<id>.<rank>`.
+    family_id: int = -1
+    family_name: str = ""
+    family_known: bool = False
 
 
 @dataclass
@@ -480,6 +486,15 @@ def _on_move(world: WorldState, packet: Packet) -> None:
         world.x, world.y = x, y
 
 
+def _parse_family_id(token: str) -> int:
+    """Family id from the wire token ``<id>.<rank>``; -1 means none."""
+    head = token.split(".", 1)[0]
+    try:
+        return int(head)
+    except ValueError:
+        return -1
+
+
 def _on_spawn(world: WorldState, packet: Packet) -> None:
     args = packet.args
     if not args:
@@ -512,6 +527,15 @@ def _on_spawn(world: WorldState, packet: Packet) -> None:
         entity.name = name
         entity.x = x
         entity.y = y
+        # `in 1` carries familyId and familyName at values 22/23 (char_id is
+        # value 0). "-1 -" means the player has no family. Short synthetic
+        # packets leave the family state unknown instead of guessing.
+        if len(values) >= 24:
+            entity.family_id = _parse_family_id(values[22])
+            entity.family_name = (
+                "" if values[23] in ("-", "") else values[23]
+            )
+            entity.family_known = True
         world.player_names[char_id] = name
         if len(world.player_names) > 2000:
             # The id -> name map only feeds the bazaar owner check; a busy
@@ -544,6 +568,28 @@ def _on_spawn(world: WorldState, packet: Packet) -> None:
             pass
         entity.x = x
         entity.y = y
+
+
+def _on_family_index(world: WorldState, packet: Packet) -> None:
+    # gidx 1 <entityId> <familyId>.<rank> <familyName> ...
+    # The server sends it for players already on the map and when membership
+    # changes. A -1 family token and "-" name mean no family.
+    args = packet.args
+    if len(args) < 4:
+        return
+    try:
+        kind = int(args[0])
+        entity_id = int(args[1])
+    except ValueError:
+        return
+    if kind != 1:
+        return
+    entity = world.entities.get(entity_id)
+    if entity is None or entity.kind != 1:
+        return
+    entity.family_id = _parse_family_id(args[2])
+    entity.family_name = "" if args[3] in ("-", "") else args[3]
+    entity.family_known = True
 
 
 def _on_despawn(world: WorldState, packet: Packet) -> None:
@@ -816,6 +862,7 @@ class Engine:
                 "c_blist": _on_bazar_client_open,  # SEND: bazaar listing
                 "c_slist": _on_bazar_client_open,  # SEND: bazaar sellers
                 "in": _on_spawn,        # RECV: entity spawned
+                "gidx": _on_family_index,  # RECV: player family id/name
                 "out": _on_despawn,     # RECV: entity despawned
                 "st": _on_status,       # RECV: entity HP/status (death)
                 "tp": _on_teleport,     # RECV: entity teleported / server position

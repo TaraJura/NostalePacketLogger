@@ -44,7 +44,7 @@ _INV_MARKER = "[RECV] inv "
 _IVN_MARKER = "[RECV] ivn "
 _GOLD_MARKER = "[RECV] gold "
 _ENTITY = re.compile(r"^([23]) (\d+) (\d+) ")
-_PLAYER = re.compile(r"^1 (.+) - (\d+) ")
+_PLAYER = re.compile(r"^1 (.+?) - (\d+) ")
 
 #: Backfill reads only the recent part of a session log. A long-running
 #: client's file can reach hundreds of megabytes (multi-hour farming), and

@@ -16,7 +16,7 @@ from .protocol import (
     default_port,
 )
 
-__version__ = "0.2.7"
+__version__ = "0.2.9"
 
 __all__ = [
     "DEFAULT_HOST",

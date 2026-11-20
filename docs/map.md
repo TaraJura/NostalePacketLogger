@@ -253,8 +253,13 @@ grouped by function:
 The fifth top-level **Family** tab holds family tools. The first one is
 **Invite member**: it sends the client's own `%Familyinvite <name>` command,
 also picks up the same command typed in game from the DLL's SEND stream, and
-shows the server's `infoi2 234 1 <name>` confirmation. Live-verified on
-2026-11-20 for `sjkrimer` and `redenkor`. See [family.md](family.md).
+shows the server's `infoi2 234 1 <name>` confirmation. **Auto-invite players
+with no family** uses the family fields in `in 1`/`gidx`, invites one known
+no-family player at a time, waits out the server's 15 s invite cooldown (a
+visible countdown; `infoi 2359`), and persists every confirmed name in an
+editable full-height list so no one is invited twice. Live-verified manually on 2026-11-20 for `sjkrimer` and
+`redenkor`; auto-invite has its own fake-server smoke. See
+[family.md](family.md).
 
 The sixth top-level **Malicious** tab holds client-side tricks that apply
 immediately and do not need the bot. **Speed +** (0–50, default 0) adds a

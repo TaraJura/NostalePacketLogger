@@ -63,6 +63,7 @@ See [../ipc.md](../ipc.md).
 |--------|-----|-------------|-----|
 | `%Familyinvite` | SEND | Invite a player to the family; one character name | [family.md](../family.md) |
 | `infoi2` | RECV | Info message; value 234 confirms a family invite | [family.md](../family.md) |
+| `infoi` | RECV | Info message; value 2359 = invite cooldown | [family.md](../family.md) |
 
 ### NPC & Shops
 | Opcode | Dir | Description | Doc |

@@ -53,7 +53,9 @@ client offers Inject & connect); the third owns one client's attach lock in a
 child process, checks the new window skips it, attaches the free client and
 releases its own lock on shutdown; the fourth drives the Family invite form
 (`%Familyinvite` send, server `infoi2 234` confirmation, invalid names and a
-manual command picked up from the packet stream). The bot smokes cover combat + path movement,
+manual command picked up from the packet stream); the fifth covers
+family auto-invite (only known no-family players, one invite each, persisted
+list, no retry). The bot smokes cover combat + path movement,
 target filters + spell rules + config save/load, the scan-backed spell picker
 dialog, scanned-spell rotation in list order, rejected walks, recovery,
 portal blocking (A* avoids warp tiles, a MOVE onto one is refused, `PORTALS|1`

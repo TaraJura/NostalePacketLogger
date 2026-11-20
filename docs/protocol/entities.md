@@ -1,11 +1,31 @@
 # Entity Packets
 
+## `gidx` (RECV)
+
+Family membership for a player already on the map, or an update when it
+changes.
+
+**Format**: `gidx 1 <entityId> <familyId>.<rank> <familyName> <unknown> <0|0|0>`
+
+Live examples (map 20):
+```
+gidx 1 300 163.918 Kartushka 1 0|0|0
+gidx 1 8835 -1 - 0 0|0|0
+```
+
+Only type `1` (player) is used. The engine updates an existing player entity;
+an unknown entity id is ignored so a `gidx` can never create a map ghost.
+
 ## `in` (RECV)
 
 An entity has appeared/spawned on the current map. Very complex packet with different formats per entity type.
 
 **Format (type 1 — Player)**:
 `in 1 <name> - <charId> <x> <y> <direction> <unknown> <unknown> <genderRaceClass> <hairStyleColor> <unknown> <equipmentSlots> <hpPercent> <mpPercent> <unknown> <unknown> <unknown> <unknown> <unknown> <familyId> <familyName> <unknown> <unknown> <unknown> <unknown> ...`
+
+`familyId` is the wire token `<id>.<rank>` (e.g. `70.918`); `-1` with the
+name `-` means the player has no family. The engine stores the numeric id,
+the name and a `family_known` flag so auto-invite never guesses.
 
 **Format (type 2 — NPC/Pet)**:
 `in 2 <vnum> <entityId> <x> <y> <direction> <hpPercent> <mpPercent> <unknown> <unknown> <ownerId> <unknown> <unknown> <unknown> <name> ...`
