@@ -199,7 +199,8 @@ works (+1, +2, +3...). The DLL reads the server's `cond` speed, calls the
 client's own entity speed setter on the local player actor (the field its
 walk builder reads), and clamps the outgoing `walk` speed back to the
 server's `cond` value — the server sees a normal walk while the client moves
-faster. It applies immediately without the bot. The boost probes +1 first and,
+faster. Live 2026-11-20: base 11, +3 applied (actor 14), every walk packet
+stayed 11, no server correction. It applies immediately without the bot. The boost probes +1 first and,
 after 8 s without a server correction, applies the requested value; if the
 server corrects the player, it settles at the highest accepted value (+1)
 instead of dropping to 0, or turns off if even +1 is rejected.

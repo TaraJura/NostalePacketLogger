@@ -198,7 +198,7 @@ def main() -> int:
             )
             status = app.status.get_text() if app.status is not None else ""
             result["tuned_status"] = "limited the speed boost to +1" in status
-            server.send("STATUS|SPEED UNSUPPORTED\n")
+            server.send("STATUS|SPEED APPLIED 3\n")
             GLib.timeout_add(500, phase7)
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"phase6 exception: {exc!r}"
@@ -206,6 +206,20 @@ def main() -> int:
         return False
 
     def phase7() -> bool:
+        try:
+            result["applied_spin"] = (
+                int(app.speed_boost_spin.get_value()) == 1
+            )
+            status = app.status.get_text() if app.status is not None else ""
+            result["applied_status"] = "applied" in status
+            server.send("STATUS|SPEED UNSUPPORTED\n")
+            GLib.timeout_add(500, phase8)
+        except Exception as exc:  # noqa: BLE001
+            result["detail"] = f"phase7 exception: {exc!r}"
+            app.quit()
+        return False
+
+    def phase8() -> bool:
         try:
             result["unsupported_zero"] = (
                 int(app.speed_boost_spin.get_value()) == 0
@@ -216,7 +230,7 @@ def main() -> int:
             status = app.status.get_text() if app.status is not None else ""
             result["unsupported_status"] = "rejects even +1" in status
         except Exception as exc:  # noqa: BLE001
-            result["detail"] = f"phase7 exception: {exc!r}"
+            result["detail"] = f"phase8 exception: {exc!r}"
         app.quit()
         return False
 
@@ -248,6 +262,8 @@ def main() -> int:
         and result.get("tuned_spin")
         and result.get("tuned_no_send")
         and result.get("tuned_status")
+        and result.get("applied_spin")
+        and result.get("applied_status")
         and result.get("unsupported_zero")
         and result.get("unsupported_no_send")
         and result.get("unsupported_status")
@@ -268,6 +284,8 @@ def main() -> int:
             f"tuned_spin={result.get('tuned_spin')} "
             f"tuned_no_send={result.get('tuned_no_send')} "
             f"tuned_status={result.get('tuned_status')} "
+            f"applied_spin={result.get('applied_spin')} "
+            f"applied_status={result.get('applied_status')} "
             f"unsupported_zero={result.get('unsupported_zero')} "
             f"unsupported_no_send={result.get('unsupported_no_send')} "
             f"unsupported_status={result.get('unsupported_status')} "

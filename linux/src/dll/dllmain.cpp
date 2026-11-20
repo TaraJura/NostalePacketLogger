@@ -437,6 +437,12 @@ DWORD WINAPI main_thread(LPVOID module) {
                 }
             }
         }
+        int applied_add = 0;
+        if (packetlogger::take_speed_applied(applied_add) &&
+            tcpserver::is_connected()) {
+            tcpserver::send_line("STATUS|SPEED APPLIED " +
+                                 std::to_string(applied_add));
+        }
         if (packetlogger::take_speed_unsupported()) {
             ntpl::logf(
                 "speed boost unsupported: the server rejected even +1");

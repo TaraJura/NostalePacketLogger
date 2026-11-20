@@ -6267,6 +6267,16 @@ class Application(Gtk.Application):
                             "client DLL is older than 0.2.4 — restart the "
                             "game client to load the Speed + probe"
                         )
+                elif message.payload.startswith("SPEED APPLIED"):
+                    parts = message.payload.split()
+                    try:
+                        value = int(parts[2])
+                    except (IndexError, ValueError):
+                        value = 0
+                    self._set_status(
+                        f"speed boost +{value} applied (the server sees the "
+                        "normal walk speed)"
+                    )
                 elif message.payload.startswith("SPEED UNSUPPORTED"):
                     # Even the +1 probe was corrected. No client-side speed
                     # above the server's cond is accepted here.

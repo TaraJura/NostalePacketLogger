@@ -66,6 +66,7 @@ std::atomic<int>           g_logged_actor{-1};
 std::atomic<int>           g_speed_correction{-1};
 std::atomic<bool>          g_speed_reset{false};
 std::atomic<bool>          g_speed_unsupported{false};
+std::atomic<int>           g_speed_applied{-1};
 std::atomic<unsigned long> g_self_id{0};
 std::atomic<unsigned long> g_self_id_at{0};
 
@@ -441,6 +442,15 @@ bool take_speed_correction(int& settle) {
     return true;
 }
 
+bool take_speed_applied(int& value) {
+    const int applied = g_speed_applied.exchange(-1, std::memory_order_acq_rel);
+    if (applied < 0) {
+        return false;
+    }
+    value = applied;
+    return true;
+}
+
 bool take_speed_unsupported() {
     return g_speed_unsupported.exchange(false, std::memory_order_acq_rel);
 }
@@ -470,6 +480,7 @@ void speed_maybe_promote(unsigned long now) {
     if (request > 1 && effective == 1 && until != 0 && now >= until) {
         g_speed_boost.store(request, std::memory_order_release);
         g_speed_probe_until.store(0, std::memory_order_relaxed);
+        g_speed_applied.store(request, std::memory_order_release);
         ntpl::logf("speed probe passed; applying +%d", request);
     }
 }

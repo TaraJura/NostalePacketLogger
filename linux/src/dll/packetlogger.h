@@ -67,6 +67,9 @@ bool take_speed_correction(int& settle);
 // this as a definitive "not usable here" message.
 bool take_speed_unsupported();
 
+// True once when the +1 probe passed and the requested value was applied.
+bool take_speed_applied(int& value);
+
 // Promote the +1 probe to the requested value after the 8 s probe window.
 // Called from the worker thread.
 void speed_maybe_promote(unsigned long now);

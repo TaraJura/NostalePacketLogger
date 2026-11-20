@@ -305,15 +305,14 @@ Limits and safety:
   cannot keep correcting the character, and the highest accepted value is
   kept instead of dropping straight to 0. Turning the boost off forces the
   entity back to the server base even while idle.
-- **Live limit (2026-11-20):** with base 12, the repeated moving tests show
-  the server corrects even **+1 (walk speed 13)** after 4–5 s
-  (`14:26:36`/`14:26:58` `tp 1 7001`). A single +1 probe happened to survive
-  8 s at 14:24, but the longer/repeated runs are definitive: this server
-  accepts only its own `cond` speed. The DLL then reports
-  `STATUS|SPEED UNSUPPORTED`; the GUI says "this server rejects even +1" and
-  leaves the spin at 0. A client-side movement boost is not usable on this
-  server; use an in-game speed buff or mount, which raises the server's
-  `cond` legitimately.
+- **Live verification (2026-11-20, client PID 1948, base 11):** the walk
+  clamp works. A `+3` request logged `testing +1` (actor 11→12), then the
+  probe passed and applied +3 (actor 12→14); every outgoing `walk` stayed at
+  **11** (the server's cond). Continuous movement produced **no `tp 1
+  7125`**: the client moves at 14 while the server sees 11. The earlier
+  un-clamped builds sent 12/13/16 against cond 11/12 and were corrected
+  within 4–5 s; the clamp is what makes it work. If a server still corrects,
+  the settle/unsupported safety above applies.
 - **This is a client hack.** The game rules prohibit client manipulation, and
   bot vendors themselves label speed hacks "high ban risk"; the account risk
   is the owner's. The default 0 keeps it off.
