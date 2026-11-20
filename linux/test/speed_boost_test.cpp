@@ -39,6 +39,9 @@ void test_target_speed()
     check(speedboost::target_speed(10, 25) == 13, "+25% of 10 reaches 12.5");
     check(speedboost::target_speed(0, 100) == 0, "no base speed, no change");
     check(speedboost::target_speed(12, -50) == 12, "negative percent is off");
+    // The client's cond setter caps at 59 (cmp dl,0x3b / ja).
+    check(speedboost::target_speed(20, 300) == 59, "+300% clamps to 59");
+    check(speedboost::target_speed(59, 100) == 59, "59 stays 59");
 }
 
 void test_cond_patch()

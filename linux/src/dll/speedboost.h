@@ -133,10 +133,16 @@ inline int target_speed(int base, int percent)
     if (base <= 0 || percent <= 0) {
         return base;
     }
+    // The client's own cond speed setter ignores anything above 0x3B (59):
+    // `cmp dl,0x3b / ja skip`. Stay at or below the cap, and never lower a
+    // value the client already accepted.
+    if (base >= 59) {
+        return base;
+    }
     const long long scaled =
         (static_cast<long long>(base) * (100LL + percent) + 50LL) / 100LL;
-    if (scaled > 999999LL) {
-        return 999999;
+    if (scaled >= 59LL) {
+        return 59;
     }
     return static_cast<int>(scaled);
 }

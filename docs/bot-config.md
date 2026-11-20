@@ -292,6 +292,12 @@ Limits and risks:
   digits as the server's value (`10`→`20` works, `9`→`18` does not). Normal
   characters walk at 10–12, so the whole 0–300 % range fits; if a speed has a
   different width the DLL logs a line and leaves the packet alone.
+- The client's own `cond` speed setter ignores values above **59**
+  (`cmp dl,0x3b / ja`), so the DLL clamps the target at 59; a higher
+  percentage simply stops there.
+- The game hands the hooks CRLF-terminated strings (`… 12\r\n`); the parser
+  trims the terminator before reading the speed (this was the 2026-11-20
+  live bug: the first version silently refused every packet).
 - The client's speed is server-driven: every incoming `cond` is patched, so
   the boost stays active while the GUI is attached.
 - **This is a client hack.** The game rules prohibit client manipulation, and
