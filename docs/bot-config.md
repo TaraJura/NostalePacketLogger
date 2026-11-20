@@ -328,40 +328,38 @@ Limits and safety:
   bot vendors themselves label speed hacks "high ban risk"; the account risk
   is the owner's. The default 0 keeps it off.
 
-## Cast speed — minimum client-side skill delays
+## Cast speed — minimum delay between spells and attacks
 
 **Cast speed** (**Malicious** tab) is a plain on/off switch, not a value: the
 request was "lower the cast speed and delay between spells to the minimum
-possible", so there is nothing to tune. While it is on, the server's own
-cooldown and cast time are the floor.
+possible", so there is nothing to tune. The server's own cast time and
+cooldown are the floor, and the client's skill-bar cooldowns stay accurate
+and visible.
 
-The server sends each skill's cooldown in its own `su` packet
-(`su … <vnum> <cooldown> …`, deciseconds). The DLL zeroes that field in the
-client's receive buffer before the client parses it (same token width, all
-zeros; the `65535` "no cooldown" sentinel is skipped). The host queue and file
-log keep the server's original value. The server's cooldown is not changed: a
-cast sent too early is still answered with `cancel 0 <castId> -1`, so the
-switch removes the client's extra wait; it cannot exceed the server's rate.
-
-The bot also stops relying on its own Skill.dat timer: this server sends
-`sr <castSlot>` when a skill's cooldown ends, the engine stores it in
-`WorldState.skill_ready_at` (monotonic), and a spell rule or the basic attack
-is allowed as soon as that readiness is newer than the last cast — with no
-per-rule cooldown and no post-cast pause, so the next cast goes out at the
-server's ready moment (the server starts its cooldown after the cast; the
-local timer started at send). The walk guard (`attack_walk_delay`) is kept so
-a walk is not sent inside the skill animation. The setting is saved as
-`cast_boost`, sent as `CAST|1` / `CAST|0` on attach/change and `CAST|0` on
-shutdown, and needs the 0.2.8 DLL. An old `cast_speed` percentage above 100
-imports as on.
+The switch is host-side. One cast is allowed at a time: after a spell or
+attack, the bot waits for the server's answer — a self `su` (accepted) or the
+`cancel` of that cast (refused / animation end) — and sends the next cast on
+the same tick it arrives. Sending earlier only gets `cancel 0 <castId> -1`
+and looks like no speedup. The bot also drops the per-rule cooldown and its
+post-cast pause, and it stops relying on its own Skill.dat timer: this server
+sends `sr <castSlot>` when a skill's cooldown ends, the engine stores it in
+`WorldState.skill_ready_at` (monotonic), and a rule or the basic attack is
+allowed as soon as that readiness is newer than the last cast. The walk guard
+(`attack_walk_delay`) is kept so a walk is not sent inside the skill
+animation. The setting is saved as `cast_boost`; an old `cast_speed`
+percentage above 100 imports as on. The GUI sends `CAST|0` on attach and
+shutdown to undo the earlier DLL zeroing, so the client cooldown display
+comes back; old DLLs ignore the command. No game restart is needed for the
+Cast speed switch.
 
 Fake-server proof (`gui_cast_ready_smoke.py`): Mana Shield has a 60 s
 Skill.dat cooldown and the rule is set to 30 s. With Cast speed off the bot
-casts it once, receives `sr 3`, and sends no second cast. Flipping the switch
-on (which sends `CAST|1`) makes the next tick use that readiness — the second
-`u_s 3` goes out **0.05 s** later, instead of waiting a minute. The bot half
-is host-side, so it works with the old DLL after only a GUI restart; the
-client-side cooldown zeroing needs DLL 0.2.8.
+casts it once, receives `sr 3`, and sends no second cast (the local 60 s gate
+holds). Flipping the switch on makes the next tick use that readiness — the
+second `u_s 3` goes out **0.05 s** later. The fake server then answers the
+second cast only after a 0.6 s cast time: no premature cast is sent in that
+window, and the third cast follows **0.63 s** after the second — the server's
+own cast time, not a rule or Skill.dat delay.
 
 ## Follow a player — trail a character
 

@@ -274,14 +274,16 @@ turns it off and the GUI resets the spin to 0. This is a client hack, high ban
 risk — see
 [bot-config.md](bot-config.md#speed-boost--client-side-movement-speed).
 
-**Cast speed** is a plain on/off switch, not a value: on zeroes the client's
-skill cooldowns (the DLL rewrites our own `su` packet's cooldown field before
-the client parses it), drops the per-rule cooldown and the post-cast pause,
-and makes the bot cast as soon as the server's `sr` readiness packet arrives.
-The server keeps its own cooldown and cast time, so a cast sent too early is
+**Cast speed** is a plain on/off switch, not a value, and it is host-side: it
+sends one cast at a time, waits for the server's answer (`su` or the refusal
+`cancel`), and sends the next spell/attack on that same tick; it drops the
+per-rule cooldown and post-cast pause and re-casts a spell as soon as the
+server's `sr` readiness packet arrives. The client's cooldown display stays
+visible and accurate (the GUI turns the old DLL zeroing off on attach). The
+server keeps its own cooldown and cast time, so a cast sent too early is
 still refused; the switch removes the client-side extra wait, not the server
-limit. Also a client hack, high ban risk — see
-[bot-config.md](bot-config.md#cast-speed--minimum-client-side-skill-delays).
+limit. High ban risk — see
+[bot-config.md](bot-config.md#cast-speed--minimum-delay-between-spells-and-attacks).
 
 See [bot-config.md](bot-config.md) for the target filter, spell-rule semantics
 and the export/import schema.

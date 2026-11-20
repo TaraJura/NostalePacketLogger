@@ -6,9 +6,10 @@ bot configuration, and restore normal on exit. Checks:
 
 * attaching sends `CAST|0` (no stale hack from an earlier GUI),
 * the switch defaults to off,
-* turning it on sends `CAST|1` immediately and drops the bot's cast pause,
+* turning it on drops the bot's cast pause and keeps the client cooldown
+  display accurate (no `CAST|1` is ever sent),
 * the setting round-trips through the bot configuration as a boolean,
-* turning it off sends `CAST|0`,
+* turning it off restores normal pacing,
 * closing the window sends `CAST|0` before the link goes away.
 
 Run through scripts/dev-test-bot.sh (Xvfb).
@@ -124,7 +125,7 @@ def main() -> int:
 
     def phase2() -> bool:
         try:
-            result["sent_on"] = "CAST|1" in server.received
+            result["no_zeroing"] = "CAST|1" not in server.received
             result["collect_on"] = app._collect_config().cast_boost is True
             result["scale_zero"] = app._cast_speed_scale() == 0.0
             config = BotConfig(cast_boost=True)
@@ -149,9 +150,7 @@ def main() -> int:
 
     def phase3() -> bool:
         try:
-            result["sent_off"] = cast_lines(server.received).count(
-                "CAST|0"
-            ) >= 2
+            result["no_zeroing_off"] = "CAST|1" not in server.received
             result["scale_one"] = app._cast_speed_scale() == 1.0
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"phase3 exception: {exc!r}"
@@ -173,14 +172,14 @@ def main() -> int:
     result["ok"] = bool(
         result.get("attach_off")
         and result.get("switch_off")
-        and result.get("sent_on")
+        and result.get("no_zeroing")
         and result.get("collect_on")
         and result.get("scale_zero")
         and result.get("config_value")
         and result.get("round_trip")
         and result.get("legacy_on")
         and result.get("legacy_off")
-        and result.get("sent_off")
+        and result.get("no_zeroing_off")
         and result.get("scale_one")
         and result.get("shutdown_off")
     )
@@ -188,13 +187,13 @@ def main() -> int:
         result["detail"] = (
             f"attach_off={result.get('attach_off')} "
             f"switch_off={result.get('switch_off')} "
-            f"sent_on={result.get('sent_on')} "
+            f"no_zeroing={result.get('no_zeroing')} "
             f"collect_on={result.get('collect_on')} "
             f"scale_zero={result.get('scale_zero')} "
             f"round_trip={result.get('round_trip')} "
             f"legacy_on={result.get('legacy_on')} "
             f"legacy_off={result.get('legacy_off')} "
-            f"sent_off={result.get('sent_off')} "
+            f"no_zeroing_off={result.get('no_zeroing_off')} "
             f"scale_one={result.get('scale_one')} "
             f"shutdown_off={result.get('shutdown_off')} "
             f"casts={casts} tail={lines[-8:]}"

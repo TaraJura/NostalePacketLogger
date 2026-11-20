@@ -77,10 +77,13 @@ _ntpl_hook_recv:
 
 The callback runs **before** `call *_ntpl_recv_original_call`, so it may
 rewrite the packet in place and the client's own parser sees the changed
-text. That is how **Cast speed** zeroes the cooldown field of our own `su`
-packet (`castspeed.h`): the host queue is filled with a copy first, and the
-rewrite keeps the token's width (all zeros) so the packet's layout stays
-valid. The server's cooldown is not touched; only the client's view of it.
+text. DLL 0.2.8 used this to zero the cooldown field of our own `su` packet
+for Cast speed (`castspeed.h`, still built), but it hid the real cooldown
+from the skill bar, so the host-side Cast speed switch now turns it off:
+the GUI sends `CAST|0` on attach and the client's cooldowns stay visible.
+If the feature is ever used again, the host queue is filled with a copy
+first and the rewrite keeps the token's width (all zeros) so the packet's
+layout stays valid. The server's cooldown is never touched.
 
 The hook is installed with `Memory::Hook(addr, &ntpl_hook_recv, 5)`:
 `VirtualProtect` to RWX, write `E9 rel32`, restore protection,

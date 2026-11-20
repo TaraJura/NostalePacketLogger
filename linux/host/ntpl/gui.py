@@ -167,6 +167,9 @@ MAX_CANCEL_STREAK = 3
 #: belong to the newest attack.
 CAST_PENDING_MAX = 8
 CAST_PENDING_TTL_S = 3.0
+#: Cast speed chaining: a cast with no `su`/`cancel` for this long is treated
+#: as lost (a dropped response must not freeze the bot's rotation for good).
+CAST_ANSWER_TIMEOUT_S = 3.0
 #: Refused attacks within this window (across targets) pause combat. The
 #: server refuses everything in a town/safe zone or through walls; hopping to
 #: the next target just looks like a robot spamming `u_s`.
@@ -545,6 +548,12 @@ class Application(Gtk.Application):
         self.last_cancel_count = 0
         self.pending_casts: list[list] = []
         self.hit_marks_seen = 0
+        # Cast speed chaining: a cast is outstanding until the server answers
+        # it (`su`, or `cancel` for a refusal/end of animation). While busy
+        # the bot sends no new skill, so the next one goes out at the server's
+        # first free moment instead of being refused during the cast.
+        self.cast_busy = False
+        self.cast_busy_at = 0.0
         # Target id -> last time a cast that landed a `su` was resolved. A
         # target that has been hit is real; a refused cast must not drop it
         # as a ghost (that only applies to never-hit client-only entities).
@@ -3882,14 +3891,16 @@ class Application(Gtk.Application):
                 "outgoing walk packets at the server's normal speed, keeps "
                 "the client faster, and turns the value down or off if the "
                 "server corrects the player. Saved as speed_boost. "
-                "Cast speed is a plain on/off switch: while it is on, the "
-                "DLL zeroes every skill cooldown the client stores from the "
-                "server's `su` packet, so the skill bar is always ready, and "
-                "the bot casts the instant the server's `sr` readiness "
-                "packet arrives with no post-cast pause and no rule delay. "
-                "The server still enforces its own cooldown and cast time, "
-                "so a cast sent too early is refused — this removes the "
-                "client-side delay, not the server limit. Saved as "
+                "Cast speed is a plain on/off switch for the bot: while it "
+                "is on, the bot sends one cast at a time, waits for the "
+                "server's answer (`su` or `cancel`), and sends the next "
+                "spell or attack on the same tick instead of waiting out a "
+                "rule or Skill.dat delay. It also casts as soon as the "
+                "server's `sr` cooldown-end packet arrives. The client's "
+                "skill-bar cooldowns stay accurate and visible. The server "
+                "enforces its own cast time and cooldown, so a cast sent "
+                "before it is ready is refused; this removes every "
+                "client-side wait, not the server limit. Saved as "
                 "cast_boost. These tweaks violate the game rules and are "
                 "high ban risk.",
             )
@@ -3926,8 +3937,9 @@ class Application(Gtk.Application):
         self.cast_boost_switch.set_active(False)
         self.cast_boost_switch.set_valign(Gtk.Align.CENTER)
         self.cast_boost_switch.set_tooltip_text(
-            "On: zero the client-side skill cooldowns and cast at the "
-            "server's ready signal. The server's own cooldown still applies."
+            "On: the bot chains the next spell/attack the moment the "
+            "server answers the current cast. The client cooldown display "
+            "stays; the server's cast time and cooldowns still apply."
         )
         self.cast_boost_switch.connect(
             "notify::active", lambda *_: self._on_cast_speed_changed()
@@ -4998,6 +5010,7 @@ class Application(Gtk.Application):
         )
         self._send(packet)
         self._note_attack(target_id, now)
+        self._note_cast_sent(now)
         if target_type == 3:
             self.fight_target_id = target_id
         # The per-rule cooldown (max of the rule and Skill.dat) is enforced in
@@ -6723,6 +6736,30 @@ class Application(Gtk.Application):
         """
         return 0.0 if self._cast_boost_on() else 1.0
 
+    def _cast_chain_blocked(self, now: float) -> bool:
+        """True while Cast speed waits for the server to answer a cast.
+
+        A spell or attack is answered by `su` (accepted) or `cancel`
+        (refused/end of animation). Sending the next one before that answer
+        makes the server refuse it, which is why the inter-spell delay looked
+        unchanged. With Cast speed on, the bot waits for the answer and sends
+        the next cast on the same tick it arrives: the server's own cast time
+        is the only remaining delay.
+        """
+        if not self._cast_boost_on() or not self.cast_busy:
+            return False
+        if now - self.cast_busy_at > CAST_ANSWER_TIMEOUT_S:
+            self.cast_busy = False
+            return False
+        return True
+
+    def _note_cast_sent(self, now: float) -> None:
+        """Mark a cast pending until the server answers it (Cast speed on)."""
+        if not self._cast_boost_on():
+            return
+        self.cast_busy = True
+        self.cast_busy_at = now
+
     def _server_skill_ready(self, slot: int, since: float) -> bool:
         """True when the server said `sr <slot>` after our last cast.
 
@@ -6737,31 +6774,30 @@ class Application(Gtk.Application):
         ready = self.engine.world.skill_ready_at.get(slot)
         return ready is not None and ready > since
 
-    def _sync_cast_speed(self, quiet: bool = False) -> None:
-        """Tell the DLL to zero the client's skill cooldowns (or restore).
+    def _restore_client_cooldowns(self, quiet: bool = False) -> None:
+        """Make sure the client shows the real server cooldowns.
 
-        The DLL rewrites the cooldown field of our own `su` packets before
-        the client parses it, so the skill bar is always ready. The bot also
-        uses the server's `sr` readiness packets and drops its own post-cast
-        pause. The server keeps its own cooldown and cast time.
+        DLL 0.2.8 could zero the skill-bar cooldowns; that hid the server's
+        real cooldown and made casting look broken. The switch is host-side
+        now (the bot chains at the server's ready signal), so the client's
+        cooldown display always stays accurate. The DLL may still have the
+        old state from an earlier click, so turn it off on attach.
         """
         if self.client is None or not self.client.connected:
             return
-        enabled = self._cast_boost_on()
         try:
-            self.client.send_raw("CAST|1" if enabled else "CAST|0")
+            self.client.send_raw("CAST|0")
         except (ConnectionLost, ValueError):
-            return
-        if not quiet:
-            self._set_status(
-                "cast speed ON: client cooldowns zeroed "
-                "(server cooldown still applies)"
-                if enabled
-                else "cast speed normal"
-            )
+            pass
 
     def _on_cast_speed_changed(self) -> None:
-        self._sync_cast_speed()
+        if self._cast_boost_on():
+            self._set_status(
+                "cast speed ON: the bot casts the moment the server is "
+                "ready (the client cooldown display stays)"
+            )
+        else:
+            self._set_status("cast speed normal")
 
     def _on_page_switch(self, _notebook, _page, _page_num) -> None:
         self._ensure_map_loaded()
@@ -7396,12 +7432,12 @@ class Application(Gtk.Application):
                     self.dll_version = version_text or None
                     self._update_window_title()
                     self._set_status(message.payload)
-                    if version and version < (0, 2, 8):
+                    if version and version < (0, 2, 6):
                         warning = (
-                            "client DLL is older than 0.2.8 — the running "
+                            "client DLL is older than 0.2.6 — the running "
                             "game still has the old module; restart the game "
-                            "client (not just the GUI) to load the Cast "
-                            "speed switch (Speed + needs 0.2.6)"
+                            "client (not just the GUI) to load the uncapped "
+                            "Speed + build (Cast speed is host-side)"
                         )
                         self._set_status(warning)
                         # The status bar is overwritten by map auto-selection
@@ -7461,17 +7497,10 @@ class Application(Gtk.Application):
                         else "cast speed normal"
                     )
                 elif message.payload.startswith("unknown command: CAST"):
-                    # The injected DLL predates the Cast speed switch. The
-                    # client-side cooldown zeroing needs 0.2.8, but the bot
-                    # half (server `sr` pacing) is host-side and works now.
-                    note = (
-                        "client DLL is older than 0.2.8: skill cooldowns "
-                        "are not zeroed; the bot still casts at the "
-                        "server's ready signal — restart the game client "
-                        "for the client-side part"
-                    )
-                    self._set_status(note)
-                    self._log_line(note)
+                    # Old DLLs do not know the Cast speed command. The
+                    # feature is host-side, so nothing is missing; stay
+                    # quiet instead of showing a scary status line.
+                    pass
                 elif message.payload.startswith(
                     "unknown command: TARGET"
                 ):
@@ -7729,7 +7758,7 @@ class Application(Gtk.Application):
         # probe walk (which would make the server teleport the character).
         self._sync_portal_block()
         self._sync_speed_boost(quiet=True)
-        self._sync_cast_speed(quiet=True)
+        self._restore_client_cooldowns(quiet=True)
         self._request_position()
         return False
 
@@ -8036,6 +8065,8 @@ class Application(Gtk.Application):
         self.last_cancel_count = self.engine.world.cancel_count
         self.pending_casts.clear()
         self.hit_marks_seen = self.engine.world.self_hit_count
+        self.cast_busy = False
+        self.cast_busy_at = 0.0
         self.hit_target_at.clear()
         self.cancel_warn_at = 0.0
         self.cancel_streak = 0
@@ -8072,6 +8103,8 @@ class Application(Gtk.Application):
         self.recover_need_mp = False
         self.fight_target_id = None
         self.pending_casts.clear()
+        self.cast_busy = False
+        self.cast_busy_at = 0.0
         self._mirror_reset()
         self._set_status("bot stopped")
         self._set_path_info("stopped")
@@ -8517,6 +8550,8 @@ class Application(Gtk.Application):
             or not self.follow_attack_check.get_active()
         ):
             return False
+        if self._cast_chain_blocked(now):
+            return False
         entry = self.player_targets.get(player.entity_id)
         if entry is None:
             return False
@@ -8553,6 +8588,7 @@ class Application(Gtk.Application):
         if not self._send(packet):
             return False
         self._note_attack(monster.entity_id, now)
+        self._note_cast_sent(now)
         self.fight_target_id = monster.entity_id
         scale = self._cast_speed_scale()
         cooldown = (
@@ -9062,6 +9098,13 @@ class Application(Gtk.Application):
             self.hit_marks_seen = world.self_hit_count
             if self.pending_casts:
                 self.pending_casts[0][1] = True
+            # Cast speed sends one cast at a time, so a self `su` after the
+            # mark can only be that cast (or an extra hit of it): the server
+            # is free and the next spell may go out this tick. Do not match
+            # it to the pending queue here: an older attack that never got
+            # its end-of-animation `cancel` can still sit at the head.
+            if self.cast_busy:
+                self.cast_busy = False
 
         # A cancelled cast does not shorten the skill cooldown: the server
         # refuses an attack sent before the skill's own cooldown is over, so
@@ -9074,6 +9117,14 @@ class Application(Gtk.Application):
                     if self.pending_casts
                     else None
                 )
+                if (
+                    self.cast_busy
+                    and cast is not None
+                    and cast[0] == self.cast_busy_at
+                ):
+                    # Refused or finished: the server is free again. The
+                    # next Cast speed cast goes out on the next tick.
+                    self.cast_busy = False
                 if cast is None:
                     # Attached mid-cast: an unknown cancel must not drop a
                     # live target.
@@ -9480,6 +9531,9 @@ class Application(Gtk.Application):
             and self.retaliate_toggle.get_active()
         )
         if (auto_attack or retaliate) and not self._combat_paused(now):
+            # Cast speed: one cast outstanding at a time. The server answers
+            # with `su`/`cancel`; until then a new u_s would only be refused.
+            cast_busy = self._cast_chain_blocked(now)
             radius = ATTACK_SEARCH_CELLS
             base_info = self.spells.get(self._basic_skill_vnum() or 0)
             if base_info is not None and base_info.range > 0:
@@ -9524,11 +9578,19 @@ class Application(Gtk.Application):
                     )
                     self.unknown_warn_at = now + 15.0
 
-            selected = self._select_spell_rule(now, monster, char_id)
+            selected = (
+                None
+                if cast_busy
+                else self._select_spell_rule(now, monster, char_id)
+            )
             rule_index, rule = (
                 selected if selected is not None else (None, None)
             )
-            if rule is not None and now >= self.attack_cooldown_until:
+            if (
+                rule is not None
+                and not cast_busy
+                and now >= self.attack_cooldown_until
+            ):
                 if self._cast_spell(
                     rule_index, rule, monster, char_id, now
                 ):
@@ -9572,6 +9634,7 @@ class Application(Gtk.Application):
                 and monster is not None
                 and basic_in_range
                 and monster_sight
+                and not cast_busy
                 and (now >= self.attack_cooldown_until or basic_ready)
             ):
                 stats = self.engine.world.stats
@@ -9605,6 +9668,7 @@ class Application(Gtk.Application):
                         )
                         self._send(packet)
                         self._note_attack(monster.entity_id, now)
+                        self._note_cast_sent(now)
                         self.fight_target_id = monster.entity_id
                         # The skill's own cast time and cooldown pace the next
                         # action; the Min delay spin is only a floor on top.

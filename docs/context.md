@@ -22,19 +22,18 @@ the data layer in [database.md](database.md).
   disconnects. Needs the 0.2.6 DLL (a game-client restart/injection), not
   just a GUI restart.
 - **Cast speed** (**Malicious** tab, plain on/off switch, default off):
-  while on, the DLL zeroes our own `su` packet's cooldown field (arg 5) in
-  the client's receive buffer before it is parsed, so the skill bar is always
-  ready; the host/log keep the original. The server still enforces its own
-  cooldown and refuses early casts (`cancel 0 <castId> -1`). The GUI also
-  casts/basic-attacks when the server's `sr <castSlot>` arrives
-  (`WorldState.skill_ready_at`, monotonic), with no per-rule cooldown and no
-  post-cast pause, so it acts at the server's real rate rather than a longer
-  local timer. Saved as `cast_boost`, `CAST|1`/`CAST|0` on attach/change,
-  `CAST|0` on shutdown. Needs DLL 0.2.8. Fake-server proof:
-  `gui_cast_ready_smoke.py` — with the 60 s-cast Mana Shield, OFF gives one
-  cast and no follow-up; flipping the switch makes the second `u_s` go out
-  0.05 s later on the server's `sr`. The bot half works with the current DLL;
-  only the client-side cooldown zeroing needs 0.2.8.
+  host-side only; the client's skill-bar cooldowns stay accurate and visible
+  (the GUI sends `CAST|0` on attach to undo DLL 0.2.8's zeroing; old DLLs
+  ignore it). While on, the bot sends one cast at a time, waits for the
+  server's answer (self `su`, or the refusal `cancel`) and sends the next
+  spell/attack on the same tick; it drops the per-rule cooldown and post-cast
+  pause and re-casts a spell as soon as its `sr <castSlot>` arrives
+  (`WorldState.skill_ready_at`, monotonic). The server's cast time and
+  cooldown remain the floor (`cancel 0 <castId> -1`). Saved as `cast_boost`.
+  Fake-server proof (`gui_cast_ready_smoke.py`): OFF = one cast, no
+  follow-up; ON = second cast 0.05 s later on `sr`; a server cast time of
+  0.6 s yields the next cast 0.63 s later with no premature spam. Works with
+  the DLL the game already has; no game restart needed.
 - **NosBazar tab** (fourth GUI page): monitor + floor-protected relist ported
   from `TaraJura/Nostale-NB`. It learns the Bibi Basar entity id/option from
   the client's own `npc_req`/`n_run` or DLL log, searches `c_blist` at 2.5 s
