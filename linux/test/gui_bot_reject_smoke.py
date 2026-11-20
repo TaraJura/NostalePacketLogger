@@ -114,14 +114,25 @@ def main() -> int:
             )
             result["detail"] = (
                 f"stopped={stopped} gave_up={gave_up} moves={len(moves)} "
-                f"status={status!r}"
+                f"status={status!r} map={app.map_grid is not None} "
+                f"cell={app._player_cell()} goals={app.bot_goals[:3]} "
+                f"index={app.path_index} walk_at={app.walk_not_before:.1f} "
+                f"now={time.monotonic():.1f}"
             )
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"check exception: {exc!r}"
         app.quit()
         return False
 
-    GLib.timeout_add(1200, start_bot)
+    def start_when_ready() -> bool:
+        # Map auto-selection clears drawn paths; wait for it so the test path
+        # is not wiped between setting it and starting the bot.
+        if app.map_grid is None or app._player_cell() is None:
+            return True
+        start_bot()
+        return False
+
+    GLib.timeout_add(200, start_when_ready)
     app.run([])
     server.close()
 
