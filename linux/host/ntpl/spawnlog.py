@@ -24,6 +24,7 @@ import re
 from pathlib import Path
 
 _IN_MARKER = "[RECV] in "
+_GIDX_MARKER = "[RECV] gidx "
 _SKI_MARKER = "[RECV] ski "
 _AT_MARKER = "[RECV] at "
 _US_MARKER = "[SEND] u_s "
@@ -251,6 +252,76 @@ def load_player_spawns(
                 name = players.get(char_id, ("", 0, 0))[0]
                 players[char_id] = (name, values[2], values[3])
     return players
+
+
+def _family_fields(token: str) -> int:
+    head = token.split(".", 1)[0]
+    try:
+        return int(head)
+    except ValueError:
+        return -1
+
+
+def load_player_families(
+    path: str | Path | None = None,
+) -> dict[int, tuple[int, str, bool]]:
+    """Return ``charId -> (familyId, familyName, known)`` from the log.
+
+    The live `in 1` and `gidx` packets carry the same family fields as the
+    packet stream. A GUI that attaches after the players spawned never sees
+    those `in` packets, so without this backfill everyone on the map looked
+    like "family unknown" and auto-invite could not select them.
+    """
+    source = Path(path) if path is not None else default_log_path()
+    if source is None:
+        return {}
+    try:
+        log = _open_log_tail(source)
+    except OSError:
+        return {}
+
+    families: dict[int, tuple[int, str, bool]] = {}
+    with log:
+        for line in log:
+            marker = line.find(_GIDX_MARKER)
+            if marker >= 0:
+                parts = line[marker + len(_GIDX_MARKER):].split()
+                if len(parts) >= 4 and parts[0] == "1":
+                    try:
+                        char_id = int(parts[1])
+                    except ValueError:
+                        continue
+                    families[char_id] = (
+                        _family_fields(parts[2]),
+                        "" if parts[3] in ("-", "") else parts[3],
+                        True,
+                    )
+                continue
+            marker = line.find(_IN_MARKER)
+            if marker >= 0:
+                record = line[marker + len(_IN_MARKER):].strip()
+                match = _PLAYER.match(record)
+                if match is None:
+                    continue
+                rest = record[len(match.group(0)):].split()
+                if len(rest) >= 23:
+                    families[int(match.group(2))] = (
+                        _family_fields(rest[21]),
+                        "" if rest[22] in ("-", "") else rest[22],
+                        True,
+                    )
+                continue
+            change = _ints_after(line, _CMAP_MARKER, 3)
+            if change and change[2] == 1:
+                families.clear()
+                continue
+            if _MAPOUT_MARKER in line:
+                families.clear()
+                continue
+            despawn = _ints_after(line, _OUT_MARKER, 2)
+            if despawn and despawn[0] == 1:
+                families.pop(despawn[1], None)
+    return families
 
 
 def load_skill_list(

@@ -86,6 +86,7 @@ from .spawnlog import (
     load_gates,
     load_inventory as load_log_inventory,
     load_last_position,
+    load_player_families,
     load_player_spawns,
     load_portals as load_log_portals,
     load_skill_list,
@@ -123,7 +124,7 @@ BOT_INTERVAL_MS = 50
 #: Family auto-invite: one invite at a time, wait for the server's
 #: confirmation, and never retry a name (the list is persisted per client).
 FAMILY_AUTO_INTERVAL_S = 2.5
-FAMILY_CONFIRM_TIMEOUT_S = 8.0
+FAMILY_CONFIRM_TIMEOUT_S = 4.0
 FAMILY_COOLDOWN_S = 15.0
 FAMILY_AUTO_TICK_MS = 250
 #: Click-to-walk tick; the next leg is handed to the client before the
@@ -607,6 +608,7 @@ class Application(Gtk.Application):
         self.family_invited_info = None
         self.family_invited_list = None
         self.family_invited_scroll = None
+        self.family_page = None
         self.family_timer_label = None
         self.family_players_info = None
         self.family_players_list = None
@@ -622,11 +624,14 @@ class Application(Gtk.Application):
         self._family_next_invite_at = 0.0
         self._family_pending: tuple[str, float] | None = None
         self._family_invited: dict[str, str] = {}
+        self._family_no_reply: dict[str, str] = {}
+        self._family_no_reply_streak = 0
         self._family_auto_timer: int | None = None
         self._family_auto_guard = False
         self._family_auto_last = 0.0
         self._family_status_hold_until = 0.0
         self._family_players_sig: tuple | None = None
+        self._family_players_next_at = 0.0
         self._family_timer_source: int | None = None
         # Right-click "Copy item name" in the NosBazar items/results lists.
         self._install_copy_action()
@@ -730,6 +735,7 @@ class Application(Gtk.Application):
         log_page = self._build_log_page()
         bazar_page = self._build_bazar_page()
         family_page = self._build_family_page()
+        self.family_page = family_page
         malicious_page = self._build_malicious_page()
 
         self.notebook = Gtk.Notebook()
@@ -3113,7 +3119,6 @@ class Application(Gtk.Application):
         )
         self.family_players_scroll.set_hexpand(True)
         self.family_players_scroll.set_vexpand(True)
-        self.family_players_scroll.set_visible(False)
         players_panel.append(self.family_players_scroll)
         split.set_start_child(players_panel)
         split.set_resize_start_child(True)
@@ -3224,16 +3229,27 @@ class Application(Gtk.Application):
 
     def _family_render_invited(self) -> None:
         count = len(self._family_invited)
+        no_reply = len(self._family_no_reply)
         if self.family_invited_info is not None:
-            self.family_invited_info.set_text(f"Invited players: {count}")
+            text = f"Invited players: {count}"
+            if no_reply:
+                text += f" · {no_reply} no reply"
+            self.family_invited_info.set_text(text)
         if self.family_invited_list is not None:
             while (
                 child := self.family_invited_list.get_first_child()
             ) is not None:
                 self.family_invited_list.remove(child)
-            for name in sorted(
-                self._family_invited.values(), key=str.casefold
+            entries = dict(self._family_invited)
+            for key, name in self._family_no_reply.items():
+                entries.setdefault(key, name)
+            for key, name in sorted(
+                entries.items(), key=lambda item: item[1].casefold()
             ):
+                silent = (
+                    key in self._family_no_reply
+                    and key not in self._family_invited
+                )
                 row = Gtk.ListBoxRow()
                 row.set_activatable(False)
                 row.set_selectable(False)
@@ -3242,9 +3258,13 @@ class Application(Gtk.Application):
                 )
                 box.set_margin_top(2)
                 box.set_margin_bottom(2)
-                label = Gtk.Label(label=name)
+                label = Gtk.Label(
+                    label=name + ("  ·  no reply" if silent else "")
+                )
                 label.set_xalign(0)
                 label.set_hexpand(True)
+                if silent:
+                    label.add_css_class("bazar-warn")
                 box.append(label)
                 remove = Gtk.Button(label="Remove")
                 remove.add_css_class("flat")
@@ -3257,13 +3277,16 @@ class Application(Gtk.Application):
                 row.set_child(box)
                 self.family_invited_list.append(row)
         if self.family_invited_scroll is not None:
-            self.family_invited_scroll.set_visible(count > 0)
+            self.family_invited_scroll.set_visible(
+                count > 0 or no_reply > 0
+            )
 
     def _family_remove(self, name: str) -> None:
         key = name.casefold()
-        if key not in self._family_invited:
+        if key not in self._family_invited and key not in self._family_no_reply:
             return
-        del self._family_invited[key]
+        self._family_invited.pop(key, None)
+        self._family_no_reply.pop(key, None)
         pending = self._family_pending
         if pending is not None and pending[0].casefold() == key:
             self._family_pending = None
@@ -3312,8 +3335,19 @@ class Application(Gtk.Application):
         if self._closing:
             self._family_timer_source = None
             return False
+        # Do not rebuild a 100-row list in the background: only the visible
+        # Family page needs it, and twice a second is plenty for a map.
+        if self.family_page is None or self.notebook is None:
+            return True
+        if self.notebook.get_current_page() != self.notebook.page_num(
+            self.family_page
+        ):
+            return True
         self._family_update_timer()
-        self._family_render_players()
+        now = time.monotonic()
+        if now >= self._family_players_next_at:
+            self._family_players_next_at = now + 1.0
+            self._family_render_players()
         return True
 
     def _family_render_players(self) -> None:
@@ -3321,7 +3355,9 @@ class Application(Gtk.Application):
             return
         world = self.engine.world
         own_id = self._char_id()
-        rows: list[tuple[str, str, bool, bool, int]] = []
+        rows: list[tuple[str, str, bool, bool, bool, int]] = []
+        total = 0
+        to_invite = 0
         for entity in world.entities.values():
             if entity.kind != 1 or entity.entity_id == own_id:
                 continue
@@ -3329,6 +3365,22 @@ class Application(Gtk.Application):
                 entity.name or self.log_names.get(entity.entity_id, "")
             ).strip()
             if not self._family_usable_name(name):
+                continue
+            total += 1
+            key = name.casefold()
+            invited = key in self._family_invited
+            silent = key in self._family_no_reply
+            known_no_family = (
+                entity.family_known
+                and entity.family_id <= 0
+                and entity.family_name in ("", "-")
+            )
+            if known_no_family and not invited and not silent:
+                to_invite += 1
+            # Show only actionable rows: invite candidates and names already
+            # in a list. A busy town's 167 "family unknown" rows made the GTK
+            # list rebuild stall the whole window.
+            if not (known_no_family or invited or silent):
                 continue
             if entity.family_known and entity.family_id > 0:
                 family = entity.family_name or "has family"
@@ -3340,19 +3392,22 @@ class Application(Gtk.Application):
                 (
                     name,
                     family,
-                    name.casefold() in self._family_invited,
+                    invited,
+                    silent,
                     entity.family_known,
                     entity.family_id,
                 )
             )
-        total = len(rows)
         rows.sort(key=lambda row: row[0].casefold())
-        rows = rows[:100]
+        rows = rows[:60]
         signature = tuple(
-            (name, family, invited) for name, family, invited, _, _ in rows
+            (name, family, invited, silent)
+            for name, family, invited, silent, _, _ in rows
         )
         if self.family_players_info is not None:
-            self.family_players_info.set_text(f"Players on map: {total}")
+            self.family_players_info.set_text(
+                f"Players on map: {total} · {to_invite} to invite"
+            )
         if signature == self._family_players_sig:
             return
         self._family_players_sig = signature
@@ -3360,7 +3415,14 @@ class Application(Gtk.Application):
             child := self.family_players_list.get_first_child()
         ) is not None:
             self.family_players_list.remove(child)
-        for name, family, invited, family_known, family_id in rows:
+        for (
+            name,
+            family,
+            invited,
+            silent,
+            family_known,
+            family_id,
+        ) in rows:
             row = Gtk.ListBoxRow()
             row.set_activatable(False)
             row.set_selectable(False)
@@ -3369,7 +3431,10 @@ class Application(Gtk.Application):
             )
             box.set_margin_top(2)
             box.set_margin_bottom(2)
-            label = Gtk.Label(label=f"{name}  ·  {family}")
+            label_text = f"{name}  ·  {family}"
+            if silent:
+                label_text += "  ·  no reply"
+            label = Gtk.Label(label=label_text)
             label.set_xalign(0)
             label.set_hexpand(True)
             box.append(label)
@@ -3379,6 +3444,15 @@ class Application(Gtk.Application):
                 action.connect(
                     "clicked",
                     lambda _button, chosen=name: self._family_remove(chosen),
+                )
+            elif silent:
+                action = Gtk.Button(label="Retry")
+                action.add_css_class("flat")
+                action.connect(
+                    "clicked",
+                    lambda _button, chosen=name: self._family_send_invite(
+                        chosen
+                    ),
                 )
             elif family_known and family_id <= 0:
                 action = Gtk.Button(label="Invite")
@@ -3396,13 +3470,14 @@ class Application(Gtk.Application):
             row.set_child(box)
             self.family_players_list.append(row)
         if self.family_players_scroll is not None:
-            self.family_players_scroll.set_visible(bool(rows))
+            self.family_players_scroll.set_visible(True)
 
     def _family_remember(self, name: str) -> None:
         key = name.casefold()
         if key in self._family_invited:
             return
         self._family_invited[key] = name
+        self._family_no_reply.pop(key, None)
         self._family_save_state()
         self._family_render_invited()
         self._family_render_players()
@@ -3410,10 +3485,13 @@ class Application(Gtk.Application):
     def _family_reset_for_attach(self, winpid: int) -> None:
         self._family_stop_auto(quiet=True)
         self._family_pending = None
+        self._family_no_reply.clear()
+        self._family_no_reply_streak = 0
         self._family_auto_last = 0.0
         self._family_status_hold_until = 0.0
         self._family_next_invite_at = 0.0
         self._family_players_sig = None
+        self._family_players_next_at = 0.0
         self.family_state_path = self._family_path_for(winpid)
         self._family_load_state()
         self._family_render_invited()
@@ -3455,6 +3533,7 @@ class Application(Gtk.Application):
             )
             return
         self._family_auto_last = 0.0
+        self._family_no_reply_streak = 0
         if self._family_auto_timer is None:
             self._family_auto_timer = GLib.timeout_add(
                 FAMILY_AUTO_TICK_MS, self._family_auto_tick
@@ -3482,18 +3561,34 @@ class Application(Gtk.Application):
         pending = self._family_pending
         if pending is not None:
             if now - pending[1] > self.family_confirm_timeout:
+                name = pending[0]
+                key = name.casefold()
                 self._family_pending = None
-                self._family_stop_auto(quiet=True)
+                # Offline, wrong-name and non-ASCII targets can be silently
+                # ignored by the server. Skip that name and keep going
+                # instead of stopping the whole run.
+                self._family_no_reply[key] = name
+                self._family_no_reply_streak += 1
+                self._family_status_hold_until = now + 3.0
+                self._family_render_invited()
+                self._family_render_players()
                 self._set_family_status(
-                    "Auto-invite stopped: no server confirmation for "
-                    f"{pending[0]}.",
-                    "bazar-bad",
+                    f"No reply for {name}; skipped. Auto-invite continues.",
+                    "bazar-warn",
                 )
-                self._log_line(
-                    "family auto-invite stopped: no confirmation for "
-                    f"{pending[0]}"
-                )
-                return False
+                self._log_line(f"family invite no reply: {name}")
+                if self._family_no_reply_streak >= 5:
+                    self._family_stop_auto(quiet=True)
+                    self._set_family_status(
+                        "Auto-invite stopped: 5 invites got no reply "
+                        "(check the client's family permission).",
+                        "bazar-bad",
+                    )
+                    self._log_line(
+                        "family auto-invite stopped: repeated no reply"
+                    )
+                    return False
+                return True
             return True
         remaining = self._family_cooldown_remaining()
         if remaining > 0:
@@ -3536,7 +3631,8 @@ class Application(Gtk.Application):
             ).strip()
             if not self._family_usable_name(name):
                 continue
-            if name.casefold() in self._family_invited:
+            key = name.casefold()
+            if key in self._family_invited or key in self._family_no_reply:
                 continue
             distance = 0
             if own_cell is not None:
@@ -3574,11 +3670,14 @@ class Application(Gtk.Application):
             return False
         now = time.monotonic()
         self._family_pending = (name, now)
+        self._family_no_reply.pop(key, None)
         # The invite is added to the invited list when the server confirms it
         # with infoi2 234; a cooldown rejection (infoi 2359) must not burn the
         # name, so it can be retried after the timer.
         self._family_next_invite_at = now + self.family_cooldown_s
         self._family_update_timer()
+        self._family_render_invited()
+        self._family_render_players()
         prefix = "Auto-invite" if auto else "Invite"
         self._set_family_status(
             f"{prefix}: sent to {name}; waiting for the server…",
@@ -3662,6 +3761,7 @@ class Application(Gtk.Application):
         ):
             return
         self._family_pending = None
+        self._family_no_reply_streak = 0
         self._family_remember(name)
         self._family_status_hold_until = time.monotonic() + 4.0
         self._set_family_status(
@@ -3802,6 +3902,9 @@ class Application(Gtk.Application):
         # A player who spawned before this GUI attached has no live `in` in
         # memory; the log still has their spawn and movements. Seed them so
         # Follow can find them by name instead of reporting "not in sight".
+        # Family fields are seeded too: otherwise every pre-attach player
+        # looked "family unknown" and auto-invite could never select them.
+        families = load_player_families(self.log_file)
         for player_id, (name, px, py) in load_player_spawns(
             self.log_file
         ).items():
@@ -3815,13 +3918,17 @@ class Application(Gtk.Application):
                 continue
             entity = world.entities.get(player_id)
             if entity is None:
-                world.entities[player_id] = Entity(
-                    player_id, 1, name=name, x=px, y=py
-                )
+                entity = Entity(player_id, 1, name=name, x=px, y=py)
+                world.entities[player_id] = entity
             else:
                 entity.x, entity.y = px, py
                 if not entity.name:
                     entity.name = name
+            family = families.get(player_id)
+            if family is not None:
+                entity.family_id, entity.family_name, entity.family_known = (
+                    family
+                )
         merged = False
         # `gp` is the server's own portal list: exact and complete per map.
         for (map_id, x, y), destination in load_gates(self.log_file).items():

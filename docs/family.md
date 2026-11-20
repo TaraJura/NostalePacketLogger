@@ -63,9 +63,15 @@ The **Auto-invite players with no family** toggle scans the map and invites
 players whose family state is known and who have none.
 
 - Family data comes from the player's `in 1` packet (`familyId` and
-  `familyName` after the char id; `-1 -` means no family) and from `gidx`
-  updates (`gidx 1 <entityId> <familyId>.<rank> <familyName> ...`).
+  `familyName` after the char id; `-1 -` means no family), from `gidx`
+  updates (`gidx 1 <entityId> <familyId>.<rank> <familyName> ...`), and from
+  the DLL session log for players who spawned before the GUI attached
+  (`load_player_families`).
 - A player whose family state was never sent is **skipped**, not guessed.
+  The map list shows only actionable players (known no-family, invited,
+  no-reply); the header shows the total on the map. Hidden `family unknown`
+  rows are not rebuilt, which keeps a busy 150+ player town responsive.
+  The visible list refreshes every second.
 - Candidates are invited nearest first, one at a time. The tab waits for the
   server's `infoi2 234` confirmation before the next one (2.5 s pacing).
 - The live server also has an invite cooldown. Sending too early returns
@@ -76,15 +82,18 @@ players whose family state is known and who have none.
   waits for it. A `2359` reply starts the countdown and leaves the name
   retryable.
 - A name is added to the invited list only after the server confirms it with
-  `infoi2 234`. The list is displayed on the right and saved to
+  `infoi2 234` within 4 s. The list is displayed on the right and saved to
   `~/.config/ntpl/family-<winpid>.json` (`NTPL_FAMILY_STATE` overrides the
   path). A name is never invited again, even if the player declines or never
   answers.
+- A name that gets no reply (offline, bad encoding, not found) is marked
+  **no reply**, skipped for this session, and auto-invite continues to the
+  next candidate. Five silent attempts in a row stop it with a hint to check
+  the client's family permission.
 - The list is editable: **Add to list** records a typed name without sending
-  anything; **Remove** (on an invited row) deletes it so auto-invite can try
-  it again. A row on the map list can be invited with **Invite**.
-- If the server stops confirming (for example the client has no family
-  permission), auto-invite stops instead of spamming.
+  anything; **Remove** (on an invited/no-reply row) deletes it so auto-invite
+  can try it again. A row on the map list can be invited with **Invite** or
+  retried with **Retry** after a no-reply.
 
 `gui_family_auto_smoke.py` covers the scan: one no-family player is invited,
 a player in a family and a player with unknown family are skipped, the list

@@ -225,6 +225,18 @@ def main() -> int:
             result["cooldown_status"] = "cooldown" in (
                 app.family_status.get_text().lower()
             )
+            # A silent target is skipped, not fatal: auto-invite must keep
+            # running (the 2026-11-20 live bug stopped after every silent name).
+            app.family_auto_toggle.set_active(True)
+            app._family_next_invite_at = time.monotonic() + 100.0
+            app.family_confirm_timeout = 1.0
+            app._family_pending = ("Quiet", time.monotonic() - 10.0)
+            app._family_auto_tick()
+            result["no_reply_skipped"] = "quiet" in app._family_no_reply
+            result["auto_continued"] = (
+                app.family_auto_toggle.get_active()
+            )
+            app.family_auto_toggle.set_active(False)
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"phase5 exception: {exc!r}"
         app.quit()
@@ -257,6 +269,8 @@ def main() -> int:
             "blocked_retryable",
             "cooldown_started",
             "cooldown_status",
+            "no_reply_skipped",
+            "auto_continued",
         )
     )
     result["detail"] = " ".join(
@@ -276,6 +290,8 @@ def main() -> int:
             "blocked_retryable",
             "cooldown_started",
             "cooldown_status",
+            "no_reply_skipped",
+            "auto_continued",
         )
     )
     print(

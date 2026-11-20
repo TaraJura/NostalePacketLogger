@@ -13,6 +13,7 @@ from ntpl.spawnlog import (
     load_gates,
     load_inventory,
     load_last_position,
+    load_player_families,
     load_player_spawns,
     load_portals,
     load_skill_list,
@@ -65,6 +66,31 @@ class SpawnLogTests(unittest.TestCase):
         self.assertEqual(
             load_player_spawns(log), {12771: ("Goddess", 5, 6)}
         )
+
+    def test_reads_player_families_from_in_and_gidx(self):
+        log = self._write(
+            "1 [RECV] in 1 Goddess - 12771 116 109 2 0 1 0 6 2 "
+            "-1.769.404.763.-1.885.-1.-1.-1.-1.-1 100 100 0 50 4 2 0 0 1 4 "
+            "75 75 -1 - -2 0 0 0 0 81 0 0|0|0 0 0 100 0 0\r\n"
+            "2 [RECV] gidx 1 12771 163.918 Kartushka 1 0|0|0\r\n"
+            "3 [RECV] in 1 Retye - 3913 25 43 2 0 1 0 9 2 "
+            "-1.769.404.763.-1.885.-1.-1.-1.-1.-1 100 100 0 -1 0 2 0 0 0 "
+            "1000009 75 75 -1 - -2 0 0 0 0 81 0 0|0|0 0 0 100 0 0\r\n"
+        )
+        self.assertEqual(
+            load_player_families(log),
+            {
+                12771: (163, "Kartushka", True),
+                3913: (-1, "", True),
+            },
+        )
+
+    def test_family_backfill_clears_on_map_change(self):
+        log = self._write(
+            "1 [RECV] gidx 1 12771 163.918 Kartushka 1 0|0|0\r\n"
+            "2 [RECV] c_map 0 85 1\r\n"
+        )
+        self.assertEqual(load_player_families(log), {})
 
     def test_player_move_without_spawn_keeps_an_empty_name(self):
         log = self._write("17:07:21.000 [RECV] mv 1 424242 10 11 6\r\n")
