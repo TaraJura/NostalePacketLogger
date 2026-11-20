@@ -424,6 +424,9 @@ class Application(Gtk.Application):
         self.follow_player_entry = None
         self.follow_attack_check = None
         self.follow_mirror_check = None
+        # Client-side movement-speed boost in percent (0 = off). Applied by
+        # the DLL to the local player's `cond` speed; see Speed +% control.
+        self.speed_boost_spin = None
         # -- cross-client packet mirroring (Follow frame) ------------------
         # Every attached host publishes its own `walk`/`u_s` to the mirror
         # bus; a follower replays the followed character's actions with its
@@ -2556,6 +2559,26 @@ class Application(Gtk.Application):
             "toggled", lambda *_: self._on_block_portals_toggled()
         )
         path_box.append(self.block_portal_toggle)
+        # Client-side speed boost (a client hack, high ban risk). The DLL
+        # scales the local player's incoming `cond` speed, which is what the
+        # client uses for its own walking and walk packet; 0 is normal.
+        self.speed_boost_spin = Gtk.SpinButton.new_with_range(0, 300, 10)
+        self.speed_boost_spin.set_value(0)
+        self.speed_boost_spin.set_hexpand(True)
+        self.speed_boost_spin.set_tooltip_text(
+            "Increase this client's walking speed by this percentage while "
+            "the window is attached (0 = normal, 100 = double). The DLL "
+            "scales the server's `cond` speed before the client parses it, so "
+            "movement stays smooth. This is a client-side speed hack: it "
+            "violates the game rules and is high ban risk. The DLL reverts "
+            "to normal if the GUI disconnects."
+        )
+        self.speed_boost_spin.connect(
+            "value-changed", lambda *_: self._on_speed_boost_changed()
+        )
+        path_box.append(
+            self._field_row(Gtk.Label(label="Speed +%"), self.speed_boost_spin)
+        )
         sidebar.append(self._frame("Path", path_box))
 
         # Follow a named player (a mule that trails the character you play).
@@ -3925,6 +3948,11 @@ class Application(Gtk.Application):
                 self.block_portal_toggle is not None
                 and self.block_portal_toggle.get_active()
             ),
+            speed_boost=(
+                int(self.speed_boost_spin.get_value())
+                if self.speed_boost_spin is not None
+                else 0
+            ),
             follow=bool(
                 self.follow_player_toggle is not None
                 and self.follow_player_toggle.get_active()
@@ -3978,6 +4006,8 @@ class Application(Gtk.Application):
         self.loop_toggle.set_active(config.loop)
         if self.block_portal_toggle is not None:
             self.block_portal_toggle.set_active(config.block_portals)
+        if self.speed_boost_spin is not None:
+            self.speed_boost_spin.set_value(config.speed_boost)
         if self.follow_player_toggle is not None:
             self.follow_player_toggle.set_active(config.follow)
         if self.follow_player_entry is not None:
@@ -5525,6 +5555,33 @@ class Application(Gtk.Application):
             else "portal blocking off: paths may cross warp tiles"
         )
 
+    def _sync_speed_boost(self, quiet: bool = False) -> None:
+        """Ask the DLL to scale the client's own walking speed.
+
+        The DLL rewrites the local player's incoming `cond` speed before the
+        client parses it, so the client walks faster and its own `walk`
+        packets carry the boosted speed. The value applies immediately, not
+        only while the bot runs. 0 is normal speed.
+        """
+        if self.client is None or not self.client.connected:
+            return
+        percent = 0
+        if self.speed_boost_spin is not None:
+            percent = int(self.speed_boost_spin.get_value())
+        try:
+            self.client.send_raw(f"SPEED|{percent}")
+        except (ConnectionLost, ValueError):
+            return
+        if not quiet:
+            self._set_status(
+                f"speed boost +{percent}% (client-side, high ban risk)"
+                if percent > 0
+                else "speed boost off"
+            )
+
+    def _on_speed_boost_changed(self) -> None:
+        self._sync_speed_boost()
+
     def _on_page_switch(self, _notebook, _page, _page_num) -> None:
         self._ensure_map_loaded()
         if self.map_area is not None:
@@ -6354,6 +6411,7 @@ class Application(Gtk.Application):
         # Ask the DLL for the client's own local position instead of sending a
         # probe walk (which would make the server teleport the character).
         self._sync_portal_block()
+        self._sync_speed_boost(quiet=True)
         self._request_position()
         return False
 
@@ -8396,6 +8454,14 @@ class Application(Gtk.Application):
         self._closing = True
         self._client_generation += 1
         self._stop_bot()
+        # Restore the client's normal speed before the link goes away. The
+        # DLL also reverts when the host disconnects, but an explicit 0 makes
+        # the shutdown deterministic.
+        if self.client is not None and self.client.connected:
+            try:
+                self.client.send_raw("SPEED|0")
+            except (ConnectionLost, ValueError):
+                pass
         self._close_mirror_writer(remove=True)
         self.mirror_reader.close()
         if self.bazar.running:

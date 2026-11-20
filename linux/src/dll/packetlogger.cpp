@@ -6,9 +6,13 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <string>
 
+#include "clientmove.h"
+#include "log.h"
 #include "memory.h"
 #include "nostale_string.h"
+#include "speedboost.h"
 
 // The signatures are the same ones the Windows build uses. They are tied to a
 // specific NostaleClientX.exe build and must be re-derived after every client
@@ -44,6 +48,122 @@ packetlogger::Status g_status;
 std::atomic<bool>    g_enabled{false};
 std::atomic<bool>    g_block_portal{false};
 
+// Client-side speed boost. `g_cond_base`/`g_cond_target` remember the last
+// server cond speed and the boosted value written to the client, so the
+// outgoing walk packet can be kept consistent without double-boosting.
+std::atomic<int>           g_speed_boost{0};
+std::atomic<int>           g_cond_base{0};
+std::atomic<int>           g_cond_target{0};
+std::atomic<int>           g_logged_target{0};
+std::atomic<unsigned long> g_self_id{0};
+std::atomic<unsigned long> g_self_id_at{0};
+std::atomic<const char*>   g_last_cond_ptr{nullptr};
+std::atomic<unsigned long> g_last_cond_ms{0};
+
+// The local character id, read from the client's own player object. Cached
+// briefly: the recv hook runs on the network thread and a cond arrives every
+// few hundred ms, so reading through client_position every time is harmless,
+// but the cache keeps a relog from needing it on every packet.
+unsigned long local_char_id() {
+    const unsigned long now = GetTickCount();
+    const unsigned long cached =
+        g_self_id.load(std::memory_order_relaxed);
+    if (cached != 0 &&
+        now - g_self_id_at.load(std::memory_order_relaxed) < 2000) {
+        return cached;
+    }
+    int x = 0;
+    int y = 0;
+    int resting = -1;
+    unsigned long char_id = 0;
+    std::string error;
+    if (client_position(x, y, char_id, resting, error) && char_id != 0) {
+        g_self_id.store(char_id, std::memory_order_relaxed);
+        g_self_id_at.store(now, std::memory_order_relaxed);
+        return char_id;
+    }
+    return cached;
+}
+
+// Rewrite the speed in a `cond` packet for the local player. Called from the
+// recv hook *before* the original parser runs; the packet is a mutable Delphi
+// AnsiString buffer and only same-width digits are replaced, so the length
+// field and the terminator stay valid.
+void patch_cond_packet(char* packet) {
+    const int percent = g_speed_boost.load(std::memory_order_relaxed);
+    if (percent <= 0 || packet == nullptr) {
+        return;
+    }
+    if (std::strncmp(packet, "cond ", 5) != 0) {
+        return;
+    }
+
+    // The refcount call this hook sits on is normally reached once per
+    // packet. Guard a second pass over the same buffer anyway: boosting the
+    // already-boosted value would compound the percentage.
+    const unsigned long now = GetTickCount();
+    if (packet == g_last_cond_ptr.load(std::memory_order_relaxed) &&
+        now - g_last_cond_ms.load(std::memory_order_relaxed) < 50) {
+        return;
+    }
+
+    const speedboost::Change change =
+        speedboost::plan_cond(packet, percent);
+    if (!change.valid) {
+        return;
+    }
+    // `cond 1` was observed only for the local player, but official crowded
+    // maps may send others too; match the client's own char id when known.
+    const unsigned long self = local_char_id();
+    if (self == 0 || change.id != self) {
+        return;
+    }
+
+    g_last_cond_ptr.store(packet, std::memory_order_relaxed);
+    g_last_cond_ms.store(now, std::memory_order_relaxed);
+
+    if (change.rewrite && speedboost::apply(packet, change)) {
+        g_cond_base.store(change.from, std::memory_order_relaxed);
+        g_cond_target.store(change.to, std::memory_order_relaxed);
+        const int previous =
+            g_logged_target.exchange(change.to, std::memory_order_relaxed);
+        if (previous != change.to) {
+            ntpl::logf("speed boost %d%%: cond %d -> %d", percent,
+                       change.from, change.to);
+        }
+        return;
+    }
+
+    // Off, rounded back to the same value, or too narrow for an in-place
+    // rewrite (a one-digit speed cannot become two digits here). Keep the
+    // pair current so a later walk packet is at least not boosted wrongly.
+    g_cond_base.store(change.from, std::memory_order_relaxed);
+    g_cond_target.store(change.to, std::memory_order_relaxed);
+}
+
+// Keep the client's own walk speed in step with the patched cond. If the
+// client already sends the boosted value this is a no-op; if it still sends
+// the server's value, replace it.
+void patch_walk_packet(char* packet) {
+    if (g_speed_boost.load(std::memory_order_relaxed) <= 0 ||
+        packet == nullptr) {
+        return;
+    }
+    if (std::strncmp(packet, "walk ", 5) != 0) {
+        return;
+    }
+    const int base = g_cond_base.load(std::memory_order_relaxed);
+    const int target = g_cond_target.load(std::memory_order_relaxed);
+    if (base <= 0 || target <= base) {
+        return;
+    }
+    const speedboost::Change change =
+        speedboost::plan_walk(packet, base, target);
+    if (change.rewrite) {
+        speedboost::apply(packet, change);
+    }
+}
+
 // `preq` (portal request) is what the client sends when the character steps
 // on a warp tile; the server answers with sp/c_map and moves it to another
 // map. There is no server-side "decline": the only way to stay is not to send
@@ -75,7 +195,12 @@ void ntpl_on_packet_recv(const char* packet) {
         g_recv == nullptr) {
         return;
     }
+    // Queue the server's original text first, then rewrite the buffer the
+    // client is about to parse. The host keeps the true cond speed.
     g_recv->push(packet);
+    if (g_speed_boost.load(std::memory_order_relaxed) > 0) {
+        patch_cond_packet(const_cast<char*>(packet));
+    }
 }
 
 // Called by hooks.S from inside the game's send path. Returns 1 when the
@@ -84,6 +209,11 @@ void ntpl_on_packet_recv(const char* packet) {
 extern "C" int ntpl_on_packet_send(const char* packet) {
     if (!g_enabled.load(std::memory_order_relaxed) || packet == nullptr) {
         return 1;
+    }
+    // Patch the outgoing walk speed before it is logged or sent, so the log
+    // shows exactly what goes on the wire.
+    if (g_speed_boost.load(std::memory_order_relaxed) > 0) {
+        patch_walk_packet(const_cast<char*>(packet));
     }
     // Keep the packet in the stream/log even when dropping it: the host can
     // then show "preq blocked" instead of a silent stop.
@@ -278,6 +408,32 @@ void set_portal_block(bool enabled) {
 
 bool portal_block() {
     return g_block_portal.load(std::memory_order_relaxed);
+}
+
+void set_speed_boost(int percent) {
+    if (percent < 0) {
+        percent = 0;
+    }
+    if (percent > 300) {
+        percent = 300;
+    }
+    const int previous =
+        g_speed_boost.exchange(percent, std::memory_order_release);
+    // Forget the last cond value: the next packet must be scaled from the
+    // server's own speed, not from a value patched with the old percentage.
+    g_cond_base.store(0, std::memory_order_relaxed);
+    g_cond_target.store(0, std::memory_order_relaxed);
+    g_logged_target.store(0, std::memory_order_relaxed);
+    g_last_cond_ptr.store(nullptr, std::memory_order_relaxed);
+    g_last_cond_ms.store(0, std::memory_order_relaxed);
+    if (previous != percent) {
+        ntpl::logf("speed boost %d%% (client-side)%s", percent,
+                   percent > 0 ? " -- high ban risk" : "");
+    }
+}
+
+int speed_boost() {
+    return g_speed_boost.load(std::memory_order_relaxed);
 }
 
 bool send_packet(const char* packet) {

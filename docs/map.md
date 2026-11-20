@@ -207,7 +207,14 @@ grouped by function:
   While recovering, a red **RECOVERING** banner states the HP percentage and
   that attacks/movement are paused; all toggle buttons are green when active
   and red when off.
-- **Path** — path summary, Start, Stop, Clear path, Loop and **Draw path**.
+- **Path** — path summary, Start, Stop, Clear path, Loop, **Draw path** and
+  **Speed +%** (0–300, default 0). Speed +% is a client-side movement-speed
+  boost: the DLL scales the local player's incoming `cond` speed before the
+  client parses it and keeps the client's own `walk` speed consistent, so the
+  character walks faster with normal animation. It applies as soon as the spin
+  changes, not only while the bot runs; closing the GUI (or the DLL losing the
+  host) restores normal speed. This is a client hack, high ban risk — see
+  [bot-config.md](bot-config.md#speed-boost--client-side-movement-speed).
   With Draw path off (default), a left click makes the character **walk to
   that cell** along the A* path in short three-cell `MOVE` legs — the same
   legs the bot uses, because a single far MoveTo makes the client jump (and
@@ -480,7 +487,7 @@ never sees the `at` packet.
 ```bash
 make -C linux host-test   # 190 cases incl. synthetic NOS, 8-way A*, checksum, config
 make -C linux gui-test    # GUI + map surface + tooltips + unknown-position guard
-make -C linux bot-test    # 36 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, follow nameless/char id, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, follow mirror, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
+make -C linux bot-test    # 37 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, follow nameless/char id, portal blocking, speed boost control, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, follow mirror, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
 ```
 
 The bot test sends a fake player at (25,117) on map 20, a monster at

@@ -23,6 +23,7 @@ Schema (version 1)::
       "revive_on_death": false,     # accept dlgi #revival (10 Seeds of Power)
       "loop": true,
       "block_portals": false,    # off: portals stay usable by default
+      "speed_boost": 0,          # client-side speed +%, 0 = normal
       "follow": false,           # follow a player instead of fighting
       "follow_player": "Name",    # player name, or char id as text
       "follow_attack": false,     # attack the monster the player hits
@@ -130,6 +131,7 @@ class BotConfig:
     revive_on_death: bool = False
     loop: bool = True
     block_portals: bool = False
+    speed_boost: int = 0
     follow: bool = False
     follow_player: str = ""
     follow_attack: bool = False
@@ -161,6 +163,7 @@ class BotConfig:
             "revive_on_death": self.revive_on_death,
             "loop": self.loop,
             "block_portals": self.block_portals,
+            "speed_boost": self.speed_boost,
             "follow": self.follow,
             "follow_player": self.follow_player,
             "follow_attack": self.follow_attack,
@@ -236,6 +239,7 @@ class BotConfig:
             revive_on_death=_as_bool(data.get("revive_on_death"), False),
             loop=_as_bool(data.get("loop"), True),
             block_portals=_as_bool(data.get("block_portals"), False),
+            speed_boost=_as_int(data.get("speed_boost"), 0, 0, 300),
             follow=_as_bool(data.get("follow"), False),
             follow_player=_as_text(data.get("follow_player"), "")[:40],
             follow_attack=_as_bool(data.get("follow_attack"), False),

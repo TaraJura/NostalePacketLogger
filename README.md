@@ -76,9 +76,10 @@ the catalog/database side is in [docs/database.md](docs/database.md).
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 278 Python unit tests
+make -C linux host-test                      # 279 Python unit tests
+make -C linux speed-test                     # DLL speed-boost packet rewriting
 make -C linux gui-test                       # headless GTK4 smokes (xvfb)
-make -C linux bot-test                       # 36 fake-server bot smokes
+make -C linux bot-test                       # 37 fake-server bot smokes
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path
 linux/scripts/dev-test-wine.sh 25
@@ -141,8 +142,8 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 278 unit tests pass, the three GTK4 window smokes
-and 36 bot smoke tests pass, and the real injector has been run against
+The Linux port builds, its 279 unit tests pass, the three GTK4 window smokes
+and 37 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 
 - both hooks `ACTIVE` (`recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`),
@@ -190,7 +191,13 @@ Level N" wording), and an explicit unknown-vnum option for monsters that
 spawned before injection. **Block portals** (off by default) drops the
 client's own `preq` portal request in the DLL and keeps paths off the warp
 tiles, so a farming loop cannot enter another map even from a tile it is
-already standing on. A third top-level **Bot log** tab keeps a
+already standing on. **Speed +%** (Path section, default 0 = normal) is a
+client-side movement-speed boost: the DLL scales the local player's incoming
+`cond` speed before the client parses it, and keeps the client's own `walk`
+speed consistent, so walking stays smooth. It applies immediately, and the
+DLL reverts to normal speed when the GUI disconnects. This is a client hack:
+the game rules prohibit client manipulation, and bot vendors themselves label
+speed hacks high ban risk. A third top-level **Bot log** tab keeps a
 timestamped, selectable record of every action (attacks, TARGET selections and
 refusals, walks, pickups, recovery, DLL errors) for debugging, and mirrors it
 to `~/.config/ntpl/bot-<winpid>.log` once a client is attached (`bot.log`

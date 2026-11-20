@@ -35,7 +35,7 @@ std::string status_line() {
         buffer, sizeof(buffer),
         "STATUS|ntpl %s | recv=0x%08lX send=0x%08lX tnt=0x%08lX | "
         "hooks recv=%s send=%s skill=%s | drops recv=%lu send=%lu | "
-        "portalblock=%s",
+        "portalblock=%s | speed=%d%%",
         ntpl::kVersion,
         static_cast<unsigned long>(st.recv_addr),
         static_cast<unsigned long>(st.send_addr),
@@ -45,7 +45,8 @@ std::string status_line() {
         hook_state(st.skill_found, st.skill_hooked),
         static_cast<unsigned long>(packetlogger::recv_dropped()),
         static_cast<unsigned long>(packetlogger::send_dropped()),
-        packetlogger::portal_block() ? "BLOCKED" : "off");
+        packetlogger::portal_block() ? "BLOCKED" : "off",
+        packetlogger::speed_boost());
 
     return std::string(buffer);
 }
@@ -291,6 +292,24 @@ void handle_command(const std::string& command) {
         return;
     }
 
+    // SPEED|N -- scale the local player's movement speed by N percent in the
+    // client (0 = normal). The incoming `cond` speed is rewritten before the
+    // client parses it; see speedboost.h. This is a client hack and high ban
+    // risk, which is why the default is 0.
+    if (command.compare(0, 6, "SPEED|") == 0) {
+        int percent = 0;
+        if (std::sscanf(command.c_str() + 6, "%d", &percent) != 1) {
+            tcpserver::send_line("STATUS|usage: SPEED|percent(0-300)");
+            return;
+        }
+        packetlogger::set_speed_boost(percent);
+        char reply[64] = {0};
+        std::snprintf(reply, sizeof(reply), "STATUS|SPEED +%d%%",
+                      packetlogger::speed_boost());
+        tcpserver::send_line(reply);
+        return;
+    }
+
     tcpserver::send_line("STATUS|unknown command: " + command);
 }
 
@@ -351,6 +370,11 @@ DWORD WINAPI main_thread(LPVOID module) {
 
     while (!g_quit) {
         if (server_up && !tcpserver::is_connected()) {
+            // The host is gone (closed or crashed). Never leave a speed patch
+            // in the client: the next host starts from the configured value.
+            if (packetlogger::speed_boost() != 0) {
+                packetlogger::set_speed_boost(0);
+            }
             if (tcpserver::accept_client()) {
                 ntpl::logf("host connected");
                 tcpserver::send_line(status_line());

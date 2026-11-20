@@ -7,8 +7,14 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 278 unittest cases, 3 GTK4 smokes, 36 fake-server bot
-  smokes pass. Build: `make -C linux all test-host`, tests above.
+- **Linux host**: 279 unittest cases, 3 GTK4 smokes, 37 fake-server bot
+  smokes, and the native `speed-test` pass. Build: `make -C linux all
+  test-host`, tests above.
+- **Speed +%** (Path section, default 0): the DLL scales the local player's
+  incoming `cond` speed before the client parses it and keeps its `walk` speed
+  consistent. Client hack, high ban risk; reverts when the GUI disconnects.
+  Needs the 2026-11-20 DLL (a game-client restart/injection), not just a GUI
+  restart.
 - **NosBazar tab** (fourth GUI page): monitor + floor-protected relist ported
   from `TaraJura/Nostale-NB`. It learns the Bibi Basar entity id/option from
   the client's own `npc_req`/`n_run` or DLL log, searches `c_blist` at 2.5 s

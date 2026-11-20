@@ -7,6 +7,7 @@
 # MINGW_CXX, not CXX: CXX is a built-in make variable and would already be
 # set to the host g++, which has no Windows headers.
 MINGW_CXX ?= i686-w64-mingw32-g++
+HOST_CXX  ?= c++
 BUILD     := build
 SRC_DLL  := src/dll
 SRC_INJ  := src/injector
@@ -30,7 +31,7 @@ INJ_OBJECTS := $(patsubst $(SRC_INJ)/%.cpp,$(BUILD)/injector/%.o,$(INJ_SOURCES))
 # changed PacketQueue capacity links against a stale ABI.
 -include $(DLL_OBJECTS:.o=.d) $(INJ_OBJECTS:.o=.d)
 
-.PHONY: all dll injector test-host host-test gui-test bot-test clean check
+.PHONY: all dll injector test-host host-test speed-test gui-test bot-test clean check
 
 all: dll injector
 
@@ -71,13 +72,21 @@ $(BUILD)/HookStubTest.exe: test/hook_stub_test.cpp test/hook_call.S $(SRC_DLL)/h
 host-test:
 	PYTHONPATH=host python3 -m unittest discover -s host/tests -v
 
+# Pure host-side test of the DLL speed-boost packet rewriting (no Wine).
+$(BUILD)/SpeedBoostTest: test/speed_boost_test.cpp $(SRC_DLL)/speedboost.h
+	@mkdir -p $(dir $@)
+	$(HOST_CXX) -std=c++17 -O2 -I$(SRC_DLL) -o $@ $<
+
+speed-test: $(BUILD)/SpeedBoostTest
+	$(BUILD)/SpeedBoostTest
+
 gui-test:
 	./scripts/dev-test-gui.sh
 
 bot-test:
 	./scripts/dev-test-bot.sh
 
-check: all test-host
+check: all test-host speed-test
 	@file $(BUILD)/PacketLogger.dll $(BUILD)/Injector.exe \
 		$(BUILD)/FakeGame.exe $(BUILD)/HookStubTest.exe
 

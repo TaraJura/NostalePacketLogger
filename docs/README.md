@@ -32,7 +32,7 @@ the host differ, the game's packets do not.
 - **Windows tree (`windows/`)** — the original working implementation. Injector
   + DLL + WinForms GUI, named pipes.
 - **Linux tree (`linux/`)** — MinGW DLL + TCP loopback + Python CLI + GTK4 GUI
-  + state engine. Builds cleanly, **278 host tests pass**, the GTK4 window
+  + state engine. Builds cleanly, **279 host tests pass**, the GTK4 window
   passes three headless smokes (packet window, client picker, multi-client
   locks), and the DLL has
   been verified against the **live NosTale client** under Wine 11: both hooks
@@ -63,8 +63,8 @@ the host differ, the game's packets do not.
   range, cast time, cooldown); the whole configuration can be saved/loaded as
   JSON. The fourth **NosBazar** tab monitors the player auction house and can
   relist with a floor, ported from Nostale-NB. `make gui-test` and `make
-  bot-test` pass (36 bot smokes, including the spell rotation, HP/MP recovery,
+  bot-test` pass (37 bot smokes, including the spell rotation, HP/MP recovery,
   finish-kill-before-recovery, loot approach, the NosBazar monitor and relist,
-  and cross-client Follow packet mirroring). See
+  the speed-boost control, and cross-client Follow packet mirroring). See
   [map.md](map.md),
   [bot-config.md](bot-config.md) and [bazar.md](bazar.md).

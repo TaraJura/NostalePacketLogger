@@ -271,6 +271,33 @@ you actually want to travel to the next map. The
 setting is saved as `block_portals`; the live state is in the DLL's status line
 (`portalblock=off|BLOCKED`).
 
+## Speed boost — client-side movement speed
+
+**Speed +%** (Path section, 0–300, default 0) increases the character's walking
+speed. It is not a server buff and not an injected movement packet: the DLL
+rewrites the `cond 1 <charId> … <speed>` packet the server sends for the local
+player **before the client parses it**, so the client's own movement
+controller, its animation and its `walk` packets all use the boosted value. If
+the client still sends the server's original speed in `walk`, the DLL replaces
+that field too; the value is never boosted twice. The boost applies as soon as
+the spin button changes — also for manual play, not only while the bot runs —
+and is saved as `speed_boost` in the JSON configuration. Closing the GUI sends
+`SPEED|0`, and the DLL also reverts on its own when the host disconnects, so a
+crashed GUI cannot leave the client fast. The live value is in the DLL status
+line (`speed=N%`).
+
+Limits and risks:
+
+- The rewrite is in place, so the boosted speed must have the same number of
+  digits as the server's value (`10`→`20` works, `9`→`18` does not). Normal
+  characters walk at 10–12, so the whole 0–300 % range fits; if a speed has a
+  different width the DLL logs a line and leaves the packet alone.
+- The client's speed is server-driven: every incoming `cond` is patched, so
+  the boost stays active while the GUI is attached.
+- **This is a client hack.** The game rules prohibit client manipulation, and
+  bot vendors themselves label speed hacks "high ban risk"; the account risk
+  is the owner's. The default 0 keeps it off.
+
 ## Follow a player — trail a character
 
 Type a player's name (or their char id) in the **Follow** frame and turn
@@ -360,6 +387,7 @@ Example:
   "revive_on_death": false,
   "loop": true,
   "block_portals": false,
+  "speed_boost": 0,
   "follow": false,
   "follow_player": "Follower Friend",
   "follow_attack": false,

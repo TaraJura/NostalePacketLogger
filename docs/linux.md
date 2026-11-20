@@ -280,10 +280,11 @@ both.
 ## Tests
 
 ```bash
-make host-test          # 195 stdlib unit tests: protocol, engine, map, config, spells
+make host-test          # 279 stdlib unit tests: protocol, engine, map, config, spells, bazar, database, mirror
+make speed-test         # DLL speed-boost packet rewriting (native C++, no Wine)
 
 make gui-test           # headless GTK4 window + map surface against a fake stream
-make bot-test           # 36 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, follow nameless/char id, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, follow mirror, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
+make bot-test           # 37 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, follow nameless/char id, portal blocking, speed boost control, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, follow mirror, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
 make all test-host
 ./scripts/dev-test-wine.sh 25
 ```
