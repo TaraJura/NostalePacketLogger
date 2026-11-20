@@ -184,7 +184,7 @@ bool client_speed_get(int& speed, std::string& error)
 }
 
 bool client_speed_set(int speed, int& previous, int& applied,
-                      std::string& error)
+                      std::string& error, bool force)
 {
     previous = 0;
     applied = 0;
@@ -208,9 +208,13 @@ bool client_speed_set(int speed, int& previous, int& applied,
     }
 
     previous = *reinterpret_cast<const std::uint8_t*>(entity + 0xAA);
-    if (previous >= speed) {
-        // Never lower a buffed value; the client's own cond handler will
-        // handle a legitimately lower server speed.
+    if (previous == speed) {
+        applied = previous;
+        return true;
+    }
+    if (!force && previous > speed) {
+        // Never lower a buffed value during normal operation; a forced reset
+        // (boost off, or the server's accepted settle value) may lower it.
         applied = previous;
         return true;
     }

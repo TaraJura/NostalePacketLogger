@@ -66,6 +66,16 @@ bool take_speed_correction(int& settle);
 // Called from the worker thread.
 void speed_maybe_promote(unsigned long now);
 
+// A forced re-apply is pending: boost turned off, a new request started, or
+// the server settled on a lower value. The worker must set the entity even
+// when the new value is lower (the client's entity otherwise stays at the
+// last boosted speed while idle, with no cond to reset it).
+bool take_speed_reset();
+
+// The value for a forced reset: the server base when the boost is off, or
+// base + the effective bonus. 0 when no base is known.
+int speed_reset_target();
+
 // The speed to apply to the local player entity: the last server cond speed
 // plus the configured flat bonus, or 0 when no boost/cond is known. The
 // worker thread calls the client's own setter with this value.

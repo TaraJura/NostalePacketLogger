@@ -409,6 +409,20 @@ DWORD WINAPI main_thread(LPVOID module) {
         if (now - last_speed_tick >= 25) {
             last_speed_tick = now;
             packetlogger::speed_maybe_promote(now);
+            if (packetlogger::take_speed_reset()) {
+                const int reset_target = packetlogger::speed_reset_target();
+                if (reset_target > 0) {
+                    int previous = 0;
+                    int applied = 0;
+                    std::string error;
+                    if (client_speed_set(reset_target, previous, applied,
+                                         error, true) &&
+                        applied != previous) {
+                        ntpl::logf("speed: player actor reset %d -> %d",
+                                   previous, applied);
+                    }
+                }
+            }
             const int target = packetlogger::speed_target();
             if (target > 0) {
                 int previous = 0;

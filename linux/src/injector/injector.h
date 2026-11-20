@@ -11,4 +11,8 @@
 // failure, so a missing 32-bit dependency or a blocked DLL is reported instead
 // of silently doing nothing. The caller must pass an absolute path: the target
 // process resolves relative paths against its own working directory.
-bool InjectDll(DWORD pid, const std::string& dll_path, std::string& error);
+// `force` skips the "packet logger already loaded" guard. Only use it after
+// that logger answered QUIT (it removed its hooks and stays inert); injecting
+// a second live logger into the same process crashes the game.
+bool InjectDll(DWORD pid, const std::string& dll_path, std::string& error,
+               bool force = false);

@@ -53,6 +53,9 @@ void print_usage() {
         "this exe)\n"
         "  --no-tag                         do not number the game window "
         "titles\n"
+        "  --force                          inject even if a logger module is "
+        "already loaded\n"
+        "                                   (only after that logger's QUIT)\n"
         "  --help                           this text\n"
         "\n"
         "Under Wine, use --all: the Windows PID of the client is not the Linux "
@@ -77,9 +80,10 @@ void print_processes(const std::vector<ProcessInfo>& processes) {
     }
 }
 
-int inject_into(const ProcessInfo& process, const std::string& dll_path) {
+int inject_into(const ProcessInfo& process, const std::string& dll_path,
+                bool force) {
     std::string error;
-    if (InjectDll(process.pid, dll_path, error)) {
+    if (InjectDll(process.pid, dll_path, error, force)) {
         std::printf("[+] injected into PID %lu (%s)\n",
                     static_cast<unsigned long>(process.pid),
                     narrow(process.exe_name).c_str());
@@ -90,7 +94,8 @@ int inject_into(const ProcessInfo& process, const std::string& dll_path) {
     return 1;
 }
 
-int interactive(const std::string& dll_path, bool tag_windows) {
+int interactive(const std::string& dll_path, bool tag_windows,
+                bool force) {
     std::vector<ProcessInfo> processes = FindNostaleProcesses();
 
     if (tag_windows) {
@@ -115,12 +120,12 @@ int interactive(const std::string& dll_path, bool tag_windows) {
 
     if (choice == 0) {
         for (const ProcessInfo& process : processes) {
-            failures += inject_into(process, dll_path);
+            failures += inject_into(process, dll_path, force);
         }
     } else if (choice >= 1 &&
                choice <= static_cast<long>(processes.size())) {
         failures += inject_into(processes[static_cast<std::size_t>(choice - 1)],
-                                dll_path);
+                                dll_path, force);
     } else {
         std::printf("[!] invalid selection\n");
         return 1;
@@ -137,6 +142,7 @@ int main(int argc, char** argv) {
     bool inject_all = false;
     bool list_only = false;
     bool tag_windows = true;
+    bool force = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string argument = argv[i];
@@ -155,6 +161,10 @@ int main(int argc, char** argv) {
         }
         if (argument == "--no-tag") {
             tag_windows = false;
+            continue;
+        }
+        if (argument == "--force") {
+            force = true;
             continue;
         }
         if (argument == "--pid" && i + 1 < argc) {
@@ -189,7 +199,7 @@ int main(int argc, char** argv) {
         ProcessInfo process;
         process.pid = static_cast<DWORD>(pid);
         process.exe_name = L"(requested by pid)";
-        return inject_into(process, dll_path);
+        return inject_into(process, dll_path, force);
     }
 
     if (inject_all) {
@@ -205,11 +215,11 @@ int main(int argc, char** argv) {
 
         int failures = 0;
         for (const ProcessInfo& process : processes) {
-            failures += inject_into(process, dll_path);
+            failures += inject_into(process, dll_path, force);
         }
         return failures == 0 ? 0 : 1;
     }
 
     std::printf("DLL: %s\n\n", dll_path.c_str());
-    return interactive(dll_path, tag_windows);
+    return interactive(dll_path, tag_windows, force);
 }

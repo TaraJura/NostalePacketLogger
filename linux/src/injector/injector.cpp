@@ -63,18 +63,21 @@ std::string last_error_text(DWORD code) {
 
 }  // namespace
 
-bool InjectDll(DWORD pid, const std::string& dll_path, std::string& error) {
+bool InjectDll(DWORD pid, const std::string& dll_path, std::string& error,
+               bool force) {
     if (pid == 0 || dll_path.empty()) {
         error = "invalid pid or DLL path";
         return false;
     }
 
-    const std::wstring loaded = find_logger_module(pid);
-    if (!loaded.empty()) {
-        error = "a packet logger is already loaded in this process (" +
-                narrow(loaded) +
-                "); restart the game client before injecting again";
-        return false;
+    if (!force) {
+        const std::wstring loaded = find_logger_module(pid);
+        if (!loaded.empty()) {
+            error = "a packet logger is already loaded in this process (" +
+                    narrow(loaded) +
+                    "); restart the game client before injecting again";
+            return false;
+        }
     }
 
     HANDLE process = OpenProcess(

@@ -64,6 +64,7 @@ std::atomic<int>           g_logged_actor{-1};
 // to the host. The boost always probes +1 first, then applies the requested
 // value; a correction settles at +1 (or 0) instead of feeding a kick loop.
 std::atomic<int>           g_speed_correction{-1};
+std::atomic<bool>          g_speed_reset{false};
 std::atomic<unsigned long> g_self_id{0};
 std::atomic<unsigned long> g_self_id_at{0};
 
@@ -162,6 +163,7 @@ void ntpl_on_packet_recv(const char* packet) {
             g_speed_boost.store(settle, std::memory_order_release);
             g_speed_probe_until.store(0, std::memory_order_relaxed);
             g_speed_correction.store(settle, std::memory_order_release);
+            g_speed_reset.store(true, std::memory_order_release);
             ntpl::logf("speed boost limited to +%d by the server", settle);
         }
     }
@@ -382,6 +384,7 @@ void set_speed_boost(int add) {
     if (add <= 0) {
         g_speed_boost.store(0, std::memory_order_release);
         g_speed_probe_until.store(0, std::memory_order_relaxed);
+        g_speed_reset.store(true, std::memory_order_release);
         if (previous != 0) {
             ntpl::logf("speed boost off");
         }
@@ -393,6 +396,7 @@ void set_speed_boost(int add) {
     g_speed_boost.store(1, std::memory_order_release);
     g_speed_probe_until.store(GetTickCount() + 8000,
                               std::memory_order_relaxed);
+    g_speed_reset.store(true, std::memory_order_release);
     ntpl::logf("speed +%d requested; testing +1 (client-side)%s", add,
                " -- high ban risk");
 }
@@ -412,6 +416,23 @@ bool take_speed_correction(int& settle) {
     }
     settle = value;
     return true;
+}
+
+bool take_speed_reset() {
+    return g_speed_reset.exchange(false, std::memory_order_acq_rel);
+}
+
+int speed_reset_target() {
+    int base = g_cond_base.load(std::memory_order_relaxed);
+    if (base <= 0) {
+        std::string error;
+        if (!client_speed_get(base, error) || base <= 0) {
+            return 0;
+        }
+        g_cond_base.store(base, std::memory_order_relaxed);
+    }
+    return speedboost::target_speed(
+        base, g_speed_boost.load(std::memory_order_relaxed));
 }
 
 void speed_maybe_promote(unsigned long now) {

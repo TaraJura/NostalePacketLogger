@@ -301,7 +301,10 @@ Limits and safety:
   (`STATUS|SPEED CORRECTED`, spin 0). This is the safety net against the
   teleport/kick loop seen on 2026-11-20: a value the server does not accept
   cannot keep correcting the character, and the highest accepted value is
-  kept instead of dropping straight to 0.
+  kept instead of dropping straight to 0. Live 2026-11-20 (base 12): +1 (13)
+  was accepted for the 8 s probe and stayed; +4 (16) was corrected once after
+  ~9.6 s and the DLL settled at +1. Turning the boost off forces the entity
+  back to the server base (12) even while idle.
 - **This is a client hack.** The game rules prohibit client manipulation, and
   bot vendors themselves label speed hacks "high ban risk"; the account risk
   is the owner's. The default 0 keeps it off.

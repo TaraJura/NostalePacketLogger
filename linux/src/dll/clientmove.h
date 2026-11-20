@@ -21,12 +21,13 @@ bool client_position(int& x, int& y, unsigned long& char_id, int& resting,
                      std::string& error);
 
 // Set the local player entity's movement speed through the client's own
-// speed setter (the same function the server's `cond` packet reaches). Only
-// raises the value: a buffed speed is never lowered. `previous`/`applied`
-// are the entity's speed byte before and after. Used by the Speed + control
-// as a safety net; validates the client build prologue before calling.
+// speed setter (the same function the server's `cond` packet reaches).
+// Normally only raises the value (a buffed speed is never lowered); `force`
+// also lowers it, for a boost-off/reset or the server's accepted settle
+// value. `previous`/`applied` are the entity's speed byte before and after.
+// Validates the client build prologue before calling.
 bool client_speed_set(int speed, int& previous, int& applied,
-                      std::string& error);
+                      std::string& error, bool force = false);
 
 // Read the local player entity's current speed byte. Used as the base when
 // the DLL starts after the last `cond`, so +1 applies without waiting for the
