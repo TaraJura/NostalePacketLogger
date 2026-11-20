@@ -28,8 +28,8 @@ unrelated group-invite message is not mislabelled.
 
 ## GUI behaviour
 
-- The **Invite member** frame has a player-name entry and an **Invite**
-  button. Enter sends too.
+- The tab has one compact row: a **Player** entry and an **Invite** button.
+  Enter sends too.
 - Names are sent as one token; empty names and names containing whitespace
   are refused locally.
 - The tab sends the command through the same raw-packet path as the Packets

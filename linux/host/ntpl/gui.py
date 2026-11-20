@@ -2969,11 +2969,11 @@ class Application(Gtk.Application):
 
     def _build_family_page(self) -> Gtk.Widget:
         """Family tools; the first feature is inviting a member."""
-        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        page.set_margin_top(18)
-        page.set_margin_bottom(18)
-        page.set_margin_start(18)
-        page.set_margin_end(18)
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        page.set_margin_top(16)
+        page.set_margin_bottom(16)
+        page.set_margin_start(16)
+        page.set_margin_end(16)
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         heading = Gtk.Label()
@@ -2983,22 +2983,23 @@ class Application(Gtk.Application):
         header.append(
             self._help_button(
                 "Family",
-                "Family tools that work while the bot is stopped. The first "
-                "one invites a player: it sends the client's own "
+                "Invite a player to your family. Type the exact character "
+                "name and press Invite: the tab sends the client's own "
                 "%Familyinvite <name> command. The player must be online and "
-                "accept the invitation, and your character needs permission "
-                "to invite. Manual %Familyinvite commands typed in game are "
-                "picked up here too.",
+                "accept, and your character needs permission to invite. "
+                "Manual %Familyinvite commands typed in game are picked up "
+                "here too.",
             )
         )
         page.append(header)
 
-        invite_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.set_halign(Gtk.Align.START)
+        row.append(Gtk.Label(label="Player"))
         self.family_name_entry = Gtk.Entry()
         self.family_name_entry.set_placeholder_text("player name")
         self.family_name_entry.set_max_length(25)
-        self.family_name_entry.set_hexpand(True)
+        self.family_name_entry.set_width_chars(24)
         self.family_name_entry.connect(
             "activate", lambda *_: self._on_family_invite()
         )
@@ -3009,28 +3010,14 @@ class Application(Gtk.Application):
             "clicked", lambda *_: self._on_family_invite()
         )
         row.append(self.family_invite_button)
-        invite_box.append(row)
+        page.append(row)
 
-        self.family_status = Gtk.Label(label="No invite sent.")
+        self.family_status = Gtk.Label(label="")
         self.family_status.set_xalign(0)
         self.family_status.set_wrap(True)
-        self.family_status.set_max_width_chars(70)
+        self.family_status.set_max_width_chars(60)
         self.family_status.add_css_class("dim-label")
-        invite_box.append(self.family_status)
-
-        page.append(
-            self._frame(
-                "Invite member",
-                invite_box,
-                help_text=(
-                    "Type the exact character name and press Invite (or "
-                    "Enter). The tab sends the client's own "
-                    "%Familyinvite <name> packet, the same one the game "
-                    "sends when you type the command. The server's "
-                    "confirmation appears below; the Bot log records it."
-                ),
-            )
-        )
+        page.append(self.family_status)
         return page
 
     def _set_family_status(self, text: str, css: str | None = None) -> None:
