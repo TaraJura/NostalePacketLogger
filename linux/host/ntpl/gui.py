@@ -827,14 +827,14 @@ class Application(Gtk.Application):
         page.append(self.scrolled)
         return page
 
-    def _help_button(self, title: str, text: str) -> Gtk.MenuButton:
+    def _help_button(self, title: str, text: str) -> Gtk.Button:
         """A compact ? button whose popover explains one section.
 
         UI standard: explanations live here, never as paragraphs in the
         layout. Live values (positions, counts, states) stay as labels.
+        A plain Button (not MenuButton) keeps the label to a single ?.
         """
-        button = Gtk.MenuButton(label="?")
-        button.add_css_class("flat")
+        button = Gtk.Button(label="?")
         button.add_css_class("ntpl-help")
         button.set_tooltip_text(f"What {title} does")
         button.set_valign(Gtk.Align.CENTER)
@@ -856,7 +856,17 @@ class Application(Gtk.Application):
         box.append(heading)
         box.append(body)
         popover.set_child(box)
-        button.set_popover(popover)
+        popover.set_parent(button)
+        button.ntpl_help_popover = popover
+
+        def toggle(*_args) -> None:
+            if popover.get_visible():
+                popover.popdown()
+            else:
+                popover.popup()
+
+        button.connect("clicked", toggle)
+        button.connect("destroy", lambda *_: popover.unparent())
         return button
 
     def _frame(
@@ -3009,7 +3019,7 @@ class Application(Gtk.Application):
             b".recover-banner { background-color: #b71c1c; color: #ffffff;"
             b" padding: 4px 6px; border-radius: 4px; }"
             b".ntpl-help { min-width: 22px; min-height: 22px;"
-            b" padding: 0 4px; border-radius: 11px; }"
+            b" padding: 0; border-radius: 11px; font-weight: bold; }"
             b".bazar-ok { color: #33b34d; }"
             b".bazar-bad { color: #d93025; }"
             b".bazar-warn { color: #b8860b; }"

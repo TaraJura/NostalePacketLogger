@@ -33,7 +33,11 @@ def descendants(widget):
 
 
 def is_help_button(widget) -> bool:
-    return isinstance(widget, Gtk.MenuButton) and widget.get_label() == "?"
+    return (
+        isinstance(widget, Gtk.Button)
+        and widget.get_label() == "?"
+        and hasattr(widget, "ntpl_help_popover")
+    )
 
 
 def inside_popover(widget) -> bool:
