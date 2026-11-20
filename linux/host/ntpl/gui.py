@@ -7460,6 +7460,18 @@ class Application(Gtk.Application):
                         if message.payload.strip() == "CAST ON"
                         else "cast speed normal"
                     )
+                elif message.payload.startswith("unknown command: CAST"):
+                    # The injected DLL predates the Cast speed switch. The
+                    # client-side cooldown zeroing needs 0.2.8, but the bot
+                    # half (server `sr` pacing) is host-side and works now.
+                    note = (
+                        "client DLL is older than 0.2.8: skill cooldowns "
+                        "are not zeroed; the bot still casts at the "
+                        "server's ready signal — restart the game client "
+                        "for the client-side part"
+                    )
+                    self._set_status(note)
+                    self._log_line(note)
                 elif message.payload.startswith(
                     "unknown command: TARGET"
                 ):
