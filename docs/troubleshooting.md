@@ -47,6 +47,8 @@
 | Attacks land on the previously clicked monster | the injected `ncif` cannot change the client's own selection | re-inject the current DLL (0.2.x) and use `TARGET\|id`; check the Bot log for `monster <id> selected ...` |
 | Bot walked onto a portal and changed map | **Block portals** is off, or the injected DLL predates the `preq` drop | turn the toggle on; `host.sh status` must show `portalblock=BLOCKED` after the GUI connects. If `PORTALS\|1` answers `unknown command`, reinject the current DLL. A dropped attempt still appears as `SEND\|preq` in the packet stream/log |
 | `PORTALS|1` answers `unknown command` | old DLL (before 0.2.3) | reinject the current `PacketLogger.dll` (new filename or client restart after `QUIT`) |
+| Speed + keeps falling back to 0, or the GUI says the client DLL is older than 0.2.4 | the game client still runs an older DLL (host-only update) | restart the game client, not just the GUI; 0.2.4 probes +1 and settles at +1 when the server rejects the requested value |
+| Speed + settles at +1 and a higher value is rejected | the server enforces its own `cond` speed | +1 is the highest this server accepts; a client-side boost beyond it is teleported/kicked by the server |
 | Bot cannot reach a target near a map edge | the only route crosses a warp tile and blocking is on | that is the protection working; walk there manually with blocking off, or fight from range |
 
 ## UI

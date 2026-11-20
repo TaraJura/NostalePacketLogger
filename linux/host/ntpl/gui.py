@@ -6232,6 +6232,25 @@ class Application(Gtk.Application):
                         "speed boost disabled: the server corrected the "
                         "player's position"
                     )
+                elif message.payload.startswith("ntpl "):
+                    # The initial DLL status line. Show a clear warning when
+                    # the game client still runs an old DLL: a host update
+                    # alone cannot add the speed-probe logic.
+                    version_text = message.payload.split()[1] \
+                        if len(message.payload.split()) > 1 else ""
+                    try:
+                        version = tuple(
+                            int(part)
+                            for part in version_text.split(".")[:3]
+                        )
+                    except ValueError:
+                        version = ()
+                    self._set_status(message.payload)
+                    if version and version < (0, 2, 4):
+                        self._set_status(
+                            "client DLL is older than 0.2.4 — restart the "
+                            "game client to load the Speed + probe"
+                        )
                 elif message.payload.startswith("SPEED TUNED"):
                     # The server rejected a higher value but accepted +N; the
                     # DLL settled on it. Show the accepted value without
