@@ -273,12 +273,16 @@ setting is saved as `block_portals`; the live state is in the DLL's status line
 
 ## Speed boost — client-side movement speed
 
-**Speed +** (**Malicious** section, 0–50, default 0) adds a flat bonus to the
+**Speed +** (**Malicious** tab, 0–50, default 0) adds a flat bonus to the
 character's walking speed, the same way a NosTale speed buff works (+1, +2,
 +3...). It is not a server buff and not an injected movement packet: the DLL
 adds the bonus to the `cond 1 <charId> … <speed>` packet the server sends for
 the local player **before the client parses it**, so the client's own movement
-controller, its animation and its `walk` packets all use the boosted value. If
+controller, its animation and its `walk` packets all use the boosted value.
+The DLL also calls the client's own entity speed setter on the local player
+actor (`[player+0x20]+0xAA`, the exact byte the walk packet builder reads), so
+the player itself moves even if the client's `cond` list lookup reaches another
+object; the NosMate's `cond 2` is never touched. If
 the client still sends the server's original speed in `walk`, the DLL replaces
 that field too; the bonus is never added twice. The boost applies as soon as
 the spin changes — also for manual play, not only while the bot runs — and is

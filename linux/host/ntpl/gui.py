@@ -686,6 +686,7 @@ class Application(Gtk.Application):
         map_page = self._build_map_page()
         log_page = self._build_log_page()
         bazar_page = self._build_bazar_page()
+        malicious_page = self._build_malicious_page()
 
         self.notebook = Gtk.Notebook()
         self.notebook.append_page(packet_page, Gtk.Label(label="Packets"))
@@ -694,6 +695,7 @@ class Application(Gtk.Application):
         # Appended last: the GUI smokes and the README shots assume Map / Bot
         # is page 1 (Packets is 0).
         self.notebook.append_page(bazar_page, Gtk.Label(label="NosBazar"))
+        self.notebook.append_page(malicious_page, Gtk.Label(label="Malicious"))
         self.notebook.set_vexpand(True)
         self.notebook.connect("switch-page", self._on_page_switch)
 
@@ -2790,44 +2792,6 @@ class Application(Gtk.Application):
         recover_box.append(self.revive_toggle)
         sidebar.append(self._frame("Recovery", recover_box))
 
-        # Malicious: client-side changes that apply immediately and do not
-        # need the bot to run. Kept separate so they are never mistaken for
-        # ordinary bot settings; all of them are high ban risk.
-        malicious_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        malicious_hint = Gtk.Label(
-            label=(
-                "Client-side tricks. These apply as soon as they are set, "
-                "whether or not the bot is running. High ban risk."
-            )
-        )
-        malicious_hint.set_xalign(0)
-        malicious_hint.set_wrap(True)
-        malicious_hint.set_max_width_chars(34)
-        malicious_hint.add_css_class("dim-label")
-        malicious_box.append(malicious_hint)
-        # Speed +: the DLL adds this flat value to the local player's incoming
-        # `cond` speed, the way a NosTale speed buff works (+1, +2, +3...).
-        self.speed_boost_spin = Gtk.SpinButton.new_with_range(0, 50, 1)
-        self.speed_boost_spin.set_value(0)
-        self.speed_boost_spin.set_hexpand(True)
-        self.speed_boost_spin.set_tooltip_text(
-            "Add this value to the client's walking speed, the same way a "
-            "NosTale speed buff works (+1, +2, +3...). 0 = normal. The "
-            "client caps walking speed at 59. The DLL adds the bonus to the "
-            "server's `cond` speed before the client parses it, so movement "
-            "stays smooth. It applies immediately and does not need the bot "
-            "to run. This is a client-side speed hack: it violates the game "
-            "rules and is high ban risk. The DLL reverts to normal if the "
-            "GUI disconnects."
-        )
-        self.speed_boost_spin.connect(
-            "value-changed", lambda *_: self._on_speed_boost_changed()
-        )
-        malicious_box.append(
-            self._field_row(Gtk.Label(label="Speed +"), self.speed_boost_spin)
-        )
-        sidebar.append(self._frame("Malicious", malicious_box))
-
         # Configuration: export/import every bot setting as JSON.
         config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         config_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -2866,6 +2830,68 @@ class Application(Gtk.Application):
         self.map_page_box = page
         self.map_box = map_box
         self.sidebar_scroll = sidebar_scroll
+        return page
+
+    def _build_malicious_page(self) -> Gtk.Widget:
+        """Client-side tricks that apply immediately and need no bot run."""
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        page.set_margin_top(18)
+        page.set_margin_bottom(18)
+        page.set_margin_start(18)
+        page.set_margin_end(18)
+
+        heading = Gtk.Label()
+        heading.set_markup("<b>Malicious</b>")
+        heading.set_xalign(0)
+        page.append(heading)
+
+        hint = Gtk.Label(
+            label=(
+                "Client-side tricks. They apply as soon as they are set, "
+                "whether or not the bot is running. They violate the game "
+                "rules and are high ban risk."
+            )
+        )
+        hint.set_xalign(0)
+        hint.set_wrap(True)
+        hint.set_max_width_chars(70)
+        hint.add_css_class("dim-label")
+        page.append(hint)
+
+        # Speed +: the DLL adds this flat value to the local player's incoming
+        # `cond` speed, the way a NosTale speed buff works (+1, +2, +3...).
+        speed_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        speed_row.append(Gtk.Label(label="Speed +"))
+        self.speed_boost_spin = Gtk.SpinButton.new_with_range(0, 50, 1)
+        self.speed_boost_spin.set_value(0)
+        self.speed_boost_spin.set_width_chars(4)
+        self.speed_boost_spin.set_tooltip_text(
+            "Add this value to the client's walking speed, the same way a "
+            "NosTale speed buff works (+1, +2, +3...). 0 = normal. The "
+            "client caps walking speed at 59. The DLL adds the bonus to the "
+            "server's `cond` speed and sets the local player entity directly, "
+            "so the player (not a NosMate) moves faster. It applies "
+            "immediately and does not need the bot to run. The DLL reverts "
+            "to normal if the GUI disconnects."
+        )
+        self.speed_boost_spin.connect(
+            "value-changed", lambda *_: self._on_speed_boost_changed()
+        )
+        speed_row.append(self.speed_boost_spin)
+        page.append(speed_row)
+
+        details = Gtk.Label(
+            label=(
+                "The value is saved with the bot configuration as "
+                "`speed_boost`. The player's walking speed is raised by this "
+                "many points: 12 + 3 = 15. The client's own limit is 59."
+            )
+        )
+        details.set_xalign(0)
+        details.set_wrap(True)
+        details.set_max_width_chars(70)
+        details.add_css_class("dim-label")
+        page.append(details)
         return page
 
     def _install_css(self) -> None:

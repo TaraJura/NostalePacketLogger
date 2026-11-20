@@ -19,3 +19,11 @@ bool client_move(int x, int y, std::string& error);
 // this after attaching to a character that sat before the host connected.
 bool client_position(int& x, int& y, unsigned long& char_id, int& resting,
                      std::string& error);
+
+// Set the local player entity's movement speed through the client's own
+// speed setter (the same function the server's `cond` packet reaches). Only
+// raises the value: a buffed speed is never lowered. `previous`/`applied`
+// are the entity's speed byte before and after. Used by the Speed + control
+// as a safety net; validates the client build prologue before calling.
+bool client_speed_set(int speed, int& previous, int& applied,
+                      std::string& error);

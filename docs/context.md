@@ -10,7 +10,7 @@ the data layer in [database.md](database.md).
 - **Linux host**: 279 unittest cases, 3 GTK4 smokes, 37 fake-server bot
   smokes, and the native `speed-test` pass. Build: `make -C linux all
   test-host`, tests above.
-- **Speed +** (**Malicious** section, default 0): the DLL adds a flat bonus
+- **Speed +** (**Malicious** tab, default 0): the DLL adds a flat bonus
   (+1, +2, +3...) to the local player's incoming `cond` speed before the
   client parses it and keeps its `walk` speed consistent. Client hack, high ban risk; reverts when the GUI disconnects.
   Needs the 2026-11-20 DLL (a game-client restart/injection), not just a GUI

@@ -56,6 +56,7 @@ std::atomic<int>           g_cond_base{0};
 std::atomic<int>           g_cond_target{0};
 std::atomic<int>           g_logged_target{0};
 std::atomic<int>           g_logged_skip{0};
+std::atomic<int>           g_logged_actor{-1};
 std::atomic<unsigned long> g_self_id{0};
 std::atomic<unsigned long> g_self_id_at{0};
 std::atomic<const char*>   g_last_cond_ptr{nullptr};
@@ -122,10 +123,38 @@ void patch_cond_packet(char* packet) {
 
     g_last_cond_ptr.store(packet, std::memory_order_relaxed);
     g_last_cond_ms.store(now, std::memory_order_relaxed);
+    g_cond_base.store(change.from, std::memory_order_relaxed);
+    g_cond_target.store(change.to, std::memory_order_relaxed);
+
+    // The client's own `cond` handler runs right after this hook. Also set
+    // the local player actor directly: the walk packet builder reads exactly
+    // that entity's speed byte, so the player moves even when the handler's
+    // list lookup reaches a different object (the symptom where only the
+    // NosMate sped up). Only raises a value, never lowers a buff.
+    int previous_speed = 0;
+    int applied_speed = 0;
+    std::string speed_error;
+    if (client_speed_set(change.to, previous_speed, applied_speed,
+                         speed_error)) {
+        if (previous_speed != applied_speed) {
+            const int logged =
+                g_logged_actor.exchange(applied_speed,
+                                        std::memory_order_relaxed);
+            if (logged != applied_speed) {
+                ntpl::logf("speed: player actor speed %d -> %d",
+                           previous_speed, applied_speed);
+            }
+        }
+    } else {
+        const int logged =
+            g_logged_actor.exchange(-1, std::memory_order_relaxed);
+        if (logged != -1) {
+            ntpl::logf("speed: player actor set failed: %s",
+                       speed_error.c_str());
+        }
+    }
 
     if (change.rewrite && speedboost::apply(packet, change)) {
-        g_cond_base.store(change.from, std::memory_order_relaxed);
-        g_cond_target.store(change.to, std::memory_order_relaxed);
         const int previous =
             g_logged_target.exchange(change.to, std::memory_order_relaxed);
         if (previous != change.to) {
@@ -136,11 +165,8 @@ void patch_cond_packet(char* packet) {
     }
 
     // Off, already at the cap, or too narrow for an in-place rewrite (a
-    // one-digit speed cannot become two digits here). Keep the pair current
-    // so a later walk packet is at least not boosted wrongly, and report a
-    // width failure once per server value.
-    g_cond_base.store(change.from, std::memory_order_relaxed);
-    g_cond_target.store(change.to, std::memory_order_relaxed);
+    // one-digit speed cannot become two digits here). The direct actor set
+    // above still applies the speed; report a width failure once per value.
     if (change.to != change.from) {
         const int previous =
             g_logged_skip.exchange(change.from, std::memory_order_relaxed);
@@ -436,6 +462,7 @@ void set_speed_boost(int add) {
     g_cond_target.store(0, std::memory_order_relaxed);
     g_logged_target.store(0, std::memory_order_relaxed);
     g_logged_skip.store(0, std::memory_order_relaxed);
+    g_logged_actor.store(-1, std::memory_order_relaxed);
     g_last_cond_ptr.store(nullptr, std::memory_order_relaxed);
     g_last_cond_ms.store(0, std::memory_order_relaxed);
     if (previous != add) {

@@ -248,16 +248,17 @@ grouped by function:
 - **Loot** — Pickup. The bot walks to eligible drops up to 20 cells away,
   picks them up when adjacent, then resumes the path.
 - **Recovery** — Auto-recover HP/MP and the low-HP/MP thresholds.
-- **Malicious** — client-side changes that take effect immediately, whether
-  or not the bot is running. **Speed +** (0–50, default 0) is a
-  client-side movement-speed bonus: the DLL adds a flat value (+1, +2, +3...)
-  to the local player's incoming `cond` speed before the client parses it and
-  keeps the client's own `walk` speed consistent, so the character walks
-  faster with normal animation. It applies as soon as the spin changes; closing the GUI (or the
-  DLL losing the host) restores normal speed. This is a client hack, high ban
-  risk — see
-  [bot-config.md](bot-config.md#speed-boost--client-side-movement-speed).
 - **Configuration** — Save/Load the whole bot configuration as JSON.
+
+A fifth top-level **Malicious** tab holds client-side tricks that apply
+immediately and do not need the bot. **Speed +** (0–50, default 0) adds a
+flat bonus (+1, +2, +3...) to the local player's incoming `cond` speed and
+also calls the client's own speed setter on the player actor, so the player
+itself walks faster with normal animation. The NosMate (`cond 2`) is not
+touched. It applies as soon as the spin changes; closing the GUI (or the DLL
+losing the host) restores normal speed. This is a client hack, high ban risk
+— see
+[bot-config.md](bot-config.md#speed-boost--client-side-movement-speed).
 
 See [bot-config.md](bot-config.md) for the target filter, spell-rule semantics
 and the export/import schema.

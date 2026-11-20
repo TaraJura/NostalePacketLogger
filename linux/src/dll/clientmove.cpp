@@ -17,6 +17,8 @@
 // when the server sends a correction.
 extern "C" void ntpl_client_move(void* player, std::uint32_t packed,
                                  std::uintptr_t function);
+extern "C" void ntpl_client_speed(void* entity, int speed,
+                                  std::uintptr_t function);
 
 namespace {
 
@@ -26,10 +28,20 @@ namespace {
 constexpr std::uintptr_t kPlayerGlobal = 0x007954B4;
 constexpr std::uintptr_t kMoveFunction = 0x00576920;
 
+// The entity speed setter the client's `cond` handler calls. It writes the
+// speed byte at entity +0xAA (and recomputes the walking timer). The walk
+// packet builder reads that same byte, so setting it moves the player.
+constexpr std::uintptr_t kSpeedFunction = 0x00492938;
+
 // 55 8B EC 83 C4 EC 53 56 57 66 89 4D FA ...  (MoveTo prologue)
 const unsigned char kMoveSignature[] = {
     0x55, 0x8B, 0xEC, 0x83, 0xC4, 0xEC, 0x53, 0x56, 0x57, 0x66, 0x89, 0x4D,
     0xFA,
+};
+
+// 53 83 C4 F8 8B D8 3A 93 AA 00 00 00 ...  (speed setter prologue)
+const unsigned char kSpeedSignature[] = {
+    0x53, 0x83, 0xC4, 0xF8, 0x8B, 0xD8, 0x3A, 0x93, 0xAA, 0x00, 0x00, 0x00,
 };
 
 bool readable(std::uintptr_t address)
@@ -121,5 +133,70 @@ bool client_move(int x, int y, std::string& error)
         (static_cast<std::uint32_t>(static_cast<std::uint16_t>(y)) << 16);
 
     ntpl_client_move(reinterpret_cast<void*>(player), packed, kMoveFunction);
+    return true;
+}
+
+bool client_speed_set(int speed, int& previous, int& applied,
+                      std::string& error)
+{
+    previous = 0;
+    applied = 0;
+    if (speed <= 0 || speed > 59) {
+        error = "SPEED: value out of range";
+        return false;
+    }
+
+    if (IsBadReadPtr(reinterpret_cast<const void*>(kSpeedFunction),
+                     sizeof(kSpeedSignature)) ||
+        std::memcmp(reinterpret_cast<const void*>(kSpeedFunction),
+                    kSpeedSignature, sizeof(kSpeedSignature)) != 0) {
+        error = "SPEED: client build mismatch";
+        return false;
+    }
+
+    // The same chain client_position uses; the entity at manager+0x20 is the
+    // one the walk packet builder (0x00720017) reads its speed from.
+    if (!readable(kPlayerGlobal)) {
+        error = "SPEED: player global not readable";
+        return false;
+    }
+    const std::uintptr_t holder =
+        *reinterpret_cast<const std::uintptr_t*>(kPlayerGlobal);
+    if (!readable(holder)) {
+        error = "SPEED: player holder not readable";
+        return false;
+    }
+    const std::uintptr_t manager =
+        *reinterpret_cast<const std::uintptr_t*>(holder);
+    if (!readable(manager) ||
+        IsBadReadPtr(reinterpret_cast<const void*>(manager + 0x20),
+                     sizeof(std::uintptr_t))) {
+        error = "SPEED: player object not readable";
+        return false;
+    }
+    const std::uintptr_t entity =
+        *reinterpret_cast<const std::uintptr_t*>(manager + 0x20);
+    if (!readable(entity) ||
+        IsBadReadPtr(reinterpret_cast<const void*>(entity + 0xAA), 1) ||
+        IsBadReadPtr(reinterpret_cast<const void*>(entity), 0xC0)) {
+        error = "SPEED: player entity not readable";
+        return false;
+    }
+
+    previous = *reinterpret_cast<const std::uint8_t*>(entity + 0xAA);
+    if (previous >= speed) {
+        // Never lower a buffed value; the client's own cond handler will
+        // handle a legitimately lower server speed.
+        applied = previous;
+        return true;
+    }
+
+    ntpl_client_speed(reinterpret_cast<void*>(entity), speed,
+                      kSpeedFunction);
+    applied = *reinterpret_cast<const std::uint8_t*>(entity + 0xAA);
+    if (applied == previous) {
+        error = "SPEED: client ignored the value";
+        return false;
+    }
     return true;
 }
