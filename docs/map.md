@@ -207,14 +207,7 @@ grouped by function:
   While recovering, a red **RECOVERING** banner states the HP percentage and
   that attacks/movement are paused; all toggle buttons are green when active
   and red when off.
-- **Path** — path summary, Start, Stop, Clear path, Loop, **Draw path** and
-  **Speed +%** (0–300, default 0). Speed +% is a client-side movement-speed
-  boost: the DLL scales the local player's incoming `cond` speed before the
-  client parses it and keeps the client's own `walk` speed consistent, so the
-  character walks faster with normal animation. It applies as soon as the spin
-  changes, not only while the bot runs; closing the GUI (or the DLL losing the
-  host) restores normal speed. This is a client hack, high ban risk — see
-  [bot-config.md](bot-config.md#speed-boost--client-side-movement-speed).
+- **Path** — path summary, Start, Stop, Clear path, Loop and **Draw path**.
   With Draw path off (default), a left click makes the character **walk to
   that cell** along the A* path in short three-cell `MOVE` legs — the same
   legs the bot uses, because a single far MoveTo makes the client jump (and
@@ -255,6 +248,15 @@ grouped by function:
 - **Loot** — Pickup. The bot walks to eligible drops up to 20 cells away,
   picks them up when adjacent, then resumes the path.
 - **Recovery** — Auto-recover HP/MP and the low-HP/MP thresholds.
+- **Malicious** — client-side changes that take effect immediately, whether
+  or not the bot is running. **Speed +%** (0–300, default 0) is a
+  client-side movement-speed boost: the DLL scales the local player's
+  incoming `cond` speed before the client parses it and keeps the client's
+  own `walk` speed consistent, so the character walks faster with normal
+  animation. It applies as soon as the spin changes; closing the GUI (or the
+  DLL losing the host) restores normal speed. This is a client hack, high ban
+  risk — see
+  [bot-config.md](bot-config.md#speed-boost--client-side-movement-speed).
 - **Configuration** — Save/Load the whole bot configuration as JSON.
 
 See [bot-config.md](bot-config.md) for the target filter, spell-rule semantics

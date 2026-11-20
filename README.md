@@ -191,7 +191,7 @@ Level N" wording), and an explicit unknown-vnum option for monsters that
 spawned before injection. **Block portals** (off by default) drops the
 client's own `preq` portal request in the DLL and keeps paths off the warp
 tiles, so a farming loop cannot enter another map even from a tile it is
-already standing on. **Speed +%** (Path section, default 0 = normal) is a
+already standing on. **Speed +%** (**Malicious** section, default 0 = normal) is a
 client-side movement-speed boost: the DLL scales the local player's incoming
 `cond` speed before the client parses it, and keeps the client's own `walk`
 speed consistent, so walking stays smooth. It applies immediately, and the

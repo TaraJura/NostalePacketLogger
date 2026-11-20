@@ -2559,26 +2559,6 @@ class Application(Gtk.Application):
             "toggled", lambda *_: self._on_block_portals_toggled()
         )
         path_box.append(self.block_portal_toggle)
-        # Client-side speed boost (a client hack, high ban risk). The DLL
-        # scales the local player's incoming `cond` speed, which is what the
-        # client uses for its own walking and walk packet; 0 is normal.
-        self.speed_boost_spin = Gtk.SpinButton.new_with_range(0, 300, 10)
-        self.speed_boost_spin.set_value(0)
-        self.speed_boost_spin.set_hexpand(True)
-        self.speed_boost_spin.set_tooltip_text(
-            "Increase this client's walking speed by this percentage while "
-            "the window is attached (0 = normal, 100 = double). The DLL "
-            "scales the server's `cond` speed before the client parses it, so "
-            "movement stays smooth. This is a client-side speed hack: it "
-            "violates the game rules and is high ban risk. The DLL reverts "
-            "to normal if the GUI disconnects."
-        )
-        self.speed_boost_spin.connect(
-            "value-changed", lambda *_: self._on_speed_boost_changed()
-        )
-        path_box.append(
-            self._field_row(Gtk.Label(label="Speed +%"), self.speed_boost_spin)
-        )
         sidebar.append(self._frame("Path", path_box))
 
         # Follow a named player (a mule that trails the character you play).
@@ -2809,6 +2789,43 @@ class Application(Gtk.Application):
         self._bind_toggle_color(self.revive_toggle)
         recover_box.append(self.revive_toggle)
         sidebar.append(self._frame("Recovery", recover_box))
+
+        # Malicious: client-side changes that apply immediately and do not
+        # need the bot to run. Kept separate so they are never mistaken for
+        # ordinary bot settings; all of them are high ban risk.
+        malicious_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        malicious_hint = Gtk.Label(
+            label=(
+                "Client-side tricks. These apply as soon as they are set, "
+                "whether or not the bot is running. High ban risk."
+            )
+        )
+        malicious_hint.set_xalign(0)
+        malicious_hint.set_wrap(True)
+        malicious_hint.set_max_width_chars(34)
+        malicious_hint.add_css_class("dim-label")
+        malicious_box.append(malicious_hint)
+        # Speed +%: the DLL scales the local player's incoming `cond` speed,
+        # which is what the client uses for its own walking and walk packet.
+        self.speed_boost_spin = Gtk.SpinButton.new_with_range(0, 300, 10)
+        self.speed_boost_spin.set_value(0)
+        self.speed_boost_spin.set_hexpand(True)
+        self.speed_boost_spin.set_tooltip_text(
+            "Increase this client's walking speed by this percentage while "
+            "the window is attached (0 = normal, 100 = double). The DLL "
+            "scales the server's `cond` speed before the client parses it, so "
+            "movement stays smooth. It applies immediately and does not need "
+            "the bot to run. This is a client-side speed hack: it violates "
+            "the game rules and is high ban risk. The DLL reverts to normal "
+            "if the GUI disconnects."
+        )
+        self.speed_boost_spin.connect(
+            "value-changed", lambda *_: self._on_speed_boost_changed()
+        )
+        malicious_box.append(
+            self._field_row(Gtk.Label(label="Speed +%"), self.speed_boost_spin)
+        )
+        sidebar.append(self._frame("Malicious", malicious_box))
 
         # Configuration: export/import every bot setting as JSON.
         config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)

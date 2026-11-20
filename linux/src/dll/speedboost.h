@@ -48,10 +48,23 @@ inline bool split(const char* text, Tokens& out)
     if (text == nullptr || *text == '\0' || *text == ' ') {
         return false;
     }
+    // The game hands the hooks CRLF-terminated strings (`... 12\r\n`). The
+    // terminator belongs to the protocol line, not to the last field, so trim
+    // it before splitting; otherwise the speed token parses as "12\r\n" and
+    // every rewrite is silently rejected.
+    std::size_t length = std::strlen(text);
+    while (length > 0 &&
+           (text[length - 1] == '\r' || text[length - 1] == '\n')) {
+        --length;
+    }
+    if (length == 0) {
+        return false;
+    }
+    const char* end = text + length;
     const char* p = text;
-    while (*p != '\0') {
+    while (p < end) {
         const char* start = p;
-        while (*p != '\0' && *p != ' ') {
+        while (p < end && *p != ' ') {
             ++p;
         }
         if (out.count >= kMaxTokens) {
@@ -62,11 +75,11 @@ inline bool split(const char* text, Tokens& out)
         out.items[out.count].length =
             static_cast<std::size_t>(p - start);
         ++out.count;
-        if (*p == ' ') {
+        if (p < end && *p == ' ') {
             ++p;
             // Single spaces only: a double or trailing space is not a packet
             // this code understands, and refusing it is safer than guessing.
-            if (*p == ' ' || *p == '\0') {
+            if (p >= end || *p == ' ') {
                 return false;
             }
         }

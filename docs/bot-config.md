@@ -273,7 +273,7 @@ setting is saved as `block_portals`; the live state is in the DLL's status line
 
 ## Speed boost — client-side movement speed
 
-**Speed +%** (Path section, 0–300, default 0) increases the character's walking
+**Speed +%** (**Malicious** section, 0–300, default 0) increases the character's walking
 speed. It is not a server buff and not an injected movement packet: the DLL
 rewrites the `cond 1 <charId> … <speed>` packet the server sends for the local
 player **before the client parses it**, so the client's own movement

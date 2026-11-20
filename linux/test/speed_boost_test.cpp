@@ -92,6 +92,15 @@ void test_cond_patch()
     change = speedboost::plan_cond("cond 1 7 0 0 98", 100);
     check(change.valid && !change.rewrite,
           "98 -> 196 is refused (field width)");
+
+    // The DLL hook sees CRLF-terminated strings from the game. The line
+    // terminator must not become part of the speed token.
+    change = speedboost::plan_cond("cond 1 7349 0 0 12\r\n", 100);
+    check(change.valid && change.rewrite, "CRLF cond is parsed and rewritten");
+    char crlf[64] = {0};
+    std::strcpy(crlf, "cond 1 7349 0 0 12\r\n");
+    check(speedboost::apply(crlf, change), "CRLF cond rewrite applies");
+    expect_packet(crlf, "cond 1 7349 0 0 24\r\n");
 }
 
 void test_walk_patch()
@@ -131,6 +140,13 @@ void test_walk_patch()
     change = speedboost::plan_walk(buffer, 11, 22);
     check(speedboost::apply(buffer, change), "walk 11 -> 22 applies");
     expect_packet(buffer, "walk 22 123 1 22");
+
+    // CRLF-terminated walk packets (what the send hook actually sees).
+    std::strcpy(buffer, "walk 25 117 0 12\r\n");
+    change = speedboost::plan_walk(buffer, 12, 24);
+    check(change.rewrite, "CRLF walk is parsed");
+    check(speedboost::apply(buffer, change), "CRLF walk rewrite applies");
+    expect_packet(buffer, "walk 25 117 0 24\r\n");
 }
 
 }  // namespace
