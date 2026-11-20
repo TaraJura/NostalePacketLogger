@@ -45,7 +45,8 @@ workflow of [`TaraJura/Nostale-NB`](https://github.com/TaraJura/Nostale-NB):
   pass; the next refresh starts after the configured interval.
 - **Results** — parses the real 15-field `rc_blist` response, keeps the
   cheapest visible listing per item, and shows the seller, gold price, profit
-  (gold per NosMall ND or an NPC-gold markup) and status. Results are sorted
+  (gold per NosMall ND or an NPC-gold markup) and status. Rows are separated by thin rules so each item's **Cost** (ND) and
+  **NB Price** stay aligned with the right row. Results are sorted
   **most profitable first**; the **Only priced** filter (on by default) hides
   rows with no listing/answer yet, so timeouts and idle rows never crowd the
   table. Item names are rendered in full (wrapped, never ellipsized). Rows

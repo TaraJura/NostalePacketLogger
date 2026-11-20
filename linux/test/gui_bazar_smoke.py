@@ -17,7 +17,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import GLib
+from gi.repository import GLib, Gtk
 
 from ntpl.bazar import BazarItem, build_search_packet, load_config
 from ntpl.gui import Application
@@ -156,6 +156,23 @@ def main() -> int:
             app.quit()
         return False
 
+    def separator_count() -> int:
+        """The rule lines the results grid draws (one under the header plus
+        one between each pair of rows)."""
+        box = app.bazar_results_box
+        grid = box.get_first_child() if box is not None else None
+        if grid is None:
+            return 0
+        count = 0
+        child = grid.get_first_child()
+        while child is not None:
+            if isinstance(child, Gtk.Separator) and child.has_css_class(
+                "bazar-sep"
+            ):
+                count += 1
+            child = child.get_next_sibling()
+        return count
+
     def check() -> bool:
         try:
             lines = list(server.received)
@@ -178,6 +195,7 @@ def main() -> int:
             no_register = not any(
                 line.startswith("SEND|c_reg ") for line in lines
             )
+            separators = separator_count()
             config_path = os.environ.get("NTPL_BAZAR_CONFIG")
             saved = False
             if config_path:
@@ -196,13 +214,15 @@ def main() -> int:
                 and profit == "27,596 g/ND"
                 and no_register
                 and saved
+                and separators == 1
                 and app.bazar.mode == "monitor"
             )
             result["detail"] = (
                 f"opened={bool(opened)} init={bool(empty_init)} "
                 f"search={bool(searches)} price={price} seller={seller} "
                 f"profit={profit!r} no_register={no_register} "
-                f"saved={saved} mode={app.bazar.mode} phase={app.bazar.phase} "
+                f"saved={saved} separators={separators} "
+                f"mode={app.bazar.mode} phase={app.bazar.phase} "
                 f"status={app.bazar_status.get_text()!r}"
             )
         except Exception as exc:  # noqa: BLE001

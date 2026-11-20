@@ -2050,7 +2050,25 @@ class Application(Gtk.Application):
             label.set_markup(f"<b>{title}</b>")
             label.set_xalign(align)
             grid.attach(label, column, 0, 1, 1)
-        for row_index, quote in enumerate(visible, start=1):
+
+        # Thin lines between the rows: without them the eye cannot tell which
+        # Cost/ND or NB Price cell belongs to which item in a long list. The
+        # header gets its own line, then each data row is followed by one
+        # except the last (no trailing line).
+        columns = len(headers)
+
+        def separator(row: int) -> None:
+            line = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+            line.add_css_class("bazar-sep")
+            line.set_hexpand(True)
+            line.set_size_request(-1, 1)
+            line.set_margin_top(3)
+            line.set_margin_bottom(3)
+            grid.attach(line, 0, row, columns, 1)
+
+        separator(1)
+        for row_index, quote in enumerate(visible):
+            grid_row = 2 + row_index * 2
             price = "n/a" if quote.price is None else f"{quote.price:,}"
             seller = quote.seller.replace("�", "").strip()
             cells = (
@@ -2105,7 +2123,9 @@ class Application(Gtk.Application):
                     label.set_tooltip_text(
                         " | ".join(quote.listing.raw_fields)
                     )
-                grid.attach(label, column, row_index, 1, 1)
+                grid.attach(label, column, grid_row, 1, 1)
+            if row_index < len(visible) - 1:
+                separator(grid_row + 1)
         self.bazar_results_box.append(grid)
 
     def _bazar_seed_from_log(self) -> None:
@@ -3973,6 +3993,10 @@ class Application(Gtk.Application):
             b".bazar-ok { color: #33b34d; }"
             b".bazar-bad { color: #d93025; }"
             b".bazar-warn { color: #b8860b; }"
+            # Thin visible rules between the NosBazar result rows, so the
+            # eye can follow an item across the Cost/NB Price/Profit columns.
+            b"separator.bazar-sep { background-color: #8f99a4;"
+            b" min-height: 1px; }"
         )
         display = Gdk.Display.get_default()
         if display is not None and hasattr(Gtk.StyleContext, "add_provider_for_display"):

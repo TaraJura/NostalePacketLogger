@@ -37,6 +37,8 @@ The packet formats and live captures are in
      `Tab` is Equip (0), Main (1) or Etc (2); `Min price` is the floor.
    - **Cost** — `NosMall ND` (fractional allowed) or `NPC gold`; this drives
      the profit column. Leave `No cost` for reference-only rows.
+   - Thin rules separate the result rows (and one under the header), so the
+     **Cost** (ND) and **NB Price** columns stay visually tied to their item.
    - The results table is always sorted by profit ratio, highest first. The
      **Only priced** filter (on by default) hides rows with no listing,
      timeout, or no answer yet; untick it to see those rows at the bottom.
