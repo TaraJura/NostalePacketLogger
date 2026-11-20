@@ -264,6 +264,18 @@ risk — see
 See [bot-config.md](bot-config.md) for the target filter, spell-rule semantics
 and the export/import schema.
 
+### UI help standard
+
+Every section explains itself through a small **?** button next to its title:
+sidebar frames, tab toolbars, the map bar, the Malicious tab, and the client /
+NosMall / spell dialogs. The popover says what the section does and how it
+works. The layout itself carries no explanatory paragraphs or hint labels;
+only live values, status lines and short empty states remain, and control
+tooltips are one line. `gui.py` implements this with `_help_button()` and
+`_frame(..., help_text=...)`; `gui_smoke.py` fails if a frame or tab has no
+**?** or if the Malicious page grows static text again. New features and
+sections must follow the same rule.
+
 The layout is responsive: wide windows show map + sidebar side by side; below
 ~1050 px the map moves above the controls. The map redraws are coalesced at
 ~80 ms instead of one redraw per packet. Right-click removes the last waypoint;

@@ -29,6 +29,11 @@ pip install -e linux/host
 ntpl monitor
 ```
 
+The GUI follows one text rule: every section has a **?** button whose popover
+explains it, and no explanatory paragraphs sit in the layout. Use
+`_help_button()` and `_frame(..., help_text=...)` in `gui.py` for new sections;
+`test/gui_smoke.py` enforces it.
+
 The core (`protocol`, `client`, `engine`, `cli`) uses only the standard
 library. The GUI needs PyGObject and GTK4; on Ubuntu install them with apt:
 
@@ -60,9 +65,9 @@ sudo apt install python3-gi gir1.2-gtk-4.0
 From `linux/`:
 
 ```bash
-make host-test      # 279 unittest cases
-make speed-test     # DLL speed-boost packet rewriting (native C++, no Wine)
-make gui-test       # 3 headless GTK4 smokes: packet window, picker, multi-client
+make host-test      # 280 unittest cases
+make speed-test     # DLL speed-boost parsing/clamp (native C++, no Wine)
+make gui-test       # 3 headless GTK4 smokes: packet window + help standard, picker, multi-client
 make bot-test       # 37 smokes: combat, rules/config, recovery, follow, follow mirror, follow nameless/char id, speed boost control, NosBazar monitor/relist/copy, NosMall import filters
 ```
 

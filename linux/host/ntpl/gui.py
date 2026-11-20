@@ -812,15 +812,69 @@ class Application(Gtk.Application):
         self.follow.set_active(True)
         self.follow.set_tooltip_text("Scroll to the newest packet automatically")
         toolbar.append(self.follow)
+        toolbar.append(
+            self._help_button(
+                "Packets",
+                "Captured client traffic, newest first. The filter matches "
+                "opcode or packet text. Send writes a raw packet through the "
+                "DLL. Follow keeps the newest row in view. Clear empties the "
+                "table; the session log stays on disk.",
+            )
+        )
 
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         page.append(toolbar)
         page.append(self.scrolled)
         return page
 
-    @staticmethod
-    def _frame(title: str, child: Gtk.Widget) -> Gtk.Frame:
-        frame = Gtk.Frame(label=title)
+    def _help_button(self, title: str, text: str) -> Gtk.MenuButton:
+        """A compact ? button whose popover explains one section.
+
+        UI standard: explanations live here, never as paragraphs in the
+        layout. Live values (positions, counts, states) stay as labels.
+        """
+        button = Gtk.MenuButton(label="?")
+        button.add_css_class("flat")
+        button.add_css_class("ntpl-help")
+        button.set_tooltip_text(f"What {title} does")
+        button.set_valign(Gtk.Align.CENTER)
+
+        popover = Gtk.Popover()
+        popover.set_has_arrow(True)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+        box.set_margin_start(10)
+        box.set_margin_end(10)
+        heading = Gtk.Label()
+        heading.set_markup(f"<b>{GLib.markup_escape_text(title)}</b>")
+        heading.set_xalign(0)
+        body = Gtk.Label(label=text)
+        body.set_wrap(True)
+        body.set_max_width_chars(46)
+        body.set_xalign(0)
+        box.append(heading)
+        box.append(body)
+        popover.set_child(box)
+        button.set_popover(popover)
+        return button
+
+    def _frame(
+        self,
+        title: str,
+        child: Gtk.Widget,
+        help_text: str | None = None,
+    ) -> Gtk.Frame:
+        if help_text is None:
+            frame = Gtk.Frame(label=title)
+        else:
+            header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            label = Gtk.Label(label=title)
+            label.set_xalign(0)
+            header.append(label)
+            header.append(self._help_button(title, help_text))
+            frame = Gtk.Frame()
+            frame.set_label_widget(header)
         frame.set_child(child)
         return frame
 
@@ -854,13 +908,14 @@ class Application(Gtk.Application):
         clear = Gtk.Button(label="Clear log")
         clear.connect("clicked", lambda *_: self._clear_bot_log())
         toolbar.append(clear)
-        hint = Gtk.Label(
-            label="Bot actions, target selections and DLL errors, newest "
-            "at the bottom."
+        toolbar.append(
+            self._help_button(
+                "Bot log",
+                "Timestamped bot actions, target selections, walks, pickups, "
+                "recovery and DLL errors, newest at the bottom. The same "
+                "lines are mirrored to a per-client log file on disk.",
+            )
         )
-        hint.add_css_class("dim-label")
-        hint.set_xalign(0)
-        toolbar.append(hint)
         box.append(toolbar)
 
         self.bot_log_buffer = Gtk.TextBuffer()
@@ -1579,21 +1634,21 @@ class Application(Gtk.Application):
             lambda entry: self._nosmall_render(entry.get_text()),
         )
         self._nosmall_search = search
-        box.append(search)
-        hint = Gtk.Label(
-            label=(
+        search.set_hexpand(True)
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        top.append(search)
+        top.append(
+            self._help_button(
+                "NosMall catalog",
                 f"{importable} importable NosMall item(s) with a known ND "
                 "cost. Items without an ND cost cannot show a profit and are "
                 "not listed; pets, fairies and partner supplies are excluded. "
                 "To offer another item, add it with New and set its Cost "
-                "first — or maintain the curated price map — then reopen this "
-                "window."
+                "first, or maintain the curated price map, then reopen this "
+                "window.",
             )
         )
-        hint.set_xalign(0)
-        hint.set_wrap(True)
-        hint.add_css_class("dim-label")
-        box.append(hint)
+        box.append(top)
         self._nosmall_status = Gtk.Label(label="")
         self._nosmall_status.set_xalign(0)
         self._nosmall_status.add_css_class("dim-label")
@@ -1613,8 +1668,7 @@ class Application(Gtk.Application):
             label="Add all matching"
         )
         self._nosmall_add_all_button.set_tooltip_text(
-            "Add every group matching the current search in one go. A full "
-            "catalog pass is long: each group is searched with 2.5 s pacing."
+            "Add every matching group; a full pass is paced at 2.5 s."
         )
         self._nosmall_add_all_button.connect(
             "clicked", lambda *_: self._nosmall_add_all()
@@ -1622,10 +1676,7 @@ class Application(Gtk.Application):
         buttons.append(self._nosmall_add_all_button)
         prune = Gtk.Button(label="Remove unpriced & pets")
         prune.set_tooltip_text(
-            "Remove every item from this window's item list that has no ND "
-            "cost, plus every pet, fairy and partner item. Priced ordinary "
-            "items are kept. Click twice to confirm; a running monitor is "
-            "stopped because the item list changes."
+            "Remove unpriced items and pets. Click twice to confirm."
         )
         prune.connect("clicked", lambda *_: self._nosmall_prune())
         buttons.append(prune)
@@ -1813,10 +1864,7 @@ class Application(Gtk.Application):
         )
         if not removed:
             if self._nosmall_status is not None:
-                self._nosmall_status.set_text(
-                    "Nothing to remove: every configured item has an ND "
-                    "cost and none is a pet"
-                )
+                self._nosmall_status.set_text("Nothing to remove.")
             return
         now = time.monotonic()
         armed = (
@@ -1872,17 +1920,9 @@ class Application(Gtk.Application):
         items = self.bazar.config.items
         if not items:
             if self.bazar_results_info is not None:
-                self.bazar_results_info.set_text(
-                    "Cheapest listing per item, most profitable first."
-                )
-            empty = Gtk.Label(
-                label=(
-                    "No items yet — add one with the editor on the right. "
-                    "The search uses item vnums, not the display name."
-                )
-            )
+                self.bazar_results_info.set_text("No items")
+            empty = Gtk.Label(label="No items yet.")
             empty.set_xalign(0)
-            empty.set_wrap(True)
             empty.add_css_class("dim-label")
             self.bazar_results_box.append(empty)
             return
@@ -1906,14 +1946,8 @@ class Application(Gtk.Application):
             self.bazar_results_info.set_text(text)
 
         if not visible:
-            empty = Gtk.Label(
-                label=(
-                    "No priced items yet — wait for the pass or untick "
-                    "'Only priced' to see timeouts and pending items."
-                )
-            )
+            empty = Gtk.Label(label="No priced items yet.")
             empty.set_xalign(0)
-            empty.set_wrap(True)
             empty.add_css_class("dim-label")
             self.bazar_results_box.append(empty)
             return
@@ -2066,9 +2100,7 @@ class Application(Gtk.Application):
         toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         open_button = Gtk.Button(label="Open bazaar")
         open_button.set_tooltip_text(
-            "Replay the Bibi Basar interaction through the client's own send "
-            "path. The NPC entity id and dialog option are learned when you "
-            "open the bazaar by hand once."
+            "Replay the Bibi Basar dialog through the client's send path."
         )
         open_button.connect("clicked", lambda *_: self._bazar_open())
         toolbar.append(open_button)
@@ -2076,8 +2108,7 @@ class Application(Gtk.Application):
         monitor_start = Gtk.Button(label="Monitor Start")
         monitor_start.add_css_class("suggested-action")
         monitor_start.set_tooltip_text(
-            "Search every configured item and show the cheapest listing and "
-            "its gold-per-ND / NPC markup. Sends only search packets."
+            "Search every item; sends search packets only."
         )
         monitor_start.connect("clicked", lambda *_: self._bazar_start_monitor())
         toolbar.append(monitor_start)
@@ -2088,9 +2119,7 @@ class Application(Gtk.Application):
         relist_start = Gtk.Button(label="Relist Start")
         relist_start.add_css_class("destructive-action")
         relist_start.set_tooltip_text(
-            "Search each item, then re-register your inventory stack one gold "
-            "below the cheapest other seller, never below min_price. Requires "
-            "the live-relist checkbox and your character name."
+            "Relist one gold below the cheapest other seller, never below min price."
         )
         relist_start.connect("clicked", lambda *_: self._bazar_start_relist())
         toolbar.append(relist_start)
@@ -2102,6 +2131,17 @@ class Application(Gtk.Application):
         self.bazar_info.set_xalign(0)
         self.bazar_info.set_hexpand(True)
         toolbar.append(self.bazar_info)
+        toolbar.append(
+            self._help_button(
+                "NosBazar",
+                "Search configured bazaar items, see the cheapest listing and "
+                "its profit, and optionally relist your inventory. Monitor "
+                "only searches. Relist changes your prices and needs live "
+                "re-listing, your character name and a positive min price. "
+                "Open bazaar replays the Bibi Basar dialog through the "
+                "client's own send path.",
+            )
+        )
         page.append(toolbar)
 
         body = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
@@ -2112,9 +2152,7 @@ class Application(Gtk.Application):
         result_tools = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL, spacing=6
         )
-        self.bazar_results_info = Gtk.Label(
-            label="Cheapest listing per item, most profitable first."
-        )
+        self.bazar_results_info = Gtk.Label(label="No items")
         self.bazar_results_info.set_xalign(0)
         self.bazar_results_info.set_hexpand(True)
         self.bazar_results_info.add_css_class("dim-label")
@@ -2122,8 +2160,7 @@ class Application(Gtk.Application):
         self.bazar_only_priced = Gtk.CheckButton(label="Only priced")
         self.bazar_only_priced.set_active(True)
         self.bazar_only_priced.set_tooltip_text(
-            "Hide items with no listing, a timeout or no answer yet, so only "
-            "items with a current price remain (most profitable first)"
+            "Show only items with a current price."
         )
         self.bazar_only_priced.connect(
             "toggled", lambda *_: self._bazar_render_results()
@@ -2161,8 +2198,7 @@ class Application(Gtk.Application):
         )
         self.bazar_live_relist.set_active(False)
         self.bazar_live_relist.set_tooltip_text(
-            "Safety gate: Relist Start does nothing unless this is ticked. "
-            "Re-listing spends the listing fee and changes your prices."
+            "Required for Relist Start; changes your prices and spends the fee."
         )
         monitor_box.append(self.bazar_live_relist)
         self.bazar_character_entry = Gtk.Entry()
@@ -2170,8 +2206,7 @@ class Application(Gtk.Application):
         self.bazar_character_entry.set_max_length(40)
         self.bazar_character_entry.set_width_chars(18)
         self.bazar_character_entry.set_tooltip_text(
-            "Used to recognise your own listing so the bot never undercuts "
-            "itself. Filled automatically when you open the bazaar."
+            "Your character, to recognise your own listing."
         )
         self.bazar_npc_entry = Gtk.Entry()
         self.bazar_npc_entry.set_placeholder_text("Bibi entity id")
@@ -2179,9 +2214,7 @@ class Application(Gtk.Application):
         self.bazar_npc_entry.set_max_length(10)
         self.bazar_npc_entry.set_width_chars(10)
         self.bazar_npc_entry.set_tooltip_text(
-            "Entity id of the Bibi Basar NPC ('in 2 793 <id>' or the client's "
-            "own npc_req). Learned automatically when you open the bazaar; "
-            "enter it manually only if you know it."
+            "Bibi Basar entity id; learned when you open the bazaar."
         )
         monitor_box.append(
             self._field_row(
@@ -2199,20 +2232,20 @@ class Application(Gtk.Application):
                 Gtk.Label(label="Refresh (s)"), self.bazar_refresh_spin
             )
         )
-        monitor_hint = Gtk.Label(
-            label=(
-                "Open the bazaar once by hand (talk to Bibi Basar → NosBazar) "
-                "so the client id and dialog option can be learned. Searches "
-                "are paced at 2.5 s; all-timeout passes back off and retry "
-                "after the refresh interval."
+        right.append(
+            self._frame(
+                "Monitor",
+                monitor_box,
+                help_text=(
+                    "Open the bazaar once by hand (talk to Bibi Basar -> "
+                    "NosBazar) so the Bibi entity id and dialog option are "
+                    "learned. Searches are paced at 2.5 s; a pass where every "
+                    "item times out retries after the refresh interval. "
+                    "Character is used to recognise your own listing so the "
+                    "bot never undercuts itself."
+                ),
             )
         )
-        monitor_hint.set_xalign(0)
-        monitor_hint.set_wrap(True)
-        monitor_hint.set_max_width_chars(40)
-        monitor_hint.add_css_class("dim-label")
-        monitor_box.append(monitor_hint)
-        right.append(self._frame("Monitor", monitor_box))
 
         items_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.bazar_items_info = Gtk.Label(label="0 items")
@@ -2238,8 +2271,7 @@ class Application(Gtk.Application):
         )
         import_item = Gtk.Button(label="Import NosMall…")
         import_item.set_tooltip_text(
-            "Browse the client's full NosMall catalog (name + item vnums) "
-            "and add a group with its c_blist search packet"
+            "Add a NosMall group with its c_blist search packet."
         )
         import_item.connect("clicked", lambda *_: self._open_nosmall_picker())
         new_item = Gtk.Button(label="New")
@@ -2252,9 +2284,31 @@ class Application(Gtk.Application):
         item_buttons.append(new_item)
         item_buttons.append(delete_item)
         items_box.append(item_buttons)
-        right.append(self._frame("Items", items_box))
+        right.append(
+            self._frame(
+                "Items",
+                items_box,
+                help_text=(
+                    "The items Monitor searches and Relist offers. Import "
+                    "NosMall adds a whole catalog group with a ready c_blist "
+                    "packet; New and Delete edit this list. The left side "
+                    "shows the cheapest listing per item, most profitable "
+                    "first."
+                ),
+            )
+        )
 
-        right.append(self._frame("Item editor", self._build_bazar_editor()))
+        right.append(
+            self._frame(
+                "Item editor",
+                self._build_bazar_editor(),
+                help_text=(
+                    "One bazaar item. Relist needs Item vnum, Tab and a "
+                    "positive Min price. Raw packet overrides Search vnums. "
+                    "Cost is the ND or gold basis used to compute profit."
+                ),
+            )
+        )
 
         config_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=6
@@ -2280,19 +2334,18 @@ class Application(Gtk.Application):
         config_row.append(save_button)
         config_row.append(reload_button)
         config_box.append(config_row)
-        config_hint = Gtk.Label(
-            label=(
-                "Saved automatically per game client as bazar-<pid>.json. "
-                "Copy it to bazar.json to use the same items in another "
-                "client."
+        right.append(
+            self._frame(
+                "Configuration",
+                config_box,
+                help_text=(
+                    "Saved automatically per game client as bazar-<pid>.json. "
+                    "Copy it to bazar.json to use the same items in another "
+                    "client. Reload discards unsaved edits and reads the JSON "
+                    "file again."
+                ),
             )
         )
-        config_hint.set_xalign(0)
-        config_hint.set_wrap(True)
-        config_hint.set_max_width_chars(40)
-        config_hint.add_css_class("dim-label")
-        config_box.append(config_hint)
-        right.append(self._frame("Configuration", config_box))
 
         right_scroll.set_child(right)
         body.set_end_child(right_scroll)
@@ -2327,8 +2380,7 @@ class Application(Gtk.Application):
         name_entry = entry("name", "display name", 18)
         copy_name = Gtk.Button(label="Copy")
         copy_name.set_tooltip_text(
-            "Copy the item name to the clipboard (also available by "
-            "right-clicking an item row or a result row)"
+            "Copy the item name."
         )
         copy_name.connect(
             "clicked", lambda *_: self._copy_text(name_entry.get_text())
@@ -2346,8 +2398,7 @@ class Application(Gtk.Application):
         )
         raw = entry("raw", "optional full c_blist …", 18)
         raw.set_tooltip_text(
-            "Advanced: a captured c_blist packet wins over Search vnums. "
-            "Leave it empty for the normal vnum search."
+            "A captured c_blist overrides Search vnums."
         )
         box.append(
             self._field_row(Gtk.Label(label="Raw packet"), raw)
@@ -2434,17 +2485,6 @@ class Application(Gtk.Application):
         buttons.append(save)
         buttons.append(clear)
         box.append(buttons)
-        editor_hint = Gtk.Label(
-            label=(
-                "Relist needs Item vnum + Tab + a Min price floor. Items "
-                "without those still work in Monitor."
-            )
-        )
-        editor_hint.set_xalign(0)
-        editor_hint.set_wrap(True)
-        editor_hint.set_max_width_chars(40)
-        editor_hint.add_css_class("dim-label")
-        box.append(editor_hint)
         return box
 
     def _build_map_page(self):
@@ -2463,6 +2503,15 @@ class Application(Gtk.Application):
         self.map_info.set_xalign(0)
         self.map_info.set_hexpand(True)
         top.append(self.map_info)
+        top.append(
+            self._help_button(
+                "Map",
+                "The client's own map with live players, monsters, NPCs, "
+                "drops, portals and time-space stones. Hover for names. A "
+                "click walks there; with Draw path on, clicks build a route "
+                "instead. The legend below the map is the colour key.",
+            )
+        )
         map_box.append(top)
 
         self.map_area = Gtk.DrawingArea()
@@ -2518,7 +2567,17 @@ class Application(Gtk.Application):
         self.recover_banner.set_max_width_chars(38)
         self.recover_banner.set_visible(False)
         char_box.append(self.recover_banner)
-        sidebar.append(self._frame("Character", char_box))
+        sidebar.append(
+            self._frame(
+                "Character",
+                char_box,
+                help_text=(
+                    "Live HP/MP, position and char id. The red banner appears "
+                    "while the bot is recovering and says why combat is "
+                    "paused."
+                ),
+            )
+        )
 
         # Path.
         path_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -2546,11 +2605,7 @@ class Application(Gtk.Application):
         self.draw_path_toggle = Gtk.ToggleButton(label="Draw path")
         self.draw_path_toggle.set_active(False)
         self.draw_path_toggle.set_tooltip_text(
-            "On: the first map click sets the route start (cyan ring), later "
-            "clicks add waypoints. Start joins the route from wherever the "
-            "character stands — at the nearest leg — and follows it; the "
-            "start point is not walked to. Off: a map click walks the "
-            "character there immediately."
+            "First click sets the route start; later clicks add waypoints."
         )
         self._bind_toggle_color(self.draw_path_toggle)
         path_box.append(self.draw_path_toggle)
@@ -2559,29 +2614,34 @@ class Application(Gtk.Application):
         # unless the user opts in for farming.
         self.block_portal_toggle.set_active(False)
         self.block_portal_toggle.set_tooltip_text(
-            "Keep the character off map portals while farming: A* paths "
-            "route around warp tiles, a map click on one is refused, and "
-            "every MOVE is checked against the portal cells, so the bot "
-            "cannot accidentally enter another map."
+            "Keep paths and MOVE off portal tiles while farming."
         )
         self._bind_toggle_color(self.block_portal_toggle)
         self.block_portal_toggle.connect(
             "toggled", lambda *_: self._on_block_portals_toggled()
         )
         path_box.append(self.block_portal_toggle)
-        sidebar.append(self._frame("Path", path_box))
+        sidebar.append(
+            self._frame(
+                "Path",
+                path_box,
+                help_text=(
+                    "Start follows the drawn route from the nearest leg and "
+                    "repeats it while Loop is on; Stop pauses, Clear path "
+                    "removes it. Draw path: the first map click sets the "
+                    "route start, later clicks add waypoints. Off, a map "
+                    "click walks there once. Block portals keeps A* and MOVE "
+                    "off portal tiles so farming cannot change maps."
+                ),
+            )
+        )
 
         # Follow a named player (a mule that trails the character you play).
         follow_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.follow_player_toggle = Gtk.ToggleButton(label="Follow player")
         self.follow_player_toggle.set_active(False)
         self.follow_player_toggle.set_tooltip_text(
-            "Keep the character near the named player: it stands up and "
-            "walks toward them. While this is on it does no normal combat, "
-            "recovery or drawn path; it picks up loot near the player when "
-            "the Pickup toggle is on, and attacks the player's own target "
-            "if the checkbox below is on. Type the player's name, or their "
-            "char id, and press Start."
+            "Trail a player by name or char id."
         )
         self._bind_toggle_color(self.follow_player_toggle)
         self.follow_player_entry = Gtk.Entry()
@@ -2592,32 +2652,35 @@ class Application(Gtk.Application):
         )
         self.follow_attack_check.set_active(False)
         self.follow_attack_check.set_tooltip_text(
-            "While following, also attack the monster the followed player is "
-            "attacking (their latest `su`) as soon as it is inside the "
-            "skill's range with a clear line — also while still walking to "
-            "the player; following resumes between casts. Nothing else is "
-            "attacked; combat, pickup and recovery stay off."
+            "Also attack the monster that player is fighting."
         )
         self.follow_mirror_check = Gtk.CheckButton(
             label="Mirror movement & spells"
         )
         self.follow_mirror_check.set_active(False)
         self.follow_mirror_check.set_tooltip_text(
-            "Replay the followed character's own walk and skill packets. "
-            "Every attached client publishes its outgoing movement and "
-            "spells to the shared mirror bus (~/.cache/ntpl/mirror), so a "
-            "second client can shadow it exactly across separate GUI "
-            "processes; the server's `mv`/`su` broadcasts are the fallback. "
-            "Self-target spells are retargeted from the player's char id to "
-            "the follower's own id. Only skills the follower has learned are "
-            "cast. Use together with Follow player."
+            "Replay the followed player's walk and spells."
         )
         follow_box.append(
             self._field_row(self.follow_player_toggle, self.follow_player_entry)
         )
         follow_box.append(self.follow_attack_check)
         follow_box.append(self.follow_mirror_check)
-        sidebar.append(self._frame("Follow", follow_box))
+        sidebar.append(
+            self._frame(
+                "Follow",
+                follow_box,
+                help_text=(
+                    "Type a player name or char id and press Start: the "
+                    "character stands and walks toward them, ignoring normal "
+                    "combat, recovery and the drawn path. Pickup still "
+                    "collects drops near the player. Attack the same target "
+                    "also attacks the monster that player is fighting. Mirror "
+                    "movement & spells replays their walk and casts on the "
+                    "shared mirror bus, across separate GUI processes."
+                ),
+            )
+        )
 
         # Combat.
         combat_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -2643,11 +2706,21 @@ class Application(Gtk.Application):
         self.combat_info.set_wrap(True)
         self.combat_info.add_css_class("dim-label")
         self.combat_info.set_tooltip_text(
-            "range, cast time, cooldown and MP from Skill.dat for the skill "
-            "the bot is using; skill 0 follows the equipped SP card"
+            "Range, cast, cooldown and MP from Skill.dat."
         )
         combat_box.append(self.combat_info)
-        sidebar.append(self._frame("Combat", combat_box))
+        sidebar.append(
+            self._frame(
+                "Combat",
+                combat_box,
+                help_text=(
+                    "Auto-attack fights monsters in range with the equipped "
+                    "SP card's basic attack (slot 0). Retaliate puts the "
+                    "monster that is hitting you first. The line below is the "
+                    "skill's range, cast time, cooldown and MP from Skill.dat."
+                ),
+            )
+        )
 
         # Targets: restrict auto-attack to selected monster templates.
         target_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -2665,9 +2738,7 @@ class Application(Gtk.Application):
             label="Also attack monsters with unknown vnum"
         )
         self.attack_unknown_toggle.set_tooltip_text(
-            "Monsters that spawned before the DLL was injected have no `in` "
-            "packet in the log, so their vnum cannot be matched. Enable this "
-            "to attack them anyway in 'Only selected' mode."
+            "Also attack monsters whose vnum is unknown."
         )
         target_box.append(self.attack_unknown_toggle)
         self.target_search = Gtk.SearchEntry()
@@ -2708,7 +2779,18 @@ class Application(Gtk.Application):
         self.target_info.set_max_width_chars(38)
         self.target_info.add_css_class("dim-label")
         target_box.append(self.target_info)
-        sidebar.append(self._frame("Targets", target_box))
+        sidebar.append(
+            self._frame(
+                "Targets",
+                target_box,
+                help_text=(
+                    "Restrict auto-attack and Retaliate to monster templates "
+                    "(vnums). Only selected and All except selected use the "
+                    "list below. Unknown vnum covers monsters that spawned "
+                    "before the logger attached, so their vnum is unknown."
+                ),
+            )
+        )
 
         # Spells: conditional cast rules, evaluated top to bottom.
         spell_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -2731,20 +2813,18 @@ class Application(Gtk.Application):
         spell_buttons.append(add_spell)
         spell_buttons.append(add_blank)
         spell_box.append(spell_buttons)
-        spell_hint = Gtk.Label(
-            label=(
-                "Requires Auto-attack. Rules execute top to bottom; each "
-                "fires when its condition is true and its cooldown is over. "
-                "Use Always for a rotation. No match falls back to Skill in "
-                "Combat."
+        sidebar.append(
+            self._frame(
+                "Spells",
+                spell_box,
+                help_text=(
+                    "Requires Auto-attack. Rules execute top to bottom; each "
+                    "fires when its condition is true and its cooldown is "
+                    "over. Use Always for a rotation. When no rule fires, the "
+                    "basic attack is used."
+                ),
             )
         )
-        spell_hint.set_xalign(0)
-        spell_hint.set_wrap(True)
-        spell_hint.set_max_width_chars(34)
-        spell_hint.add_css_class("dim-label")
-        spell_box.append(spell_hint)
-        sidebar.append(self._frame("Spells", spell_box))
 
         # Loot.
         loot_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -2755,7 +2835,17 @@ class Application(Gtk.Application):
         )
         self._bind_toggle_color(self.pickup_toggle)
         loot_box.append(self._field_row(self.pickup_toggle))
-        sidebar.append(self._frame("Loot", loot_box))
+        sidebar.append(
+            self._frame(
+                "Loot",
+                loot_box,
+                help_text=(
+                    "Pick up your own and free drops within 10 cells, also "
+                    "during combat. Another player's protected drop is "
+                    "skipped."
+                ),
+            )
+        )
 
         # Recovery.
         recover_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -2792,13 +2882,23 @@ class Application(Gtk.Application):
         self.revive_toggle = Gtk.ToggleButton(label="Revive on death")
         self.revive_toggle.set_active(False)
         self.revive_toggle.set_tooltip_text(
-            "Accept the in-place revival dialog (Continue here? You'll "
-            "need 10 Seeds of Power) and resume. Off: the bot stops when "
-            "the character dies and you revive manually."
+            "Accept the revival dialog (10 Seeds of Power) and resume."
         )
         self._bind_toggle_color(self.revive_toggle)
         recover_box.append(self.revive_toggle)
-        sidebar.append(self._frame("Recovery", recover_box))
+        sidebar.append(
+            self._frame(
+                "Recovery",
+                recover_box,
+                help_text=(
+                    "Sit and regenerate when HP or MP falls below the "
+                    "threshold; the current kill is finished first. Revive on "
+                    "death accepts the in-place revival dialog (Continue "
+                    "here? You'll need 10 Seeds of Power) and resumes. Off "
+                    "stops the bot at death."
+                ),
+            )
+        )
 
         # Configuration: export/import every bot setting as JSON.
         config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -2818,7 +2918,17 @@ class Application(Gtk.Application):
         self.config_info.set_max_width_chars(38)
         self.config_info.add_css_class("dim-label")
         config_box.append(self.config_info)
-        sidebar.append(self._frame("Configuration", config_box))
+        sidebar.append(
+            self._frame(
+                "Configuration",
+                config_box,
+                help_text=(
+                    "Save or load the whole bot setup as JSON: route, "
+                    "targets, spells, follow, recovery and toggles. The line "
+                    "below is the last save or load result."
+                ),
+            )
+        )
 
         sidebar_scroll = Gtk.ScrolledWindow()
         sidebar_scroll.set_child(sidebar)
@@ -2848,23 +2958,25 @@ class Application(Gtk.Application):
         page.set_margin_start(18)
         page.set_margin_end(18)
 
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         heading = Gtk.Label()
         heading.set_markup("<b>Malicious</b>")
         heading.set_xalign(0)
-        page.append(heading)
-
-        hint = Gtk.Label(
-            label=(
-                "Client-side tricks. They apply as soon as they are set, "
-                "whether or not the bot is running. They violate the game "
-                "rules and are high ban risk."
+        header.append(heading)
+        header.append(
+            self._help_button(
+                "Malicious",
+                "Client-side tweaks that need no bot. Speed + raises the "
+                "local player's walking speed by that many flat points "
+                "(12 + 3 = 15) and applies immediately, in manual play too. "
+                "The DLL clamps outgoing walk packets to the server's normal "
+                "speed, keeps the client faster, and turns the value down or "
+                "off if the server corrects the player. The client's limit is "
+                "59. Saved as speed_boost. These tweaks violate the game "
+                "rules and are high ban risk.",
             )
         )
-        hint.set_xalign(0)
-        hint.set_wrap(True)
-        hint.set_max_width_chars(70)
-        hint.add_css_class("dim-label")
-        page.append(hint)
+        page.append(header)
 
         # Speed +: the DLL adds this flat value to the local player's incoming
         # `cond` speed, the way a NosTale speed buff works (+1, +2, +3...).
@@ -2874,34 +2986,13 @@ class Application(Gtk.Application):
         self.speed_boost_spin.set_value(0)
         self.speed_boost_spin.set_width_chars(4)
         self.speed_boost_spin.set_tooltip_text(
-            "Add this value to the client's walking speed, the same way a "
-            "NosTale speed buff works (+1, +2, +3...). 0 = normal. The "
-            "client caps walking speed at 59. The DLL sets the local player "
-            "entity directly, so the player (not a NosMate) moves faster. "
-            "It applies immediately and does not need the bot to run. The "
-            "DLL clamps the outgoing walk speed to the server's normal value "
-            "and keeps the client faster. If the server corrects the player, "
-            "the DLL turns the value down or off. The DLL reverts to normal "
-            "if the GUI disconnects."
+            "Flat walking-speed bonus; 0 = normal. Applies immediately."
         )
         self.speed_boost_spin.connect(
             "value-changed", lambda *_: self._on_speed_boost_changed()
         )
         speed_row.append(self.speed_boost_spin)
         page.append(speed_row)
-
-        details = Gtk.Label(
-            label=(
-                "The value is saved with the bot configuration as "
-                "`speed_boost`. The player's walking speed is raised by this "
-                "many points: 12 + 3 = 15. The client's own limit is 59."
-            )
-        )
-        details.set_xalign(0)
-        details.set_wrap(True)
-        details.set_max_width_chars(70)
-        details.add_css_class("dim-label")
-        page.append(details)
         return page
 
     def _install_css(self) -> None:
@@ -2917,6 +3008,8 @@ class Application(Gtk.Application):
             b"button.ntpl-off:hover { background-color: #d32f2f; }"
             b".recover-banner { background-color: #b71c1c; color: #ffffff;"
             b" padding: 4px 6px; border-radius: 4px; }"
+            b".ntpl-help { min-width: 22px; min-height: 22px;"
+            b" padding: 0 4px; border-radius: 11px; }"
             b".bazar-ok { color: #33b34d; }"
             b".bazar-bad { color: #d93025; }"
             b".bazar-warn { color: #b8860b; }"
@@ -3406,7 +3499,18 @@ class Application(Gtk.Application):
 
         search = Gtk.SearchEntry()
         search.set_placeholder_text("Search spell name or vnum")
-        box.append(search)
+        search.set_hexpand(True)
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        top.append(search)
+        top.append(
+            self._help_button(
+                "spell picker",
+                "Active spells scanned from the client's NSgtdData.NOS / "
+                "Skill.dat, with slot status when the learned skill list is "
+                "known. Pick one to add it as a rule.",
+            )
+        )
+        box.append(top)
 
         listbox = Gtk.ListBox()
         listbox.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -3417,16 +3521,11 @@ class Application(Gtk.Application):
         scroller.set_vexpand(True)
         box.append(scroller)
 
-        info = Gtk.Label(
-            label=(
-                "Scanned from NSgtdData.NOS / Skill.dat. "
-                "Active spells only."
-            )
-        )
+        info = Gtk.Label(label="")
         info.set_xalign(0)
-        info.set_wrap(True)
         info.add_css_class("dim-label")
         box.append(info)
+
         window.set_child(box)
 
         def refresh() -> None:
@@ -3441,7 +3540,7 @@ class Application(Gtk.Application):
                 row.set_selectable(False)
                 row.set_activatable(False)
                 listbox.append(row)
-                info.set_text("Decoding NSgtdData.NOS / Skill.dat…")
+                info.set_text("Decoding Skill.dat…")
                 return
             query = search.get_text().strip().lower()
             known = self._known_skills()
@@ -3522,9 +3621,7 @@ class Application(Gtk.Application):
                 )
             else:
                 info.set_text(
-                    f"{len(spells)} spell(s) matched · slots unknown — the "
-                    "learned list is sent at login; use a spell once or "
-                    "relog with the logger attached"
+                    f"{len(spells)} matched · slots unknown (relog to learn)"
                 )
 
         search.connect("search-changed", lambda *_: refresh())
@@ -3620,8 +3717,7 @@ class Application(Gtk.Application):
         cooldown.set_digits(1)
         cooldown.set_value(rule.cooldown)
         cooldown.set_tooltip_text(
-            "seconds before this rule may fire again; the spell's own "
-            "Skill.dat cooldown is enforced even when this is 0"
+            "Seconds before this rule may fire again; Skill.dat cooldown still applies."
         )
         target = Gtk.DropDown.new_from_strings(["Monster", "Self"])
         target_index = (
@@ -5828,22 +5924,20 @@ class Application(Gtk.Application):
         else:
             heading.set_markup("<b>No NosTale client found</b>")
         heading.set_xalign(0)
-        box.append(heading)
-
-        hint = Gtk.Label(
-            label=(
-                "Choose the window to attach to. Listing marks every game "
-                "window with a number in its title bar (NosTale [#2]); pick "
-                "the row with the same number. A client without the logger "
-                "is injected automatically (Inject && connect). Clients "
-                "attached by another GUI are disabled."
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        header.append(heading)
+        header.append(
+            self._help_button(
+                "client picker",
+                "Choose the game window to attach to. Listing marks every "
+                "game window with a number in its title bar (NosTale [#2]); "
+                "pick the row with the same number. A client without the "
+                "logger is injected automatically (Inject & connect). "
+                "Clients attached by another GUI are disabled. If the list is "
+                "empty, start the game and press Refresh.",
             )
         )
-        hint.set_wrap(True)
-        hint.set_xalign(0)
-        hint.set_max_width_chars(56)
-        hint.add_css_class("dim-label")
-        box.append(hint)
+        box.append(header)
 
         if clients:
             listbox = Gtk.ListBox()
@@ -5892,19 +5986,6 @@ class Application(Gtk.Application):
             box.append(listbox)
             if first is not None:
                 listbox.select_row(first)
-        else:
-            empty = Gtk.Label(
-                label=(
-                    "Start the game, then press Refresh. The window lists "
-                    "every NostaleClientX.exe window in the running Wine "
-                    "prefix."
-                )
-            )
-            empty.set_wrap(True)
-            empty.set_xalign(0)
-            empty.add_css_class("dim-label")
-            box.append(empty)
-
         self._client_dialog_status = Gtk.Label(
             label=" · ".join(discovery.errors)
         )

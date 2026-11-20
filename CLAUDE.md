@@ -68,7 +68,7 @@ PYTHONPATH=linux/host python3 -m ntpl db stats            # row counts
 PYTHONPATH=linux/host python3 -m ntpl db packets --opcode c_blist
 PYTHONPATH=linux/host python3 -m ntpl db nosmall --export ~/bazar-nosmall-all.json --all
 PYTHONPATH=linux/host python3 -m ntpl headless --token-file ~/.config/ntpl/token --game-dir <Nostale dir>  # clientless login
-make -C linux gui-test              # headless GTK4 + map surface smoke
+make -C linux gui-test              # headless GTK4 + map surface + help-standard smoke
 make -C linux bot-test              # 31 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, portal blocking, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, NosBazar monitor
 make -C linux clean
 
@@ -318,6 +318,12 @@ Two discovery/injection safety rules (both live-tested 2026-11-18):
   `~/.git`; never commit there and never run `gc`/`clean` on it.
 - **Privacy:** never read, copy or write credentials, session data, or the
   contents of `usercache-*` / `webcache-*`.
+- **GUI text:** explanations never sit in the layout. Every section, frame,
+  tab and dialog gets a compact **?** button whose popover says what it does
+  and how it works — use `_help_button()` and `_frame(..., help_text=...)` in
+  `gui.py`. Keep live status values and short empty states; keep control
+  tooltips to one line. `gui_smoke.py` enforces this, so update the help text
+  with every new feature instead of adding a paragraph.
 - **Terms of service:** Gameforge prohibits automation. The owner accepts the
   account risk; do not add detection-evasion features.
 

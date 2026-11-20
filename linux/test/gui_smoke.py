@@ -19,9 +19,30 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import GLib
+from gi.repository import GLib, Gtk
 
 from ntpl.gui import Application, LOG_MAX_LINES
+
+
+def descendants(widget):
+    child = widget.get_first_child()
+    while child is not None:
+        yield child
+        yield from descendants(child)
+        child = child.get_next_sibling()
+
+
+def is_help_button(widget) -> bool:
+    return isinstance(widget, Gtk.MenuButton) and widget.get_label() == "?"
+
+
+def inside_popover(widget) -> bool:
+    parent = widget.get_parent()
+    while parent is not None:
+        if isinstance(parent, Gtk.Popover):
+            return True
+        parent = parent.get_parent()
+    return False
 
 
 def start_fake_server() -> int:
@@ -148,6 +169,45 @@ def main() -> int:
                 and app.stats_area is not None
             )
 
+            # UI standard: every section explains itself through a ? popover;
+            # no explanatory paragraphs live in the layout. Every frame must
+            # carry a help button, every tab at least one, and the Malicious
+            # page must stay text-light.
+            pages = [
+                app.notebook.get_nth_page(i)
+                for i in range(app.notebook.get_n_pages())
+            ]
+            widgets = [w for page in pages for w in descendants(page)]
+            frames = [w for w in widgets if isinstance(w, Gtk.Frame)]
+            frames_helped = [
+                frame
+                for frame in frames
+                if frame.get_label_widget() is not None
+                and any(
+                    is_help_button(w)
+                    for w in descendants(frame.get_label_widget())
+                )
+            ]
+            pages_helped = [
+                page
+                for page in pages
+                if any(is_help_button(w) for w in descendants(page))
+            ]
+            malicious_page = pages[4]
+            malicious_long_labels = [
+                w.get_text()
+                for w in descendants(malicious_page)
+                if isinstance(w, Gtk.Label)
+                and not inside_popover(w)
+                and len(w.get_text()) > 60
+            ]
+            help_ok = (
+                len(frames) >= 13
+                and len(frames_helped) == len(frames)
+                and len(pages_helped) == len(pages)
+                and not malicious_long_labels
+            )
+
             toggle_off = app.auto_attack_toggle.has_css_class("ntpl-off")
             app.auto_attack_toggle.set_active(True)
             toggle_on = app.auto_attack_toggle.has_css_class("ntpl-on")
@@ -201,7 +261,10 @@ def main() -> int:
 
             result["detail"] = (
                 f"rows={rows} status={status!r} log={log_ok} "
-                f"trim={trim_ok} "
+                f"trim={trim_ok} help={help_ok} "
+                f"frames={len(frames_helped)}/{len(frames)} "
+                f"pages={len(pages_helped)}/{len(pages)} "
+                f"malicious_text={len(malicious_long_labels)} "
                 f"map={app.map_grid.map_id if app.map_grid else None} "
                 f"surface={app.map_surface is not None} guard={guard} facing={facing} "
                 f"hp={stats.hp}/{stats.hp_max} stats_area={app.stats_area is not None} "
@@ -224,6 +287,7 @@ def main() -> int:
                 and banner_ok
                 and log_ok
                 and trim_ok
+                and help_ok
             )
         except Exception as exc:  # noqa: BLE001 - report, do not crash GTK
             result["detail"] = f"exception: {exc!r}"
