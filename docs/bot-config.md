@@ -332,11 +332,20 @@ Limits and safety:
 
 **Cast speed** (**Malicious** tab) is a plain on/off switch, not a value: the
 request was "lower the cast speed and delay between spells to the minimum
-possible", so there is nothing to tune. The server's own cast time and
-cooldown are the floor, and the client's skill-bar cooldowns stay accurate
-and visible.
+possible", so there is nothing to tune. It works with or without the bot.
+The server's own cast time and cooldown are the floor, and the client's
+skill-bar cooldowns stay accurate and visible.
 
-The switch is host-side. One cast is allowed at a time: after a spell or
+**Manual play:** the client sends `u_s` as soon as a skill is pressed. If
+the server is casting the previous skill it answers `cancel 0 <slot> -1`.
+With Cast speed on and the bot stopped, the GUI keeps that exact packet and
+re-sends it when the server finishes the current cast (a self `su`) or the
+skill's cooldown ends (`sr <slot>`), so pressing the next spell early is not
+lost and it fires at the server's first free moment. Only the latest press
+is kept (15 s TTL, two retries); the DLL's echo of the host's own send is
+ignored. This needs no DLL update and no game restart.
+
+**Bot:** one cast is allowed at a time: after a spell or
 attack, the bot waits for the server's answer — a self `su` (accepted) or the
 `cancel` of that cast (refused / animation end) — and sends the next cast on
 the same tick it arrives. Sending earlier only gets `cancel 0 <castId> -1`
@@ -360,6 +369,12 @@ second `u_s 3` goes out **0.05 s** later. The fake server then answers the
 second cast only after a 0.6 s cast time: no premature cast is sent in that
 window, and the third cast follows **0.63 s** after the second — the server's
 own cast time, not a rule or Skill.dat delay.
+
+Fake-server proof for manual play (`gui_manual_cast_smoke.py`, bot stopped):
+a `u_s 1 3 500` press answered by `cancel 0 1 -1` is held by the GUI and
+re-sent when `sr 1` arrives; the same press is held and re-sent on the next
+self `su`; and the DLL's echo of the host's own `SEND|u_s` does not start a
+loop.
 
 ## Follow a player — trail a character
 
