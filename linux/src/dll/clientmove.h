@@ -24,10 +24,18 @@ bool client_position(int& x, int& y, unsigned long& char_id, int& resting,
 // speed setter (the same function the server's `cond` packet reaches).
 // Normally only raises the value (a buffed speed is never lowered); `force`
 // also lowers it, for a boost-off/reset or the server's accepted settle
-// value. `previous`/`applied` are the entity's speed byte before and after.
-// Validates the client build prologue before calling.
-bool client_speed_set(int speed, int& previous, int& applied,
-                      std::string& error, bool force = false);
+// value. `previous`/`applied` are the entity speed before and after.
+//
+// The client's speed byte and its 60-entry timing table stop at 59. For a
+// target above that the DLL raises the setter's cap and points the client's
+// speed-table references at a full 256-entry table (the first 60 values are
+// the client's own). Above 255 the entity stays at byte 255 and that entry is
+// scaled, so the emulated speed is not limited by the byte. The extension is
+// installed once, from this thread, with the game's other threads suspended;
+// it stays for the rest of the process so the client's own code keeps a valid
+// table after the DLL goes away.
+bool client_speed_apply(int target, int& previous, int& applied,
+                        std::string& error, bool force = false);
 
 // Read the local player entity's current speed byte. Used as the base when
 // the DLL starts after the last `cond`, so +1 applies without waiting for the

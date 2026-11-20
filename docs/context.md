@@ -13,11 +13,14 @@ the data layer in [database.md](database.md).
 - **Speed +** (**Malicious** tab, default 0): the DLL reads the server's
   `cond` speed, calls the client's own entity speed setter on the local
   player actor, and clamps the outgoing `walk` speed back to the server's
-  cond. The boost probes +1 first, then the
-  requested value; a server `tp` correction settles at +1 (or off if +1
-  itself is rejected) and the GUI shows the limit. Client hack, high ban risk; reverts when the GUI disconnects.
-  Needs the 2026-11-20 DLL (a game-client restart/injection), not just a GUI
-  restart.
+  cond. The value applies immediately (no +1 probe since 0.2.5); a server
+  `tp` correction settles at +1 (or off if +1 itself is rejected) and the
+  GUI shows the limit. The spin has no small cap: on the first value above
+  the client's own 59 limit the DLL raises that check and supplies a
+  256-entry speed table, and values above the byte's 255 are emulated by
+  scaling its top entry. Client hack, high ban risk; reverts when the GUI
+  disconnects. Needs the 0.2.6 DLL (a game-client restart/injection), not
+  just a GUI restart.
 - **NosBazar tab** (fourth GUI page): monitor + floor-protected relist ported
   from `TaraJura/Nostale-NB`. It learns the Bibi Basar entity id/option from
   the client's own `npc_req`/`n_run` or DLL log, searches `c_blist` at 2.5 s

@@ -396,8 +396,8 @@ void set_speed_boost(int add) {
     if (add < 0) {
         add = 0;
     }
-    if (add > 59) {
-        add = 59;
+    if (add > speedboost::kMaxSpeed) {
+        add = speedboost::kMaxSpeed;
     }
     const int previous =
         g_speed_request.exchange(add, std::memory_order_release);

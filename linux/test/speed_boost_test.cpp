@@ -29,10 +29,14 @@ void test_target_speed()
     check(speedboost::target_speed(10, 5) == 15, "+5 on 10");
     check(speedboost::target_speed(0, 3) == 0, "no base speed, no change");
     check(speedboost::target_speed(12, -1) == 12, "negative bonus is off");
-    // The client's cond setter caps at 59 (cmp dl,0x3b / ja).
-    check(speedboost::target_speed(20, 100) == 59, "large bonus clamps to 59");
-    check(speedboost::target_speed(58, 3) == 59, "sum clamps to 59");
-    check(speedboost::target_speed(59, 1) == 59, "59 stays 59");
+    // The host spin has no 59 cap any more; the DLL lifts the client's own
+    // limit and extends its speed table instead.
+    check(speedboost::target_speed(20, 100) == 120, "large bonus is not capped at 59");
+    check(speedboost::target_speed(58, 3) == 61, "sum past 59 is kept");
+    check(speedboost::target_speed(59, 1) == 60, "59 + 1 is 60");
+    check(speedboost::target_speed(59, speedboost::kMaxSpeed) ==
+              speedboost::kMaxSpeed,
+          "the emulated speed has an int bound");
 }
 
 void test_clamp_walk()
@@ -52,9 +56,18 @@ void test_clamp_walk()
     check(std::strcmp(buffer, "walk 25 117 0 12\r\n") == 0,
           "clamped CRLF walk text");
 
-    // Width must not change in place.
+    // Width must not change in place; a shorter base is zero-padded so the
+    // client's AnsiString length stays valid.
     std::strcpy(buffer, "walk 25 117 0 10");
-    check(!speedboost::clamp_walk(buffer, 9), "10 -> 9 is refused");
+    check(speedboost::clamp_walk(buffer, 9), "10 -> 9 is zero-padded");
+    check(std::strcmp(buffer, "walk 25 117 0 09") == 0,
+          "padded one-digit base");
+
+    // Speeds above 59 use a three-digit field; the clamped value pads to it.
+    std::strcpy(buffer, "walk 25 117 0 255");
+    check(speedboost::clamp_walk(buffer, 12), "255 clamps to 012");
+    check(std::strcmp(buffer, "walk 25 117 0 012") == 0,
+          "three-digit speed padded to the base width");
 
     std::strcpy(buffer, "mv 1 7349 25 117 16");
     check(!speedboost::clamp_walk(buffer, 12), "mv is not a walk");
@@ -94,9 +107,9 @@ void test_parse_cond()
     check(!speedboost::parse_cond("cond 1 7349 0 0 abc", 3).valid,
           "non-numeric speed is ignored");
 
-    // The target is clamped at the client's walking-speed limit.
+    // The target follows the extended speed, not the client's old 59 cap.
     cond = speedboost::parse_cond("cond 1 7 0 0 58", 3);
-    check(cond.valid && cond.target == 59, "58 + 3 clamps to 59");
+    check(cond.valid && cond.target == 61, "58 + 3 targets 61");
 
     // The parser does not care about packet field width; the entity setter
     // handles a one-digit server speed fine.

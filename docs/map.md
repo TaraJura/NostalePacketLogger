@@ -262,8 +262,10 @@ editable full-height list so no one is invited twice. Live-verified manually on 
 [family.md](family.md).
 
 The sixth top-level **Malicious** tab holds client-side tricks that apply
-immediately and do not need the bot. **Speed +** (0–50, default 0) adds a
-flat bonus (+1, +2, +3...) to the character's walking speed. The DLL reads
+immediately and do not need the bot. **Speed +** (default 0) adds a
+flat bonus (+1, +2, +3...) to the character's walking speed; the spin scrolls
+without a small cap, and the DLL lifts the client's own 59 limit and extends
+its speed table. The DLL reads
 the server's `cond` speed, calls the client's own entity speed setter on the
 local player actor (the field the walk builder reads), and clamps the
 outgoing `walk` speed back to the server's cond value. The NosMate (`cond 2`) is not touched. It applies as soon as the spin

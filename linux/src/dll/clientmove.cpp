@@ -5,6 +5,7 @@
 #include <string>
 
 #include <windows.h>
+#include <tlhelp32.h>
 
 // The client's own "walk to" entry point (this build):
 //
@@ -183,12 +184,176 @@ bool client_speed_get(int& speed, std::string& error)
     return true;
 }
 
-bool client_speed_set(int speed, int& previous, int& applied,
-                      std::string& error, bool force)
+namespace {
+
+// The client's movement timing reads a 60-entry float table at 0x0078A3C8,
+// indexed by the entity's speed byte. Its setter refuses anything above 59
+// (`cmp dl,0x3b / ja`). Both limits are lifted here for the local player:
+// the cap byte becomes 0xff and every code reference to the table is pointed
+// at a 256-entry copy. Entries 0..59 are the client's own values, so normal
+// play is unchanged; 60..255 continue the same linear timing and entry 255
+// can be scaled to emulate a speed above the byte maximum.
+constexpr std::uintptr_t kCodeStart = 0x00401000;
+constexpr std::uintptr_t kCodeEnd = 0x00787DC4;
+constexpr std::uintptr_t kSpeedTable = 0x0078A3C8;
+constexpr int kSpeedTableEntries = 256;
+
+std::uintptr_t g_speed_table = 0;  // our extended table; 0 = not installed
+bool g_speed_extend_failed = false;
+
+struct SuspendedThreads {
+    HANDLE handles[256];
+    int count;
+};
+
+void suspend_other_threads(SuspendedThreads& suspended)
+{
+    suspended.count = 0;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) {
+        return;
+    }
+    const DWORD pid = GetCurrentProcessId();
+    const DWORD self = GetCurrentThreadId();
+    THREADENTRY32 entry = {};
+    entry.dwSize = sizeof(entry);
+    if (Thread32First(snapshot, &entry)) {
+        do {
+            if (entry.th32OwnerProcessID != pid ||
+                entry.th32ThreadID == self) {
+                continue;
+            }
+            if (suspended.count >=
+                static_cast<int>(sizeof(suspended.handles) /
+                                 sizeof(suspended.handles[0]))) {
+                break;
+            }
+            HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME, FALSE,
+                                       entry.th32ThreadID);
+            if (thread == nullptr) {
+                continue;
+            }
+            if (SuspendThread(thread) == static_cast<DWORD>(-1)) {
+                CloseHandle(thread);
+                continue;
+            }
+            suspended.handles[suspended.count++] = thread;
+        } while (Thread32Next(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+}
+
+void resume_threads(SuspendedThreads& suspended)
+{
+    for (int i = 0; i < suspended.count; ++i) {
+        ResumeThread(suspended.handles[i]);
+        CloseHandle(suspended.handles[i]);
+    }
+    suspended.count = 0;
+}
+
+// Install the extended table once. The game's other threads are suspended
+// while the code bytes change, so none of them runs a half-written table
+// address. The table lives in the game's address space and is deliberately
+// never freed: after the DLL unloads, the patched instructions still run and
+// must find a valid table there.
+bool extend_speed_table(std::string& error)
+{
+    if (g_speed_table != 0) {
+        return true;
+    }
+    if (g_speed_extend_failed) {
+        error = "SPEED: this client build cannot go above 59";
+        return false;
+    }
+
+    const unsigned char* code =
+        reinterpret_cast<const unsigned char*>(kCodeStart);
+    const std::size_t code_size = kCodeEnd - kCodeStart;
+    unsigned char* table_refs[32];
+    int ref_count = 0;
+    for (std::size_t i = 2; i + 4 <= code_size; ++i) {
+        if (code[i] != 0xC8 || code[i + 1] != 0xA3 ||
+            code[i + 2] != 0x78 || code[i + 3] != 0x00) {
+            continue;
+        }
+        const unsigned char opcode = code[i - 2];
+        const unsigned char sib = code[i - 1];
+        if (sib != 0x85 ||
+            (opcode != 0xD9 && opcode != 0xD8 && opcode != 0x8B)) {
+            continue;
+        }
+        if (ref_count >=
+            static_cast<int>(sizeof(table_refs) / sizeof(table_refs[0]))) {
+            break;
+        }
+        table_refs[ref_count++] = const_cast<unsigned char*>(code + i);
+    }
+
+    const unsigned char cap_expected[5] = {0x80, 0xFA, 0x3B, 0x77, 0x5C};
+    const unsigned char* cap =
+        reinterpret_cast<const unsigned char*>(kSpeedFunction) + 0x0E;
+    const float* source = reinterpret_cast<const float*>(kSpeedTable);
+    if (ref_count != 11 || std::memcmp(cap, cap_expected, 5) != 0 ||
+        !(source[1] > 0.0001f && source[1] < 0.0003f &&
+          source[59] > 0.0100f && source[59] < 0.0130f)) {
+        g_speed_extend_failed = true;
+        error = "SPEED: this client build cannot go above 59";
+        return false;
+    }
+
+    float* table = static_cast<float*>(
+        VirtualAlloc(nullptr, kSpeedTableEntries * sizeof(float),
+                     MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    if (table == nullptr) {
+        error = "SPEED: cannot allocate the speed table";
+        return false;
+    }
+    for (int i = 0; i < 60; ++i) {
+        table[i] = source[i];
+    }
+    for (int i = 60; i < kSpeedTableEntries; ++i) {
+        table[i] = 0.0002f * static_cast<float>(i);
+    }
+
+    SuspendedThreads suspended;
+    suspend_other_threads(suspended);
+    DWORD old_protection = 0;
+    bool patched = VirtualProtect(
+                       reinterpret_cast<void*>(kCodeStart), code_size,
+                       PAGE_EXECUTE_READWRITE, &old_protection) != FALSE;
+    if (patched) {
+        const std::uintptr_t address =
+            reinterpret_cast<std::uintptr_t>(table);
+        for (int i = 0; i < ref_count; ++i) {
+            std::memcpy(table_refs[i], &address, sizeof(address));
+        }
+        const unsigned char unlimited = 0xFF;
+        std::memcpy(const_cast<unsigned char*>(cap) + 2, &unlimited, 1);
+        FlushInstructionCache(GetCurrentProcess(),
+                              reinterpret_cast<const void*>(kCodeStart),
+                              code_size);
+        DWORD ignored = 0;
+        VirtualProtect(reinterpret_cast<void*>(kCodeStart), code_size,
+                       old_protection, &ignored);
+    }
+    resume_threads(suspended);
+
+    if (!patched) {
+        VirtualFree(table, 0, MEM_RELEASE);
+        error = "SPEED: cannot patch the client speed table";
+        return false;
+    }
+    g_speed_table = reinterpret_cast<std::uintptr_t>(table);
+    return true;
+}
+
+bool speed_set_byte(int speed, int& previous, int& applied,
+                    std::string& error, bool force)
 {
     previous = 0;
     applied = 0;
-    if (speed <= 0 || speed > 59) {
+    if (speed <= 0 || speed > 255) {
         error = "SPEED: value out of range";
         return false;
     }
@@ -226,5 +391,45 @@ bool client_speed_set(int speed, int& previous, int& applied,
         error = "SPEED: client ignored the value";
         return false;
     }
+    return true;
+}
+
+}  // namespace
+
+bool client_speed_apply(int target, int& previous, int& applied,
+                        std::string& error, bool force)
+{
+    previous = 0;
+    applied = 0;
+    if (target <= 0) {
+        error = "SPEED: value out of range";
+        return false;
+    }
+    if (target <= 59) {
+        return speed_set_byte(target, previous, applied, error, force);
+    }
+    if (!extend_speed_table(error)) {
+        return false;
+    }
+
+    // The client's byte tops out at 255. Above that the byte stays 255 and
+    // its timing entry is scaled to the emulated speed, so scrolling can keep
+    // raising the value past the byte limit as well.
+    const int byte = target < 255 ? target : 255;
+    float* table = reinterpret_cast<float*>(g_speed_table);
+    table[byte] =
+        0.0002f * static_cast<float>(byte == target ? byte : target);
+
+    int byte_previous = 0;
+    int byte_applied = 0;
+    if (!speed_set_byte(byte, byte_previous, byte_applied, error, force)) {
+        return false;
+    }
+    if (byte_applied != byte) {
+        error = "SPEED: client kept a higher buffed speed";
+        return false;
+    }
+    previous = byte_previous;
+    applied = target;
     return true;
 }

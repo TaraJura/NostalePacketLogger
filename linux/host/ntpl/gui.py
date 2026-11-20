@@ -122,6 +122,10 @@ BOT_LOG_PATH = Path(
 BOT_LOG_MAX_BYTES = 4 * 1024 * 1024
 DRAIN_INTERVAL_MS = 50
 BOT_INTERVAL_MS = 50
+#: Speed + has no small host cap. The DLL lifts the client's own 59 limit and
+#: emulates values past the speed byte; a million is the practical bound kept
+#: in the config and the spin, not a gameplay limit.
+SPEED_BOOST_MAX = 1000000
 #: Family auto-invite: one invite at a time, wait for the server's
 #: confirmation, and never retry a name (the list is persisted per client).
 FAMILY_AUTO_INTERVAL_S = 2.5
@@ -3870,11 +3874,13 @@ class Application(Gtk.Application):
                 "Client-side tweaks that need no bot. Speed + raises the "
                 "local player's walking speed by that many flat points "
                 "(12 + 3 = 15) and applies immediately, in manual play too. "
-                "The DLL clamps outgoing walk packets to the server's normal "
-                "speed, keeps the client faster, and turns the value down or "
-                "off if the server corrects the player. The client's limit is "
-                "59. Saved as speed_boost. These tweaks violate the game "
-                "rules and are high ban risk.",
+                "Scroll or type any value: the DLL raises the client's own "
+                "59 cap, extends its speed table and scales the top entry "
+                "past the speed byte, so there is no small cap. The DLL keeps "
+                "outgoing walk packets at the server's normal speed, keeps "
+                "the client faster, and turns the value down or off if the "
+                "server corrects the player. Saved as speed_boost. These "
+                "tweaks violate the game rules and are high ban risk.",
             )
         )
         page.append(header)
@@ -3883,11 +3889,15 @@ class Application(Gtk.Application):
         # `cond` speed, the way a NosTale speed buff works (+1, +2, +3...).
         speed_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         speed_row.append(Gtk.Label(label="Speed +"))
-        self.speed_boost_spin = Gtk.SpinButton.new_with_range(0, 50, 1)
+        # No small host-side cap: the wheel scrolls the value up as far as the
+        # DLL can emulate it. The client's own 59 limit is raised by the DLL.
+        self.speed_boost_spin = Gtk.SpinButton.new_with_range(
+            0, SPEED_BOOST_MAX, 1
+        )
         self.speed_boost_spin.set_value(0)
-        self.speed_boost_spin.set_width_chars(4)
+        self.speed_boost_spin.set_width_chars(7)
         self.speed_boost_spin.set_tooltip_text(
-            "Flat walking-speed bonus; 0 = normal. Applies immediately."
+            "Flat walking-speed bonus; 0 = normal. Scroll to raise it."
         )
         self.speed_boost_spin.connect(
             "value-changed", lambda *_: self._on_speed_boost_changed()
@@ -7280,10 +7290,10 @@ class Application(Gtk.Application):
                     self.dll_version = version_text or None
                     self._update_window_title()
                     self._set_status(message.payload)
-                    if version and version < (0, 2, 5):
+                    if version and version < (0, 2, 6):
                         self._set_status(
-                            "client DLL is older than 0.2.5 — restart the "
-                            "game client to load the immediate Speed + build"
+                            "client DLL is older than 0.2.6 — restart the "
+                            "game client to load the uncapped Speed + build"
                         )
                 elif message.payload.startswith("SPEED APPLIED"):
                     parts = message.payload.split()
@@ -7294,6 +7304,13 @@ class Application(Gtk.Application):
                     self._set_status(
                         f"speed boost +{value} applied (the server sees the "
                         "normal walk speed)"
+                    )
+                elif message.payload.startswith("SPEED EXTEND FAILED"):
+                    # The DLL could not lift the client's own 59 limit on
+                    # this build; the stored value is still the user's choice.
+                    self._set_status(
+                        "this game client cannot exceed +59 (DLL build "
+                        "mismatch) — restart the game to load DLL 0.2.6"
                     )
                 elif message.payload.startswith("SPEED UNSUPPORTED"):
                     # Even the lowest boost was corrected. No client-side

@@ -119,7 +119,11 @@ def main() -> int:
                     app.quit()
                 return False
             result["attach_zero"] = speed_lines(server.received)[0] == "SPEED|0"
-            app.speed_boost_spin.set_value(25)
+            # The Malicious spin has no 50/59 cap; the wheel can raise it.
+            result["spin_range"] = (
+                app.speed_boost_spin.get_adjustment().get_upper() >= 1000000
+            )
+            app.speed_boost_spin.set_value(120)
             GLib.timeout_add(500, phase2)
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"phase1 exception: {exc!r}"
@@ -128,7 +132,7 @@ def main() -> int:
 
     def phase2() -> bool:
         try:
-            result["sent25"] = "SPEED|25" in server.received
+            result["sent120"] = "SPEED|120" in server.received
             app.speed_boost_spin.set_value(0)
             GLib.timeout_add(400, phase3)
         except Exception as exc:  # noqa: BLE001
@@ -249,7 +253,8 @@ def main() -> int:
     result["speeds"] = speeds
     result["ok"] = bool(
         result.get("attach_zero")
-        and result.get("sent25")
+        and result.get("spin_range")
+        and result.get("sent120")
         and result.get("sent_zero_again")
         and result.get("config_value")
         and result.get("round_trip")
@@ -272,7 +277,8 @@ def main() -> int:
     if not result.get("detail") or result["detail"] == "not checked":
         result["detail"] = (
             f"attach_zero={result.get('attach_zero')} "
-            f"sent25={result.get('sent25')} "
+            f"spin_range={result.get('spin_range')} "
+            f"sent120={result.get('sent120')} "
             f"sent_zero_again={result.get('sent_zero_again')} "
             f"round_trip={result.get('round_trip')} "
             f"spin_after_config={result.get('spin_after_config')} "

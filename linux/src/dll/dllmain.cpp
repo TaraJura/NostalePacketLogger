@@ -300,7 +300,7 @@ void handle_command(const std::string& command) {
     if (command.compare(0, 6, "SPEED|") == 0) {
         int add = 0;
         if (std::sscanf(command.c_str() + 6, "%d", &add) != 1) {
-            tcpserver::send_line("STATUS|usage: SPEED|add(0-59)");
+            tcpserver::send_line("STATUS|usage: SPEED|add(0-1000000)");
             return;
         }
         packetlogger::set_speed_boost(add);
@@ -409,8 +409,8 @@ DWORD WINAPI main_thread(LPVOID module) {
                     int previous = 0;
                     int applied = 0;
                     std::string error;
-                    if (client_speed_set(reset_target, previous, applied,
-                                         error, true) &&
+                    if (client_speed_apply(reset_target, previous, applied,
+                                           error, true) &&
                         applied != previous) {
                         ntpl::logf("speed: player actor reset %d -> %d",
                                    previous, applied);
@@ -422,7 +422,7 @@ DWORD WINAPI main_thread(LPVOID module) {
                 int previous = 0;
                 int applied = 0;
                 std::string error;
-                if (client_speed_set(target, previous, applied, error) &&
+                if (client_speed_apply(target, previous, applied, error) &&
                     applied == target && target != logged_speed_target) {
                     logged_speed_target = target;
                     ntpl::logf(
@@ -432,6 +432,17 @@ DWORD WINAPI main_thread(LPVOID module) {
                         tcpserver::send_line(
                             "STATUS|SPEED APPLIED " +
                             std::to_string(target));
+                    }
+                } else if (!error.empty() && target > 59 &&
+                           target != logged_speed_target) {
+                    // A client build whose speed table cannot be extended
+                    // keeps the 59 limit; say so once per requested value
+                    // instead of silently doing nothing.
+                    logged_speed_target = target;
+                    ntpl::logf("speed: %s", error.c_str());
+                    if (tcpserver::is_connected()) {
+                        tcpserver::send_line(
+                            "STATUS|SPEED EXTEND FAILED " + error);
                     }
                 }
             }

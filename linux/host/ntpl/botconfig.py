@@ -67,6 +67,9 @@ SPELL_TARGETS = ("monster", "self")
 MAX_MONSTER_VNUMS = 5000
 MAX_SPELL_RULES = 100
 MAX_WAYPOINTS = 500
+#: Speed + is not clamped at the client's 59 any more (the DLL lifts it);
+#: this only keeps a hand-edited file from carrying a nonsense int.
+MAX_SPEED_BOOST = 1000000
 
 
 class ConfigError(ValueError):
@@ -239,7 +242,9 @@ class BotConfig:
             revive_on_death=_as_bool(data.get("revive_on_death"), False),
             loop=_as_bool(data.get("loop"), True),
             block_portals=_as_bool(data.get("block_portals"), False),
-            speed_boost=_as_int(data.get("speed_boost"), 0, 0, 50),
+            speed_boost=_as_int(
+                data.get("speed_boost"), 0, 0, MAX_SPEED_BOOST
+            ),
             follow=_as_bool(data.get("follow"), False),
             follow_player=_as_text(data.get("follow_player"), "")[:40],
             follow_attack=_as_bool(data.get("follow_attack"), False),

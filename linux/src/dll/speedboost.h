@@ -108,21 +108,24 @@ inline bool parse_uint(const char* text, const Token& token,
     return true;
 }
 
+// Highest emulated walk speed the flat bonus may reach. The client's own speed
+// byte is capped at 255; values above that are carried by scaling the player's
+// table entry (the DLL extends the client's speed table, see clientmove.cpp),
+// so the host spin has no small cap of its own.
+constexpr int kMaxSpeed = 1000000;
+
 // Speed for `base` with a flat `add` bonus, the way a NosTale speed buff
-// works (+1, +2, +3, ...). Returns base when the bonus is off.
+// works (+1, +2, +3, ...). Returns base when the bonus is off. The original
+// client only accepts 0..59 and indexes a 60-entry timing table; the DLL
+// raises that limit and supplies the table, so the sum is no longer clamped
+// at 59 here.
 inline int target_speed(int base, int add)
 {
     if (base <= 0 || add <= 0) {
         return base;
     }
-    // The client's own cond speed setter ignores anything above 0x3B (59):
-    // `cmp dl,0x3b / ja skip`. Stay at or below the cap, and never lower a
-    // value the client already accepted.
-    if (base >= 59) {
-        return base;
-    }
-    const int sum = base + add;
-    return sum >= 59 ? 59 : sum;
+    const long long sum = static_cast<long long>(base) + add;
+    return sum > kMaxSpeed ? kMaxSpeed : static_cast<int>(sum);
 }
 
 // Report the server's own base speed in an outgoing walk packet while the
@@ -145,15 +148,23 @@ inline bool clamp_walk(char* text, int base)
         speed <= static_cast<unsigned long>(base)) {
         return false;
     }
+    const std::size_t width = tokens.items[4].length;
     char digits[16] = {0};
     const int written =
         std::snprintf(digits, sizeof(digits), "%d", base);
-    if (written <= 0 ||
-        static_cast<std::size_t>(written) != tokens.items[4].length) {
+    if (written <= 0 || width >= sizeof(digits) ||
+        static_cast<std::size_t>(written) > width) {
         return false;
     }
-    std::memcpy(text + tokens.items[4].offset, digits,
+    // Keep the AnsiString length valid when the boosted speed has more digits
+    // than the server's own value: 255 -> 012, not a shorter string. The
+    // server's integer parser accepts leading zeros; the field width is what
+    // the client's string header depends on.
+    char padded[16] = {0};
+    std::memset(padded, '0', width);
+    std::memcpy(padded + (width - static_cast<std::size_t>(written)), digits,
                 static_cast<std::size_t>(written));
+    std::memcpy(text + tokens.items[4].offset, padded, width);
     return true;
 }
 

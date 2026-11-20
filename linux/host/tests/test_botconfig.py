@@ -49,7 +49,11 @@ class BotConfigTests(unittest.TestCase):
             BotConfig.from_dict({"speed_boost": -5}).speed_boost, 0
         )
         self.assertEqual(
-            BotConfig.from_dict({"speed_boost": 999}).speed_boost, 50
+            BotConfig.from_dict({"speed_boost": 999}).speed_boost, 999
+        )
+        self.assertEqual(
+            BotConfig.from_dict({"speed_boost": 5000000}).speed_boost,
+            1000000,
         )
         config = BotConfig(speed_boost=35)
         self.assertEqual(config.to_dict()["speed_boost"], 35)

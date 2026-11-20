@@ -273,10 +273,12 @@ setting is saved as `block_portals`; the live state is in the DLL's status line
 
 ## Speed boost — client-side movement speed
 
-**Speed +** (**Malicious** tab, 0–50, default 0) adds a flat bonus to the
+**Speed +** (**Malicious** tab, default 0) adds a flat bonus to the
 character's walking speed, the same way a NosTale speed buff works (+1, +2,
-+3...). It is a client-side change, not a server buff and not a modified
-packet: the DLL reads the server's `cond 1 <charId> … <speed>` packet to learn
++3...). The spin has no small cap: the mouse wheel (or typing) raises it
+toward the DLL's emulated maximum of 1,000,000. It is a client-side change,
+not a server buff and not a modified packet: the DLL reads the server's
+`cond 1 <charId> … <speed>` packet to learn
 the player's base speed, then calls the client's own entity speed setter on
 the local player actor (`[player+0x20]+0xAA`, the exact field the walk packet
 builder reads). The **outgoing `walk` speed is clamped back to the server's
@@ -294,7 +296,19 @@ when the host disconnects.
 Limits and safety:
 
 - The client's own `cond` speed setter ignores values above **59**
-  (`cmp dl,0x3b / ja`), so the DLL clamps the target at 59.
+  (`cmp dl,0x3b / ja`) and indexes a 60-entry timing table. On the first
+  request above 59 the DLL raises that cap byte to `0xff` and points the 11
+  code references to the table at a 256-entry copy (entries 0–59 are the
+  client's own values, 60–255 continue the same linear timing). The game's
+  other threads are suspended while those bytes change; the table lives for
+  the rest of the client process, so the patched code stays valid after the
+  DLL unloads. A build whose code or table does not match is left alone and
+  reports `STATUS|SPEED EXTEND FAILED`, so the old 59 limit still applies.
+- Above the speed byte's 255 the entity stays at byte 255 and its timing
+  entry is scaled to the emulated speed, so the wheel keeps raising the value
+  past the byte limit as well. The clamped outgoing `walk` field is
+  zero-padded when the server base has fewer digits (`255 -> 012`), keeping
+  the client's string length valid; the server's integer parser reads `12`.
 - The value applies **immediately** (no probe). The walk clamp normally
   prevents the server from seeing the boost at all. If a server still
   corrects the player (`tp 1 <charId> …`), the DLL settles at **+1** or turns
