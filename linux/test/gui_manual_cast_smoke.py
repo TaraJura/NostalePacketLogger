@@ -27,6 +27,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import GLib
 
 from ntpl.gui import Application
+from ntpl.protocol import Kind, Packet
 
 SELF_ID = 14881134
 PRESS_1 = "SEND|u_s 1 3 500"
@@ -139,8 +140,10 @@ def main() -> int:
         try:
             result["resent_sr"] = server.received.count(PRESS_1) >= 1
             result["cleared"] = app.manual_cast_packet is None
-            # Echo the host's own packet like the DLL send hook does; it
-            # must not become a new held press.
+            # Echo the host's own packet like the DLL does (the command
+            # echo and the send-hook echo); neither may become a new held
+            # press.
+            server.send(PRESS_1 + "\n")
             server.send(PRESS_1 + "\n")
             GLib.timeout_add(200, phase2_check)
         except Exception as exc:  # noqa: BLE001
@@ -175,9 +178,38 @@ def main() -> int:
     def phase3() -> bool:
         try:
             result["resent_su"] = server.received.count(PRESS_2) >= 1
+            # The queue must also work while the bot is running: a manual
+            # press is not the bot's own cast and must be held the same way.
+            app.bot_running = True
+            app._manual_cast_packet(
+                Packet(Kind.SEND, "u_s 1 3 500", time.time())
+            )
+            app._manual_cast_packet(
+                Packet(Kind.RECV, "cancel 0 1 -1", time.time())
+            )
+            result["held_with_bot"] = app.manual_cast_packet == "u_s 1 3 500"
+            state_before = server.received.count(PRESS_1)
+            app._flush_manual_cast(time.monotonic(), "smoke with bot")
+            result["press1_before"] = state_before
+            app.bot_running = False
+            GLib.timeout_add(250, phase4)
+            return False
+        except Exception as exc:  # noqa: BLE001
+            result["detail"] = f"phase3 exception: {exc!r}"
+            app.quit()
+        return False
+
+    def phase4() -> bool:
+        try:
+            result["resent_with_bot"] = (
+                server.received.count(PRESS_1)
+                > result.get("press1_before", 0)
+            )
             result["ok"] = bool(
                 result.get("bot_off")
                 and result.get("held")
+                and result.get("held_with_bot")
+                and result.get("resent_with_bot")
                 and result.get("status")
                 and result.get("resent_sr")
                 and result.get("cleared")

@@ -338,11 +338,11 @@ skill-bar cooldowns stay accurate and visible.
 
 **Manual play:** the client sends `u_s` as soon as a skill is pressed. If
 the server is casting the previous skill it answers `cancel 0 <slot> -1`.
-With Cast speed on and the bot stopped, the GUI keeps that exact packet and
+With Cast speed on (the bot may be running or stopped), the GUI keeps that exact packet and
 re-sends it when the server finishes the current cast (a self `su`) or the
 skill's cooldown ends (`sr <slot>`), so pressing the next spell early is not
 lost and it fires at the server's first free moment. Only the latest press
-is kept (15 s TTL, two retries); the DLL's echo of the host's own send is
+is kept (a newer press replaces it; 15 s TTL, two retries); the DLL's echo of the host's own send is
 ignored. This needs no DLL update and no game restart.
 
 **Bot:** one cast is allowed at a time: after a spell or
