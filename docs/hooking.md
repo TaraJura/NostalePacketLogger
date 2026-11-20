@@ -75,6 +75,13 @@ _ntpl_hook_recv:
 - `jmp *_ntpl_recv_jmp_back` continues at `hook + 5`, the instruction after the
   original `E8`.
 
+The callback runs **before** `call *_ntpl_recv_original_call`, so it may
+rewrite the packet in place and the client's own parser sees the changed
+text. That is how **Cast speed** shortens the cooldown field of our own `su`
+packet (`castspeed.h`): the host queue is filled with a copy first, and the
+rewrite keeps the token's width (leading zeros) so the packet's layout stays
+valid. The server's cooldown is not touched; only the client's view of it.
+
 The hook is installed with `Memory::Hook(addr, &ntpl_hook_recv, 5)`:
 `VirtualProtect` to RWX, write `E9 rel32`, restore protection,
 `FlushInstructionCache`.

@@ -24,6 +24,7 @@ Schema (version 1)::
       "loop": true,
       "block_portals": false,    # off: portals stay usable by default
       "speed_boost": 0,          # flat client-side speed bonus (+1, +2...)
+      "cast_speed": 100,         # client-side cast speed, percent (100 normal)
       "follow": false,           # follow a player instead of fighting
       "follow_player": "Name",    # player name, or char id as text
       "follow_attack": false,     # attack the monster the player hits
@@ -70,6 +71,10 @@ MAX_WAYPOINTS = 500
 #: Speed + is not clamped at the client's 59 any more (the DLL lifts it);
 #: this only keeps a hand-edited file from carrying a nonsense int.
 MAX_SPEED_BOOST = 1000000
+#: Cast speed is a percentage: 100 = normal, 200 = half the client-side
+#: cooldown/cast pause. The DLL clamps to the same range.
+MIN_CAST_SPEED = 100
+MAX_CAST_SPEED = 1000
 
 
 class ConfigError(ValueError):
@@ -135,6 +140,7 @@ class BotConfig:
     loop: bool = True
     block_portals: bool = False
     speed_boost: int = 0
+    cast_speed: int = MIN_CAST_SPEED
     follow: bool = False
     follow_player: str = ""
     follow_attack: bool = False
@@ -167,6 +173,7 @@ class BotConfig:
             "loop": self.loop,
             "block_portals": self.block_portals,
             "speed_boost": self.speed_boost,
+            "cast_speed": self.cast_speed,
             "follow": self.follow,
             "follow_player": self.follow_player,
             "follow_attack": self.follow_attack,
@@ -244,6 +251,10 @@ class BotConfig:
             block_portals=_as_bool(data.get("block_portals"), False),
             speed_boost=_as_int(
                 data.get("speed_boost"), 0, 0, MAX_SPEED_BOOST
+            ),
+            cast_speed=_as_int(
+                data.get("cast_speed"), MIN_CAST_SPEED,
+                MIN_CAST_SPEED, MAX_CAST_SPEED
             ),
             follow=_as_bool(data.get("follow"), False),
             follow_player=_as_text(data.get("follow_player"), "")[:40],

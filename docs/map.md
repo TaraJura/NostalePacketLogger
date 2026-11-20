@@ -274,6 +274,14 @@ turns it off and the GUI resets the spin to 0. This is a client hack, high ban
 risk — see
 [bot-config.md](bot-config.md#speed-boost--client-side-movement-speed).
 
+**Cast speed %** (default 100 = normal) shortens the client's skill cooldowns:
+the DLL rewrites our own `su` packet's cooldown field before the client parses
+it, and above 100% the bot casts as soon as the server's `sr` readiness packet
+arrives and skips its own cast pause. The server keeps its own cooldown, so a
+cast sent too early is still refused; the control removes the client-side
+extra wait, not the server limit. Also a client hack, high ban risk — see
+[bot-config.md](bot-config.md#cast-speed--client-side-skill-cooldowns).
+
 See [bot-config.md](bot-config.md) for the target filter, spell-rule semantics
 and the export/import schema.
 
@@ -516,7 +524,7 @@ never sees the `at` packet.
 ```bash
 make -C linux host-test   # 190 cases incl. synthetic NOS, 8-way A*, checksum, config
 make -C linux gui-test    # GUI + map surface + tooltips + unknown-position guard
-make -C linux bot-test    # 37 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, follow nameless/char id, portal blocking, speed boost control, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, follow mirror, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
+make -C linux bot-test    # 38 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, follow nameless/char id, portal blocking, speed boost control, cast speed control, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, follow mirror, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
 ```
 
 The bot test sends a fake player at (25,117) on map 20, a monster at

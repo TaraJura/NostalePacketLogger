@@ -61,6 +61,23 @@ class BotConfigTests(unittest.TestCase):
             BotConfig.from_dict(config.to_dict()).speed_boost, 35
         )
 
+    def test_cast_speed_defaults_to_normal_and_is_clamped(self):
+        self.assertEqual(BotConfig().cast_speed, 100)
+        self.assertEqual(
+            BotConfig.from_dict({"cast_speed": 200}).cast_speed, 200
+        )
+        self.assertEqual(
+            BotConfig.from_dict({"cast_speed": 10}).cast_speed, 100
+        )
+        self.assertEqual(
+            BotConfig.from_dict({"cast_speed": 5000}).cast_speed, 1000
+        )
+        config = BotConfig(cast_speed=250)
+        self.assertEqual(config.to_dict()["cast_speed"], 250)
+        self.assertEqual(
+            BotConfig.from_dict(config.to_dict()).cast_speed, 250
+        )
+
     def test_invalid_values_are_clamped_without_crashing(self):
         config = BotConfig.from_dict(
             {

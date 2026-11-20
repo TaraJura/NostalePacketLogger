@@ -59,6 +59,7 @@ run gui_follow_mirror_slot_smoke.py
 run gui_follow_nameless_smoke.py
 run gui_portal_block_smoke.py
 run gui_speed_boost_smoke.py
+run gui_cast_speed_smoke.py
 run gui_retaliate_smoke.py
 run gui_far_leg_smoke.py
 run gui_death_smoke.py

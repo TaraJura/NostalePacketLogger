@@ -73,7 +73,7 @@ host-test:
 	PYTHONPATH=host python3 -m unittest discover -s host/tests -v
 
 # Pure host-side test of the DLL speed-boost packet rewriting (no Wine).
-$(BUILD)/SpeedBoostTest: test/speed_boost_test.cpp $(SRC_DLL)/speedboost.h
+$(BUILD)/SpeedBoostTest: test/speed_boost_test.cpp $(SRC_DLL)/speedboost.h $(SRC_DLL)/castspeed.h
 	@mkdir -p $(dir $@)
 	$(HOST_CXX) -std=c++17 -O2 -I$(SRC_DLL) -o $@ $<
 

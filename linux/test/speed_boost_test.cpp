@@ -5,7 +5,9 @@
 // the parsing rules that keep the boost tied to the server's real speed.
 
 #include <cstdio>
+#include <cstring>
 
+#include "castspeed.h"
 #include "speedboost.h"
 
 namespace {
@@ -117,6 +119,65 @@ void test_parse_cond()
     check(cond.valid && cond.target == 10, "9 + 1 targets 10");
 }
 
+void test_cast_speed_scale()
+{
+    char buffer[80] = {0};
+
+    // su <op> <type> <id> <type> <id> <vnum> <cooldown> ... -- the cooldown
+    // is raw field 6 ("su" itself is field 0). 300 ds at 200% is 150 ds.
+    std::strcpy(buffer, "su 1 7349 3 7020 838 300 40 4209");
+    check(castspeed::scale_field(buffer, 6, 200), "300 ds scales");
+    check(std::strcmp(buffer, "su 1 7349 3 7020 838 150 40 4209") == 0,
+          "half cooldown text");
+
+    // The token keeps its width even when the value loses digits.
+    std::strcpy(buffer, "su 1 7349 3 7020 838 300 40");
+    check(castspeed::scale_field(buffer, 6, 1000), "300 ds at 1000%");
+    check(std::strcmp(buffer, "su 1 7349 3 7020 838 030 40") == 0,
+          "zero-padded cooldown keeps the field width");
+
+    std::strcpy(buffer, "su 1 1 3 2 866 9");
+    check(castspeed::scale_field(buffer, 6, 200), "9 ds scales");
+    check(std::strcmp(buffer, "su 1 1 3 2 866 4") == 0, "9 -> 4");
+
+    std::strcpy(buffer, "su 1 1 3 2 866 1");
+    check(castspeed::scale_field(buffer, 6, 200), "1 ds scales to 0");
+    check(std::strcmp(buffer, "su 1 1 3 2 866 0") == 0, "1 -> 0");
+
+    // Normal speed and malformed shapes are left alone.
+    std::strcpy(buffer, "su 1 1 3 2 866 9");
+    check(!castspeed::scale_field(buffer, 6, 100), "100% does nothing");
+    check(std::strcmp(buffer, "su 1 1 3 2 866 9") == 0, "100% text");
+
+    std::strcpy(buffer, "su 1 1 3 2 866 9");
+    check(!castspeed::scale_field(buffer, 9, 200), "missing field ignored");
+    check(std::strcmp(buffer, "su 1 1 3 2 866 9") == 0,
+          "missing field leaves the packet unchanged");
+
+    std::strcpy(buffer, "su 1 1 3 2 866 abc");
+    check(!castspeed::scale_field(buffer, 6, 200), "non-number ignored");
+    check(std::strcmp(buffer, "su 1 1 3 2 866 abc") == 0,
+          "non-number text unchanged");
+
+    std::strcpy(buffer, "su 1 1 3 2 866 -5");
+    check(!castspeed::scale_field(buffer, 6, 200), "negative ignored");
+    check(std::strcmp(buffer, "su 1 1 3 2 866 -5") == 0,
+          "negative text unchanged");
+
+    // 65535 is the protocol's "no cooldown" sentinel; scaling it would turn
+    // a ready skill into a very long cooldown.
+    std::strcpy(buffer, "su 1 1 3 2 866 65535");
+    check(!castspeed::scale_field(buffer, 6, 200), "0xffff is not scaled");
+    check(std::strcmp(buffer, "su 1 1 3 2 866 65535") == 0,
+          "0xffff text unchanged");
+
+    // The `sr -10` duration is raw field 3.
+    std::strcpy(buffer, "sr -10 876 900 0");
+    check(castspeed::scale_field(buffer, 3, 300), "sr duration scales");
+    check(std::strcmp(buffer, "sr -10 876 300 0") == 0,
+          "sr duration text");
+}
+
 }  // namespace
 
 int main()
@@ -124,6 +185,7 @@ int main()
     test_target_speed();
     test_clamp_walk();
     test_parse_cond();
+    test_cast_speed_scale();
     if (g_failures != 0) {
         std::fprintf(stderr, "%d speed-boost test(s) failed\n", g_failures);
         return 1;

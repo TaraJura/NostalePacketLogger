@@ -126,6 +126,11 @@ BOT_INTERVAL_MS = 50
 #: emulates values past the speed byte; a million is the practical bound kept
 #: in the config and the spin, not a gameplay limit.
 SPEED_BOOST_MAX = 1000000
+#: Cast speed is a percentage: 100% is normal, 200% halves the client-side
+#: skill cooldown and the bot's post-cast pause. The DLL clamps the same way.
+CAST_SPEED_MIN = 100
+CAST_SPEED_MAX = 1000
+CAST_SPEED_STEP = 10
 #: Family auto-invite: one invite at a time, wait for the server's
 #: confirmation, and never retry a name (the list is persisted per client).
 FAMILY_AUTO_INTERVAL_S = 2.5
@@ -445,6 +450,8 @@ class Application(Gtk.Application):
         # True while the DLL reports the server's accepted limit and the spin
         # is updated from it: that must not send a new SPEED command.
         self._speed_tuning = False
+        # Client-side cast speed percentage (100 = normal); see Cast speed.
+        self.cast_speed_spin = None
         # -- cross-client packet mirroring (Follow frame) ------------------
         # Every attached host publishes its own `walk`/`u_s` to the mirror
         # bus; a follower replays the followed character's actions with its
@@ -3879,8 +3886,17 @@ class Application(Gtk.Application):
                 "past the speed byte, so there is no small cap. The DLL keeps "
                 "outgoing walk packets at the server's normal speed, keeps "
                 "the client faster, and turns the value down or off if the "
-                "server corrects the player. Saved as speed_boost. These "
-                "tweaks violate the game rules and are high ban risk.",
+                "server corrects the player. Saved as speed_boost. "
+                "Cast speed is a percentage: 100% is normal, 200% makes the "
+                "client's skill cooldown and the bot's post-cast pause half "
+                "as long. The DLL shortens the cooldown the client stores "
+                "from the server's `su` packet, so the skill bar clears "
+                "sooner; the server still enforces its own cooldown and can "
+                "refuse a cast sent too early. When it is above 100% the bot "
+                "also casts as soon as the server's `sr` readiness packet "
+                "arrives and skips the client-side cast pause. Saved as "
+                "cast_speed. These tweaks violate the game rules and are "
+                "high ban risk.",
             )
         )
         page.append(header)
@@ -3904,6 +3920,27 @@ class Application(Gtk.Application):
         )
         speed_row.append(self.speed_boost_spin)
         page.append(speed_row)
+
+        # Cast speed: 100% is normal; the DLL scales the client's skill
+        # cooldown from the server's `su` packet and the bot skips its own
+        # post-cast pause, so spells come back sooner. The server's own
+        # cooldown still applies.
+        cast_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        cast_row.append(Gtk.Label(label="Cast speed %"))
+        self.cast_speed_spin = Gtk.SpinButton.new_with_range(
+            CAST_SPEED_MIN, CAST_SPEED_MAX, CAST_SPEED_STEP
+        )
+        self.cast_speed_spin.set_value(CAST_SPEED_MIN)
+        self.cast_speed_spin.set_width_chars(5)
+        self.cast_speed_spin.set_tooltip_text(
+            "100% = normal. 200% halves the client-side skill cooldown "
+            "and the cast pause; the server's own cooldown still applies."
+        )
+        self.cast_speed_spin.connect(
+            "value-changed", lambda *_: self._on_cast_speed_changed()
+        )
+        cast_row.append(self.cast_speed_spin)
+        page.append(cast_row)
         return page
 
     def _install_css(self) -> None:
@@ -4890,7 +4927,16 @@ class Application(Gtk.Application):
             cooldown = max(
                 rule.cooldown, info.cooldown if info is not None else 0.0
             )
-            if now < self.spell_last_cast.get(index, 0.0) + cooldown:
+            last_cast = self.spell_last_cast.get(index, 0.0)
+            slot = self._skill_slot(rule.spell)
+            if slot is not None and self._server_skill_ready(
+                slot, last_cast
+            ):
+                # The server said this skill's cooldown ended (`sr`). Only
+                # the rule's own pacing still applies; waiting out the local
+                # Skill.dat timer would cast later than the server allows.
+                cooldown = rule.cooldown
+            if now < last_cast + cooldown:
                 continue
             target = self._spell_target(rule)
             if target == "self" and char_id is None:
@@ -4963,10 +5009,15 @@ class Application(Gtk.Application):
             self.fight_target_id = target_id
         # The per-rule cooldown (max of the rule and Skill.dat) is enforced in
         # _select_spell_rule; here only the cast animation plus the Min delay
-        # floor pace the next action.
-        cooldown = info.cast_time if info is not None else 0.0
+        # floor pace the next action. Cast speed above 100% shortens that
+        # client-side cast pause; the server's cooldown is still checked by
+        # the sr readiness gate.
+        scale = self._cast_speed_scale()
+        cooldown = (info.cast_time if info is not None else 0.0) * scale
         self.attack_cooldown_until = now + cooldown
-        cast_pause = info.cast_time if info is not None else 0.0
+        cast_pause = (
+            info.cast_time if info is not None else 0.0
+        ) * scale
         self.walk_not_before = now + max(
             self.attack_walk_delay, cast_pause
         )
@@ -5026,6 +5077,11 @@ class Application(Gtk.Application):
                 if self.speed_boost_spin is not None
                 else 0
             ),
+            cast_speed=(
+                int(self.cast_speed_spin.get_value())
+                if self.cast_speed_spin is not None
+                else CAST_SPEED_MIN
+            ),
             follow=bool(
                 self.follow_player_toggle is not None
                 and self.follow_player_toggle.get_active()
@@ -5081,6 +5137,8 @@ class Application(Gtk.Application):
             self.block_portal_toggle.set_active(config.block_portals)
         if self.speed_boost_spin is not None:
             self.speed_boost_spin.set_value(config.speed_boost)
+        if self.cast_speed_spin is not None:
+            self.cast_speed_spin.set_value(config.cast_speed)
         if self.follow_player_toggle is not None:
             self.follow_player_toggle.set_active(config.follow)
         if self.follow_player_entry is not None:
@@ -6657,6 +6715,68 @@ class Application(Gtk.Application):
             return
         self._sync_speed_boost()
 
+    def _cast_speed_percent(self) -> int:
+        """The Cast speed percentage currently shown (100 = normal)."""
+        if self.cast_speed_spin is None:
+            return CAST_SPEED_MIN
+        try:
+            value = int(self.cast_speed_spin.get_value())
+        except (TypeError, ValueError):
+            return CAST_SPEED_MIN
+        return max(CAST_SPEED_MIN, min(CAST_SPEED_MAX, value))
+
+    def _cast_speed_scale(self) -> float:
+        """Multiplier for client-side cast/cooldown waits (1.0 = normal).
+
+        The DLL does the client half; the bot shortens its own post-cast
+        pause by the same percentage. The server's cooldown gates each skill
+        on its own, so this never makes the bot send a cast that is still on
+        the server's cooldown (see ``_server_skill_ready``).
+        """
+        percent = self._cast_speed_percent()
+        if percent <= CAST_SPEED_MIN:
+            return 1.0
+        return CAST_SPEED_MIN / float(percent)
+
+    def _server_skill_ready(self, slot: int, since: float) -> bool:
+        """True when the server said `sr <slot>` after our last cast.
+
+        This server sends `sr <castingId>` when a skill's cooldown ends. With
+        Cast speed above 100% it is a better gate than the local Skill.dat
+        timer: it is the authoritative ready moment, so the bot can cast
+        again as soon as the server accepts instead of waiting out a longer
+        client-side timer (or sending early and being refused).
+        """
+        if self._cast_speed_percent() <= CAST_SPEED_MIN:
+            return False
+        ready = self.engine.world.skill_ready_at.get(slot)
+        return ready is not None and ready > since
+
+    def _sync_cast_speed(self, quiet: bool = False) -> None:
+        """Ask the DLL to shorten the client's skill cooldowns.
+
+        The DLL rewrites the cooldown field of our own `su` packets before
+        the client parses it (100% = normal), so the skill bar clears sooner.
+        The bot also uses the server's `sr` readiness packets and shortens
+        its own post-cast pause. The server keeps its own cooldown.
+        """
+        if self.client is None or not self.client.connected:
+            return
+        percent = self._cast_speed_percent()
+        try:
+            self.client.send_raw(f"CAST|{percent}")
+        except (ConnectionLost, ValueError):
+            return
+        if not quiet:
+            self._set_status(
+                f"cast speed {percent}% (client-side, high ban risk)"
+                if percent > CAST_SPEED_MIN
+                else "cast speed normal"
+            )
+
+    def _on_cast_speed_changed(self) -> None:
+        self._sync_cast_speed()
+
     def _on_page_switch(self, _notebook, _page, _page_num) -> None:
         self._ensure_map_loaded()
         if self.map_area is not None:
@@ -7290,12 +7410,12 @@ class Application(Gtk.Application):
                     self.dll_version = version_text or None
                     self._update_window_title()
                     self._set_status(message.payload)
-                    if version and version < (0, 2, 6):
+                    if version and version < (0, 2, 7):
                         warning = (
-                            "client DLL is older than 0.2.6 — the running "
+                            "client DLL is older than 0.2.7 — the running "
                             "game still has the old module; restart the game "
-                            "client (not just the GUI) to load the uncapped "
-                            "Speed + build"
+                            "client (not just the GUI) to load the Cast "
+                            "speed build (Speed + needs 0.2.6)"
                         )
                         self._set_status(warning)
                         # The status bar is overwritten by map auto-selection
@@ -7345,6 +7465,15 @@ class Application(Gtk.Application):
                     self._set_status(
                         f"server limited the speed boost to +{value} "
                         "(highest it accepts)"
+                    )
+                elif message.payload.startswith("CAST "):
+                    # DLL acknowledgement of CAST|N. The spin already shows
+                    # the value; no need to touch it (that would resend).
+                    text = message.payload[5:].strip()
+                    self._set_status(
+                        f"cast speed {text} applied (client-side)"
+                        if text and not text.startswith("100")
+                        else "cast speed normal"
                     )
                 elif message.payload.startswith(
                     "unknown command: TARGET"
@@ -7603,6 +7732,7 @@ class Application(Gtk.Application):
         # probe walk (which would make the server teleport the character).
         self._sync_portal_block()
         self._sync_speed_boost(quiet=True)
+        self._sync_cast_speed(quiet=True)
         self._request_position()
         return False
 
@@ -8427,11 +8557,14 @@ class Application(Gtk.Application):
             return False
         self._note_attack(monster.entity_id, now)
         self.fight_target_id = monster.entity_id
+        scale = self._cast_speed_scale()
         cooldown = (
-            max(info.cooldown, info.cast_time) if info is not None else 1.0
+            max(info.cooldown, info.cast_time * scale)
+            if info is not None
+            else 1.0
         )
         self.attack_cooldown_until = now + cooldown
-        cast_pause = info.cast_time if info is not None else 0.0
+        cast_pause = (info.cast_time * scale) if info is not None else 0.0
         self.walk_not_before = now + max(self.attack_walk_delay, cast_pause)
         self._set_status(f"follow-attack {monster.entity_id}: {packet}")
         return True
@@ -9405,6 +9538,12 @@ class Application(Gtk.Application):
                     return True
 
             basic = 0
+            # The basic attack is always `u_s 0`. Cast speed above 100% lets
+            # it go at the server's own `sr 0` readiness instead of waiting
+            # out the longer local timer.
+            basic_ready = self._server_skill_ready(
+                0, self.last_attack_sent_at
+            )
             basic_vnum = self._basic_skill_vnum()
             basic_info = (
                 self.spells.get(basic_vnum) if basic_vnum else None
@@ -9436,7 +9575,7 @@ class Application(Gtk.Application):
                 and monster is not None
                 and basic_in_range
                 and monster_sight
-                and now >= self.attack_cooldown_until
+                and (now >= self.attack_cooldown_until or basic_ready)
             ):
                 stats = self.engine.world.stats
                 if (
@@ -9472,10 +9611,14 @@ class Application(Gtk.Application):
                         self.fight_target_id = monster.entity_id
                         # The skill's own cast time and cooldown pace the next
                         # action; the Min delay spin is only a floor on top.
+                        # Cast speed shortens only the client-side cast
+                        # pause: the server's cooldown stays as the floor,
+                        # and `sr 0` is the authoritative ready moment.
+                        scale = self._cast_speed_scale()
                         if basic_info is not None:
                             cooldown = max(
                                 basic_info.cooldown,
-                                basic_info.cast_time,
+                                basic_info.cast_time * scale,
                             )
                         else:
                             # Unknown skill data: keep a safe 1 s floor.
@@ -9484,7 +9627,7 @@ class Application(Gtk.Application):
                         # Do not walk inside the skill animation: the server
                         # drops the walk and the bot would skip the path.
                         cast_pause = (
-                            basic_info.cast_time
+                            basic_info.cast_time * scale
                             if basic_info is not None
                             else 0.0
                         )
@@ -9500,7 +9643,7 @@ class Application(Gtk.Application):
                 rule is None
                 and monster is not None
                 and (not basic_in_range or not monster_sight)
-                and now >= self.attack_cooldown_until
+                and (now >= self.attack_cooldown_until or basic_ready)
                 and not self.bot_goals
                 and not self.recovery_pending
             ):
@@ -9651,6 +9794,7 @@ class Application(Gtk.Application):
         if self.client is not None and self.client.connected:
             try:
                 self.client.send_raw("SPEED|0")
+                self.client.send_raw(f"CAST|{CAST_SPEED_MIN}")
             except (ConnectionLost, ValueError):
                 pass
         self._close_mirror_writer(remove=True)

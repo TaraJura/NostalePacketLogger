@@ -35,7 +35,7 @@ std::string status_line() {
         buffer, sizeof(buffer),
         "STATUS|ntpl %s | recv=0x%08lX send=0x%08lX tnt=0x%08lX | "
         "hooks recv=%s send=%s skill=%s | drops recv=%lu send=%lu | "
-        "portalblock=%s | speed=+%d",
+        "portalblock=%s | speed=+%d | cast=%d%%",
         ntpl::kVersion,
         static_cast<unsigned long>(st.recv_addr),
         static_cast<unsigned long>(st.send_addr),
@@ -46,7 +46,8 @@ std::string status_line() {
         static_cast<unsigned long>(packetlogger::recv_dropped()),
         static_cast<unsigned long>(packetlogger::send_dropped()),
         packetlogger::portal_block() ? "BLOCKED" : "off",
-        packetlogger::speed_boost());
+        packetlogger::speed_boost(),
+        packetlogger::cast_speed());
 
     return std::string(buffer);
 }
@@ -307,6 +308,24 @@ void handle_command(const std::string& command) {
         const int requested = packetlogger::speed_request();
         char reply[64] = {0};
         std::snprintf(reply, sizeof(reply), "STATUS|SPEED +%d", requested);
+        tcpserver::send_line(reply);
+        return;
+    }
+
+    // CAST|N -- shorten the skill cooldown the client takes from the server's
+    // `su` packet to 100/N percent (100 = normal, 200 = half). The client's
+    // skill bar clears sooner; the server keeps its own cooldown and may
+    // refuse a cast sent before it is over. Client hack, high ban risk.
+    if (command.compare(0, 5, "CAST|") == 0) {
+        int percent = 100;
+        if (std::sscanf(command.c_str() + 5, "%d", &percent) != 1) {
+            tcpserver::send_line("STATUS|usage: CAST|percent(100-1000)");
+            return;
+        }
+        packetlogger::set_cast_speed(percent);
+        const int applied = packetlogger::cast_speed();
+        char reply[64] = {0};
+        std::snprintf(reply, sizeof(reply), "STATUS|CAST %d%%", applied);
         tcpserver::send_line(reply);
         return;
     }

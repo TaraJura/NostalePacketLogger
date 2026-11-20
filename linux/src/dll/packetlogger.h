@@ -56,6 +56,16 @@ void set_speed_boost(int add);
 int speed_boost();      // effective bonus currently applied
 int speed_request();    // bonus the host asked for
 
+// Client-side cast speed: `percent` above 100 shortens the skill cooldown the
+// client takes from the server's own `su <...> <cooldown> ...` packet, so the
+// skill bar becomes usable sooner (the server still enforces its own
+// cooldown and may refuse a cast sent too early). The packet is rewritten in
+// place before the client parses it; the host's log keeps the original. 100
+// is normal. This is a client hack (high ban risk); the GUI sets it from its
+// Cast speed control.
+void set_cast_speed(int percent);
+int cast_speed();
+
 // True once after the server corrected the player's position while a speed
 // boost was active. `settle` is the bonus to keep: +1 when a higher value was
 // rejected (the +1 probe had passed), 0 when even +1 was rejected. The worker

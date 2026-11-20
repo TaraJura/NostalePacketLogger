@@ -144,6 +144,13 @@ class WorldState:
     # swordsman). This is what makes range/cast/cooldown/MP per-card correct
     # without hardcoding a class skill.
     basic_skill: int | None = None
+    # `sr <castingId>`: the server's cooldown for that skill ended (the client
+    # clears the skill bar's cooldown on it). Cast speed uses this as the
+    # authoritative "ready" moment instead of waiting out a local timer; the
+    # custom `sr -10 <vnum> <duration> <elapsed>` form starts a cooldown and
+    # is not a readiness signal. Values are `time.monotonic()` so the GUI's
+    # bot tick can compare them with its own clock.
+    skill_ready_at: dict[int, float] = field(default_factory=dict)
     pending_skill_slot: int | None = None
     pending_skill_at: float = 0.0
     # Last entity that hit the local player, with the packet timestamp.
@@ -645,6 +652,18 @@ def _on_cancel(world: WorldState, packet: Packet) -> None:
     world.cancel_count += 1
 
 
+def _on_skill_ready(world: WorldState, packet: Packet) -> None:
+    # sr <castingId> -- the server's cooldown for this skill ended. Only the
+    # plain form is a readiness signal; `sr -10 <vnum> <duration> <elapsed>`
+    # (this server's cooldown-start form) must not clear a gate.
+    values = packet.ints(1)
+    if not values or values[0] < 0:
+        return
+    # Monotonic, like the GUI's bot clock. `Packet.timestamp` is wall time
+    # and cannot be compared with the tick's `time.monotonic()`.
+    world.skill_ready_at[values[0]] = time.monotonic()
+
+
 def _on_status(world: WorldState, packet: Packet) -> None:
     # st <type> <id> <level> <unknown> <state> <unknown> <hp> <unknown>
     #    <hpMax> ... -- live monster status (2026-11-07, map 3):
@@ -916,6 +935,7 @@ class Engine:
                 "wp": _on_waypoint,     # RECV: the map's Time-Space list
                 "ski": _on_skill_list,  # RECV: learned skill list
                 "su": _on_skill_used,   # RECV: a skill hit
+                "sr": _on_skill_ready,  # RECV: a skill's cooldown ended
                 "cancel": _on_cancel,   # RECV: the cast was cancelled
                 "stat": _on_stats,      # RECV: own hp/mp
                 "revive": _on_revive,   # RECV: the character was revived

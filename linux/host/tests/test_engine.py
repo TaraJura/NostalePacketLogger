@@ -1,3 +1,4 @@
+import time
 import unittest
 
 from ntpl.engine import Engine, walk_checksum
@@ -305,6 +306,20 @@ class EngineTests(unittest.TestCase):
         self.engine.feed(packet(Kind.RECV, "cancel 0 0 -1"))
         world = self.engine.feed(packet(Kind.RECV, "cancel 0 0 -1"))
         self.assertEqual(world.cancel_count, 2)
+
+    def test_skill_ready_tracks_plain_sr_only(self):
+        # sr <castingId>: the server's cooldown for that skill ended. The
+        # stored time is monotonic, like the GUI's bot clock.
+        before = time.monotonic()
+        world = self.engine.feed(Packet(Kind.RECV, "sr 2", 12.5))
+        ready = world.skill_ready_at.get(2)
+        self.assertIsNotNone(ready)
+        self.assertGreaterEqual(ready, before)
+        # The custom cooldown-start form is not a readiness signal.
+        world = self.engine.feed(
+            Packet(Kind.RECV, "sr -10 876 900 0", 13.0)
+        )
+        self.assertEqual(world.skill_ready_at, {2: ready})
 
     def test_drop_and_get(self):
         # Live: drop 1046 13961541 29 180 635 0 14881134

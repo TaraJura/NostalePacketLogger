@@ -1,4 +1,4 @@
-# Project context — 2026-11-19
+# Project context — 2026-11-20
 
 Quick map for the next session. The detailed history is in
 [handoff-2026-11-19.md](handoff-2026-11-19.md); packet formats in
@@ -7,7 +7,7 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 291 unittest cases, 5 GTK4 smokes, 37 fake-server bot
+- **Linux host**: 293 unittest cases, 5 GTK4 smokes, 38 fake-server bot
   smokes, and the native `speed-test` pass. Build: `make -C linux all
   test-host`, tests above.
 - **Speed +** (**Malicious** tab, default 0): the DLL reads the server's
@@ -21,6 +21,16 @@ the data layer in [database.md](database.md).
   scaling its top entry. Client hack, high ban risk; reverts when the GUI
   disconnects. Needs the 0.2.6 DLL (a game-client restart/injection), not
   just a GUI restart.
+- **Cast speed %** (**Malicious** tab, default 100 = normal, 100–1000):
+  the DLL rewrites our own `su` packet's cooldown field (arg 5) in the
+  client's receive buffer before it is parsed, so the skill bar clears
+  sooner; the host/log keep the original. The server still enforces its own
+  cooldown and refuses early casts (`cancel 0 <castId> -1`). Above 100% the
+  GUI also casts/basic-attacks when the server's `sr <castSlot>` arrives
+  (`WorldState.skill_ready_at`, monotonic) and scales its post-cast pause,
+  so it acts at the server's real rate rather than a longer local timer.
+  Saved as `cast_speed`, `CAST|<percent>` on attach/change, `CAST|100` on
+  shutdown. Needs DLL 0.2.7; not yet live-verified.
 - **NosBazar tab** (fourth GUI page): monitor + floor-protected relist ported
   from `TaraJura/Nostale-NB`. It learns the Bibi Basar entity id/option from
   the client's own `npc_req`/`n_run` or DLL log, searches `c_blist` at 2.5 s
