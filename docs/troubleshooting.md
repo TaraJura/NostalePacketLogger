@@ -49,7 +49,8 @@
 | `PORTALS|1` answers `unknown command` | old DLL (before 0.2.3) | reinject the current `PacketLogger.dll` (new filename or client restart after `QUIT`) |
 | Speed + keeps falling back to 0, or the GUI says the client DLL is older than 0.2.4 | the game client still runs an older DLL (host-only update) | restart the game client, not just the GUI; 0.2.4 probes +1 and settles at +1 when the server rejects the requested value |
 | Speed + settles at +1 and a higher value is rejected | the server enforces its own `cond` speed | +1 is the highest this server accepts; live 2026-11-20 at base 12: +1 (13) held, +4 (16) was corrected and settled to +1 |
-| `Injector` says a logger is already loaded after `QUIT` | the old module stays mapped, and the guard refuses a second injection | reload with a new DLL filename and `Injector.exe --pid <pid> --dll <name>.dll --force` (only after that logger's QUIT), or restart the game client |
+| `Injector` says a logger is already loaded after `QUIT` | the old module stays mapped, and the guard refuses a second injection | reload with a new DLL filename and `Injector.exe --pid <pid> --dll <name>.dll --force` (only after that logger's QUIT and its `C:\ntpl-<pid>.port` file has disappeared; `--force` refuses while the port file exists), or restart the game client |
+| Client crashes after injecting a DLL | a second live logger was injected (two send/recv hooks) | restart the game client; never `--force` while the old logger is still listening. The injector now refuses if the old port file exists |
 | Bot cannot reach a target near a map edge | the only route crosses a warp tile and blocking is on | that is the protection working; walk there manually with blocking off, or fight from range |
 
 ## UI

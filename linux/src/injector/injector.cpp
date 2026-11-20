@@ -44,6 +44,14 @@ std::wstring find_logger_module(DWORD pid) {
 }
 
 
+bool port_file_exists(DWORD pid) {
+    char path[MAX_PATH] = {0};
+    std::snprintf(path, sizeof(path), "C:\\ntpl-%lu.port",
+                  static_cast<unsigned long>(pid));
+    const DWORD attributes = GetFileAttributesA(path);
+    return attributes != INVALID_FILE_ATTRIBUTES;
+}
+
 std::string last_error_text(DWORD code) {
     char buffer[512] = {0};
     const DWORD length = FormatMessageA(
@@ -70,12 +78,23 @@ bool InjectDll(DWORD pid, const std::string& dll_path, std::string& error,
         return false;
     }
 
-    if (!force) {
-        const std::wstring loaded = find_logger_module(pid);
-        if (!loaded.empty()) {
+    const std::wstring loaded = find_logger_module(pid);
+    if (!loaded.empty()) {
+        if (!force) {
             error = "a packet logger is already loaded in this process (" +
                     narrow(loaded) +
                     "); restart the game client before injecting again";
+            return false;
+        }
+        // The module stays mapped after QUIT, so --force is needed for a
+        // reload. But if its port file still exists, the old logger is still
+        // running (or never cleaned up): injecting a second live logger
+        // crashes the game. QUIT removes the port file.
+        if (port_file_exists(pid)) {
+            error =
+                "the old logger is still running (C:\\ntpl-<pid>.port "
+                "exists); send QUIT, wait for the port file to disappear, "
+                "then retry --force";
             return false;
         }
     }
