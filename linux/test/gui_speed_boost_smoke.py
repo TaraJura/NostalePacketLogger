@@ -76,6 +76,12 @@ class FakeServer:
                     except OSError:
                         return
 
+    def send(self, text: str) -> None:
+        try:
+            self.connection.sendall(text.encode())
+        except OSError:
+            pass
+
     def close(self) -> None:
         self.stop.set()
         for sock in (self.connection, self.listener):
@@ -155,8 +161,27 @@ def main() -> int:
     def phase4() -> bool:
         try:
             result["sent35"] = "SPEED|35" in server.received
+            # The DLL reports a server correction; the GUI must reset the
+            # control to 0 and send SPEED|0.
+            server.send("STATUS|SPEED CORRECTED\n")
+            GLib.timeout_add(500, phase5)
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"phase4 exception: {exc!r}"
+            app.quit()
+        return False
+
+    def phase5() -> bool:
+        try:
+            result["correction_zero"] = (
+                int(app.speed_boost_spin.get_value()) == 0
+            )
+            result["correction_sent_zero"] = (
+                speed_lines(server.received)[-1:] == ["SPEED|0"]
+            )
+            status = app.status.get_text() if app.status is not None else ""
+            result["correction_status"] = "server corrected" in status
+        except Exception as exc:  # noqa: BLE001
+            result["detail"] = f"phase5 exception: {exc!r}"
         app.quit()
         return False
 
@@ -182,6 +207,9 @@ def main() -> int:
         and result.get("spin_after_config")
         and result.get("collected")
         and result.get("sent35")
+        and result.get("correction_zero")
+        and result.get("correction_sent_zero")
+        and result.get("correction_status")
         and result.get("shutdown_zero")
     )
     if not result.get("detail") or result["detail"] == "not checked":
@@ -193,6 +221,9 @@ def main() -> int:
             f"spin_after_config={result.get('spin_after_config')} "
             f"collected={result.get('collected')} "
             f"sent35={result.get('sent35')} "
+            f"correction_zero={result.get('correction_zero')} "
+            f"correction_sent_zero={result.get('correction_sent_zero')} "
+            f"correction_status={result.get('correction_status')} "
             f"shutdown_zero={result.get('shutdown_zero')} "
             f"speeds={speeds} tail={lines[-8:]}"
         )

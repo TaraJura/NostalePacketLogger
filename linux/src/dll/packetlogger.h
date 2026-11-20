@@ -45,13 +45,25 @@ void set_enabled(bool enabled);
 void set_portal_block(bool enabled);
 bool portal_block();
 
-// Client-side speed boost: while `add` > 0, the local player's incoming
-// `cond` speed gets that flat bonus (the way a NosTale speed buff works:
-// +1, +2, +3, ...) before the client parses it, and the client's own `walk`
-// speed is kept consistent. 0 turns it off. This is a client hack (high ban
-// risk); the GUI sets it from its Speed + control.
+// Client-side speed boost: while `add` > 0, the worker thread adds that flat
+// bonus to the local player's server-reported cond speed and applies it
+// through the client's own entity speed setter (a NosTale-style +1, +2, +3).
+// No packets are modified; the client's own walk builder reads the same
+// entity speed, so the wire follows the client's entity rather than an
+// independently patched field. 0 turns it off. This is a client hack (high
+// ban risk); the GUI sets it from its Speed + control.
 void set_speed_boost(int add);
 int speed_boost();
+
+// True once after the server corrected the player's position while a speed
+// boost was active; the boost has already been turned off. The worker reports
+// it to the host so the GUI can reset the control.
+bool take_speed_correction();
+
+// The speed to apply to the local player entity: the last server cond speed
+// plus the configured flat bonus, or 0 when no boost/cond is known. The
+// worker thread calls the client's own setter with this value.
+int speed_target();
 
 // Sends one already-formatted packet through the game's own send function.
 // Must be called from the worker thread (never from inside a hook).

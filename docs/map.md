@@ -252,12 +252,13 @@ grouped by function:
 
 A fifth top-level **Malicious** tab holds client-side tricks that apply
 immediately and do not need the bot. **Speed +** (0–50, default 0) adds a
-flat bonus (+1, +2, +3...) to the local player's incoming `cond` speed and
-also calls the client's own speed setter on the player actor, so the player
-itself walks faster with normal animation. The NosMate (`cond 2`) is not
-touched. It applies as soon as the spin changes; closing the GUI (or the DLL
-losing the host) restores normal speed. This is a client hack, high ban risk
-— see
+flat bonus (+1, +2, +3...) to the character's walking speed. No packet is
+modified: the DLL reads the server's `cond` speed and calls the client's own
+entity speed setter on the local player actor, the same field the walk builder
+reads. The NosMate (`cond 2`) is not touched. It applies as soon as the spin
+changes; if the server corrects the player while a boost is active, the DLL
+turns it off and the GUI resets the spin to 0. This is a client hack, high ban
+risk — see
 [bot-config.md](bot-config.md#speed-boost--client-side-movement-speed).
 
 See [bot-config.md](bot-config.md) for the target filter, spell-rule semantics

@@ -32,11 +32,10 @@ walk 20 139 0 10    (20 + 139 = 159; 159 % 3 == 0 -> checksum 0)
   position, but the client does not animate the move. The server then sends a
   `tp` correction, which the client renders as a teleport. Packet-only walking
   is therefore not a substitute for the client's own movement.
-- The `speed` field mirrors the character's last `cond` speed (live: both 12).
-  The GUI's **Speed +** control patches that `cond` in the DLL and, if the
-  client still sends the unboosted value, this field too; a packet already
-  carrying the boosted value is left alone, so the flat bonus is never added
-  twice. The client's boosted speed is what the server sees in `walk`.
+- The `speed` field mirrors the character's current entity speed (live: both
+  12). The GUI's **Speed +** control changes the client's entity speed through
+  its own setter; neither this field nor `cond` is rewritten, so the packet
+  always reports the speed the client is actually using.
 - The character must be **standing**. While sitting (`rest` state 1) the server
   ignores movement. Toggle with `rest 1 1 <charId>` first.
 - Accepted walks are **not** echoed to the client. Only a rejected or

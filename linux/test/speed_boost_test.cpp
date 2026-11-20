@@ -1,12 +1,10 @@
-// Host-side unit test for the DLL's speed-boost packet rewriting.
+// Host-side unit test for the DLL's speed-boost cond parsing.
 //
 // `make speed-test` builds and runs this on Linux; it needs neither Wine nor
-// the game. The rewriting is deliberately pure (speedboost.h) because it
-// writes into a live client's AnsiString buffer, so the field-width and
-// idempotence rules are worth pinning down.
+// the game. The DLL only reads the packet and never rewrites it, so these are
+// the parsing rules that keep the boost tied to the server's real speed.
 
 #include <cstdio>
-#include <cstring>
 
 #include "speedboost.h"
 
@@ -18,15 +16,6 @@ void check(bool condition, const char* what)
 {
     if (!condition) {
         std::fprintf(stderr, "FAIL: %s\n", what);
-        ++g_failures;
-    }
-}
-
-void expect_packet(const char* before, const char* after)
-{
-    if (std::strcmp(before, after) != 0) {
-        std::fprintf(stderr, "FAIL: expected \"%s\", got \"%s\"\n", after,
-                     before);
         ++g_failures;
     }
 }
@@ -46,115 +35,48 @@ void test_target_speed()
     check(speedboost::target_speed(59, 1) == 59, "59 stays 59");
 }
 
-void test_cond_patch()
+void test_parse_cond()
 {
-    const char* cond = "cond 1 7349 0 0 12";
-    speedboost::Change change = speedboost::plan_cond(cond, 3);
-    check(change.valid, "cond is valid");
-    check(change.id == 7349, "cond id is parsed");
-    check(change.from == 12 && change.to == 15, "cond speed +3");
-    check(change.rewrite, "15 fits the two-digit field");
+    speedboost::Cond cond =
+        speedboost::parse_cond("cond 1 7349 0 0 12", 3);
+    check(cond.valid, "cond is valid");
+    check(cond.id == 7349, "cond id is parsed");
+    check(cond.base == 12, "cond base speed is parsed");
+    check(cond.target == 15, "cond target is base + 3");
 
-    char buffer[64] = {0};
-    std::strcpy(buffer, cond);
-    check(speedboost::apply(buffer, change), "cond rewrite applies");
-    expect_packet(buffer, "cond 1 7349 0 0 15");
+    cond = speedboost::parse_cond("cond 1 7349 0 0 12", 0);
+    check(cond.valid && cond.target == 12, "0 bonus keeps the base");
 
-    change = speedboost::plan_cond(cond, 0);
-    check(change.valid && !change.rewrite, "0 bonus never rewrites");
-    std::strcpy(buffer, cond);
-    check(!speedboost::apply(buffer, change), "0 bonus apply is a no-op");
-    expect_packet(buffer, cond);
-
-    // A walk packet is not a cond packet.
-    check(!speedboost::plan_cond("walk 25 117 0 12", 3).valid,
-          "walk is not a cond");
+    // The DLL hook sees CRLF-terminated strings from the game.
+    cond = speedboost::parse_cond("cond 1 7001 0 0 12\r\n", 4);
+    check(cond.valid && cond.id == 7001 && cond.base == 12 &&
+              cond.target == 16,
+          "CRLF cond is parsed");
 
     // Only entity type 1 is the local player; monsters and pets use 2.
-    check(!speedboost::plan_cond("cond 2 209552 0 0 12", 3).valid,
+    check(!speedboost::parse_cond("cond 2 209552 0 0 12", 3).valid,
           "cond type 2 is ignored");
+    check(!speedboost::parse_cond("walk 25 117 0 12", 3).valid,
+          "walk is not a cond");
 
     // The speed must be the last of six fields.
-    check(!speedboost::plan_cond("cond 1 7349 0 0 12 7", 3).valid,
+    check(!speedboost::parse_cond("cond 1 7349 0 0 12 7", 3).valid,
           "a cond with an extra field is ignored");
-    check(!speedboost::plan_cond("cond 1 7349 0 12", 3).valid,
+    check(!speedboost::parse_cond("cond 1 7349 0 12", 3).valid,
           "a short cond is ignored");
-    check(!speedboost::plan_cond("cond  1 7349 0 0 12", 3).valid,
+    check(!speedboost::parse_cond("cond  1 7349 0 0 12", 3).valid,
           "double space is not a valid packet shape");
-    check(!speedboost::plan_cond("cond 1 7349 0 0 abc", 3).valid,
+    check(!speedboost::parse_cond("cond 1 7349 0 0 abc", 3).valid,
           "non-numeric speed is ignored");
 
-    // A one-digit speed cannot grow to two digits in place.
-    change = speedboost::plan_cond("cond 1 7 0 0 9", 1);
-    check(change.valid && !change.rewrite,
-          "9 -> 10 is refused (field width)");
-    char narrow[32] = {0};
-    std::strcpy(narrow, "cond 1 7 0 0 9");
-    check(!speedboost::apply(narrow, change), "narrow apply is a no-op");
-    expect_packet(narrow, "cond 1 7 0 0 9");
+    // The target is clamped at the client's walking-speed limit.
+    cond = speedboost::parse_cond("cond 1 7 0 0 58", 3);
+    check(cond.valid && cond.target == 59, "58 + 3 clamps to 59");
 
-    // The client cap still leaves a two-digit field.
-    change = speedboost::plan_cond("cond 1 7 0 0 58", 3);
-    check(change.valid && change.rewrite && change.to == 59,
-          "58 + 3 clamps to 59");
-    std::strcpy(buffer, "cond 1 7 0 0 58");
-    check(speedboost::apply(buffer, change), "clamped cond applies");
-    expect_packet(buffer, "cond 1 7 0 0 59");
-
-    // The DLL hook sees CRLF-terminated strings from the game. The line
-    // terminator must not become part of the speed token.
-    change = speedboost::plan_cond("cond 1 7349 0 0 12\r\n", 3);
-    check(change.valid && change.rewrite, "CRLF cond is parsed and rewritten");
-    char crlf[64] = {0};
-    std::strcpy(crlf, "cond 1 7349 0 0 12\r\n");
-    check(speedboost::apply(crlf, change), "CRLF cond rewrite applies");
-    expect_packet(crlf, "cond 1 7349 0 0 15\r\n");
-}
-
-void test_walk_patch()
-{
-    char buffer[64] = {0};
-
-    // The client still sends the server's speed: patch it.
-    speedboost::Change change =
-        speedboost::plan_walk("walk 25 117 0 12", 12, 15);
-    check(change.valid && change.rewrite, "walk with base speed is patched");
-    std::strcpy(buffer, "walk 25 117 0 12");
-    check(speedboost::apply(buffer, change), "walk rewrite applies");
-    expect_packet(buffer, "walk 25 117 0 15");
-
-    // The client already uses the boosted cond speed: leave it alone (a
-    // second bonus would be added twice).
-    change = speedboost::plan_walk("walk 25 117 0 15", 12, 15);
-    check(change.valid && !change.rewrite, "already boosted walk is kept");
-
-    // A different speed (mount, buff) is not guessed at.
-    change = speedboost::plan_walk("walk 25 117 0 13", 12, 15);
-    check(change.valid && !change.rewrite, "unknown walk speed is kept");
-
-    // Width limits apply here too.
-    change = speedboost::plan_walk("walk 25 117 0 9", 9, 10);
-    check(change.valid && !change.rewrite, "walk 9 -> 10 is refused");
-
-    // No cond seen yet: nothing to do.
-    check(!speedboost::plan_walk("walk 25 117 0 12", 0, 0).rewrite,
-          "no cond, no walk rewrite");
-
-    check(!speedboost::plan_walk("mv 1 7349 25 117 12", 12, 15).valid,
-          "mv is not a walk");
-
-    // The checksum field is untouched.
-    std::strcpy(buffer, "walk 22 123 1 11");
-    change = speedboost::plan_walk(buffer, 11, 13);
-    check(speedboost::apply(buffer, change), "walk 11 -> 13 applies");
-    expect_packet(buffer, "walk 22 123 1 13");
-
-    // CRLF-terminated walk packets (what the send hook actually sees).
-    std::strcpy(buffer, "walk 25 117 0 12\r\n");
-    change = speedboost::plan_walk(buffer, 12, 15);
-    check(change.rewrite, "CRLF walk is parsed");
-    check(speedboost::apply(buffer, change), "CRLF walk rewrite applies");
-    expect_packet(buffer, "walk 25 117 0 15\r\n");
+    // The parser does not care about packet field width; the entity setter
+    // handles a one-digit server speed fine.
+    cond = speedboost::parse_cond("cond 1 7 0 0 9", 1);
+    check(cond.valid && cond.target == 10, "9 + 1 targets 10");
 }
 
 }  // namespace
@@ -162,8 +84,7 @@ void test_walk_patch()
 int main()
 {
     test_target_speed();
-    test_cond_patch();
-    test_walk_patch();
+    test_parse_cond();
     if (g_failures != 0) {
         std::fprintf(stderr, "%d speed-boost test(s) failed\n", g_failures);
         return 1;

@@ -275,37 +275,29 @@ setting is saved as `block_portals`; the live state is in the DLL's status line
 
 **Speed +** (**Malicious** tab, 0–50, default 0) adds a flat bonus to the
 character's walking speed, the same way a NosTale speed buff works (+1, +2,
-+3...). It is not a server buff and not an injected movement packet: the DLL
-adds the bonus to the `cond 1 <charId> … <speed>` packet the server sends for
-the local player **before the client parses it**, so the client's own movement
-controller, its animation and its `walk` packets all use the boosted value.
-The DLL also calls the client's own entity speed setter on the local player
-actor (`[player+0x20]+0xAA`, the exact byte the walk packet builder reads), so
-the player itself moves even if the client's `cond` list lookup reaches another
-object; the NosMate's `cond 2` is never touched. If
-the client still sends the server's original speed in `walk`, the DLL replaces
-that field too; the bonus is never added twice. The boost applies as soon as
-the spin changes — also for manual play, not only while the bot runs — and is
-saved as `speed_boost` in the JSON configuration. Closing the GUI sends
-`SPEED|0`, and the DLL also reverts on its own when the host disconnects, so a
-crashed GUI cannot leave the client fast. The live value is in the DLL status
-line (`speed=+N`).
++3...). It is a client-side change, not a server buff and not a modified
+packet: the DLL reads the server's `cond 1 <charId> … <speed>` packet to learn
+the player's base speed, then calls the client's own entity speed setter on
+the local player actor (`[player+0x20]+0xAA`, the exact field the walk packet
+builder reads). **No packet bytes are changed.** The client's `walk` packets
+therefore report whatever speed the client's entity actually has, so the
+server is never told a speed the client is not using. A 25 ms worker watchdog
+re-applies the value because the client's own `cond` handler resets the entity
+to the server's value on each packet; if no cond has arrived yet, the entity's
+current speed is used as the base. The boost applies as soon as the spin
+changes, without the bot running, and is saved as `speed_boost` in the JSON
+configuration. Closing the GUI sends `SPEED|0`, and the DLL stops the watchdog
+when the host disconnects.
 
-Limits and risks:
+Limits and safety:
 
-- The rewrite is in place, so the boosted speed must have the same number of
-  digits as the server's value (`12`→`15` works; `9`→`10` does not). Normal
-  characters walk at 10–12 and the client cap is 59, so the whole 0–50 range
-  fits the two-digit field; if a speed has a different width the DLL logs a
-  line and leaves the packet alone.
 - The client's own `cond` speed setter ignores values above **59**
-  (`cmp dl,0x3b / ja`), so the DLL clamps the target at 59; a higher bonus
-  simply stops there.
-- The game hands the hooks CRLF-terminated strings (`… 12\r\n`); the parser
-  trims the terminator before reading the speed (this was the 2026-11-20
-  live bug: the first version silently refused every packet).
-- The client's speed is server-driven: every incoming `cond` is patched, so
-  the boost stays active while the GUI is attached.
+  (`cmp dl,0x3b / ja`), so the DLL clamps the target at 59.
+- If the server corrects the player's position (`tp 1 <charId> …`) while the
+  boost is active, the DLL turns it off immediately and sends
+  `STATUS|SPEED CORRECTED`; the GUI resets the spin to 0 and shows the reason.
+  This is the safety net against the teleport/kick loop seen on 2026-11-20;
+  a speed the server does not accept cannot keep correcting the character.
 - **This is a client hack.** The game rules prohibit client manipulation, and
   bot vendors themselves label speed hacks "high ban risk"; the account risk
   is the owner's. The default 0 keeps it off.

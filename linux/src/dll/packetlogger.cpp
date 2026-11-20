@@ -48,19 +48,22 @@ packetlogger::Status g_status;
 std::atomic<bool>    g_enabled{false};
 std::atomic<bool>    g_block_portal{false};
 
-// Client-side speed boost. `g_cond_base`/`g_cond_target` remember the last
-// server cond speed and the boosted value written to the client, so the
-// outgoing walk packet can be kept consistent without double-boosting.
+// Client-side speed boost. The host sets a flat bonus; the worker thread
+// applies it directly through the client's own entity speed setter (the same
+// function the server's `cond` packet reaches). Nothing on the wire is
+// rewritten: the client's walk builder reads the same entity, so the wire
+// follows the client's entity speed rather than an independently patched
+// field. If the server corrects the player (tp 1 <self>) while a boost is
+// active, the boost is turned off at once to stop a correction/kick loop.
 std::atomic<int>           g_speed_boost{0};
 std::atomic<int>           g_cond_base{0};
-std::atomic<int>           g_cond_target{0};
-std::atomic<int>           g_logged_target{0};
-std::atomic<int>           g_logged_skip{0};
 std::atomic<int>           g_logged_actor{-1};
+// Set when the server corrects the player's position while a boost is on.
+// The worker thread reports it to the host; the boost is turned off right
+// away so a bad speed cannot accumulate corrections into a kick.
+std::atomic<bool>          g_speed_corrected{false};
 std::atomic<unsigned long> g_self_id{0};
 std::atomic<unsigned long> g_self_id_at{0};
-std::atomic<const char*>   g_last_cond_ptr{nullptr};
-std::atomic<unsigned long> g_last_cond_ms{0};
 
 // The local character id, read from the client's own player object. Cached
 // briefly: the recv hook runs on the network thread and a cond arrives every
@@ -87,118 +90,26 @@ unsigned long local_char_id() {
     return cached;
 }
 
-// Rewrite the speed in a `cond` packet for the local player. Called from the
-// recv hook *before* the original parser runs; the packet is a mutable Delphi
-// AnsiString buffer and only same-width digits are replaced, so the length
-// field and the terminator stay valid.
-void patch_cond_packet(char* packet) {
-    const int add = g_speed_boost.load(std::memory_order_relaxed);
-    if (add <= 0 || packet == nullptr) {
+// Remember the server's current cond speed for the local player. The client
+// parses the packet unchanged; the worker thread adds the user's flat bonus
+// and sets the player entity directly a moment later, after the client's own
+// cond handler has run. No packet bytes are changed.
+void note_cond_packet(const char* packet) {
+    if (packet == nullptr || std::strncmp(packet, "cond ", 5) != 0) {
         return;
     }
-    if (std::strncmp(packet, "cond ", 5) != 0) {
-        return;
-    }
-
-    // The refcount call this hook sits on is normally reached once per
-    // packet. Guard a second pass over the same buffer anyway: adding the
-    // bonus to the already-boosted value would add it twice.
-    const unsigned long now = GetTickCount();
-    if (packet == g_last_cond_ptr.load(std::memory_order_relaxed) &&
-        now - g_last_cond_ms.load(std::memory_order_relaxed) < 50) {
-        return;
-    }
-
-    const speedboost::Change change =
-        speedboost::plan_cond(packet, add);
-    if (!change.valid) {
+    const speedboost::Cond cond = speedboost::parse_cond(
+        packet, g_speed_boost.load(std::memory_order_relaxed));
+    if (!cond.valid) {
         return;
     }
     // `cond 1` was observed only for the local player, but official crowded
     // maps may send others too; match the client's own char id when known.
     const unsigned long self = local_char_id();
-    if (self == 0 || change.id != self) {
+    if (self == 0 || cond.id != self) {
         return;
     }
-
-    g_last_cond_ptr.store(packet, std::memory_order_relaxed);
-    g_last_cond_ms.store(now, std::memory_order_relaxed);
-    g_cond_base.store(change.from, std::memory_order_relaxed);
-    g_cond_target.store(change.to, std::memory_order_relaxed);
-
-    // The client's own `cond` handler runs right after this hook. Also set
-    // the local player actor directly: the walk packet builder reads exactly
-    // that entity's speed byte, so the player moves even when the handler's
-    // list lookup reaches a different object (the symptom where only the
-    // NosMate sped up). Only raises a value, never lowers a buff.
-    int previous_speed = 0;
-    int applied_speed = 0;
-    std::string speed_error;
-    if (client_speed_set(change.to, previous_speed, applied_speed,
-                         speed_error)) {
-        if (previous_speed != applied_speed) {
-            const int logged =
-                g_logged_actor.exchange(applied_speed,
-                                        std::memory_order_relaxed);
-            if (logged != applied_speed) {
-                ntpl::logf("speed: player actor speed %d -> %d",
-                           previous_speed, applied_speed);
-            }
-        }
-    } else {
-        const int logged =
-            g_logged_actor.exchange(-1, std::memory_order_relaxed);
-        if (logged != -1) {
-            ntpl::logf("speed: player actor set failed: %s",
-                       speed_error.c_str());
-        }
-    }
-
-    if (change.rewrite && speedboost::apply(packet, change)) {
-        const int previous =
-            g_logged_target.exchange(change.to, std::memory_order_relaxed);
-        if (previous != change.to) {
-            ntpl::logf("speed boost +%d: cond %d -> %d", add, change.from,
-                       change.to);
-        }
-        return;
-    }
-
-    // Off, already at the cap, or too narrow for an in-place rewrite (a
-    // one-digit speed cannot become two digits here). The direct actor set
-    // above still applies the speed; report a width failure once per value.
-    if (change.to != change.from) {
-        const int previous =
-            g_logged_skip.exchange(change.from, std::memory_order_relaxed);
-        if (previous != change.from) {
-            ntpl::logf(
-                "speed boost +%d: cond %d -> %d does not fit the field",
-                add, change.from, change.to);
-        }
-    }
-}
-
-// Keep the client's own walk speed in step with the patched cond. If the
-// client already sends the boosted value this is a no-op; if it still sends
-// the server's value, replace it.
-void patch_walk_packet(char* packet) {
-    if (g_speed_boost.load(std::memory_order_relaxed) <= 0 ||
-        packet == nullptr) {
-        return;
-    }
-    if (std::strncmp(packet, "walk ", 5) != 0) {
-        return;
-    }
-    const int base = g_cond_base.load(std::memory_order_relaxed);
-    const int target = g_cond_target.load(std::memory_order_relaxed);
-    if (base <= 0 || target <= base) {
-        return;
-    }
-    const speedboost::Change change =
-        speedboost::plan_walk(packet, base, target);
-    if (change.rewrite) {
-        speedboost::apply(packet, change);
-    }
+    g_cond_base.store(cond.base, std::memory_order_relaxed);
 }
 
 // `preq` (portal request) is what the client sends when the character steps
@@ -232,11 +143,21 @@ void ntpl_on_packet_recv(const char* packet) {
         g_recv == nullptr) {
         return;
     }
-    // Queue the server's original text first, then rewrite the buffer the
-    // client is about to parse. The host keeps the true cond speed.
+    // Keep the server's packet untouched. The speed boost acts on the
+    // client's entity, not on the wire.
     g_recv->push(packet);
+    note_cond_packet(packet);
+    // A server correction while the boost is active means the server did not
+    // accept the faster walk (the 2026-11-20 teleports/kick). Drop the boost
+    // at the first one instead of feeding it more corrections.
     if (g_speed_boost.load(std::memory_order_relaxed) > 0) {
-        patch_cond_packet(const_cast<char*>(packet));
+        unsigned long id = 0;
+        if (std::sscanf(packet, "tp 1 %lu", &id) == 1 &&
+            id == local_char_id()) {
+            g_speed_boost.store(0, std::memory_order_release);
+            g_speed_corrected.store(true, std::memory_order_release);
+            ntpl::logf("speed boost disabled: server corrected the player");
+        }
     }
 }
 
@@ -246,11 +167,6 @@ void ntpl_on_packet_recv(const char* packet) {
 extern "C" int ntpl_on_packet_send(const char* packet) {
     if (!g_enabled.load(std::memory_order_relaxed) || packet == nullptr) {
         return 1;
-    }
-    // Patch the outgoing walk speed before it is logged or sent, so the log
-    // shows exactly what goes on the wire.
-    if (g_speed_boost.load(std::memory_order_relaxed) > 0) {
-        patch_walk_packet(const_cast<char*>(packet));
     }
     // Keep the packet in the stream/log even when dropping it: the host can
     // then show "preq blocked" instead of a silent stop.
@@ -456,15 +372,7 @@ void set_speed_boost(int add) {
     }
     const int previous =
         g_speed_boost.exchange(add, std::memory_order_release);
-    // Forget the last cond value: the next packet must be built from the
-    // server's own speed, not from a value patched with the old bonus.
-    g_cond_base.store(0, std::memory_order_relaxed);
-    g_cond_target.store(0, std::memory_order_relaxed);
-    g_logged_target.store(0, std::memory_order_relaxed);
-    g_logged_skip.store(0, std::memory_order_relaxed);
     g_logged_actor.store(-1, std::memory_order_relaxed);
-    g_last_cond_ptr.store(nullptr, std::memory_order_relaxed);
-    g_last_cond_ms.store(0, std::memory_order_relaxed);
     if (previous != add) {
         ntpl::logf("speed boost +%d (client-side)%s", add,
                    add > 0 ? " -- high ban risk" : "");
@@ -473,6 +381,30 @@ void set_speed_boost(int add) {
 
 int speed_boost() {
     return g_speed_boost.load(std::memory_order_relaxed);
+}
+
+bool take_speed_correction() {
+    return g_speed_corrected.exchange(false, std::memory_order_acq_rel);
+}
+
+int speed_target() {
+    const int add = g_speed_boost.load(std::memory_order_relaxed);
+    if (add <= 0) {
+        return 0;
+    }
+    int base = g_cond_base.load(std::memory_order_relaxed);
+    if (base <= 0) {
+        // No cond seen since injection: use the entity's current (server)
+        // speed as the base once, so +1 applies without waiting for the
+        // next packet. After this the stored base is refreshed by every
+        // local-player cond.
+        std::string error;
+        if (!client_speed_get(base, error) || base <= 0) {
+            return 0;
+        }
+        g_cond_base.store(base, std::memory_order_relaxed);
+    }
+    return speedboost::target_speed(base, add);
 }
 
 bool send_packet(const char* packet) {

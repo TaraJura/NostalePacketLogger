@@ -6215,6 +6215,15 @@ class Application(Gtk.Application):
                             f"(entity {parts[3]}, controller {parts[4]})"
                         )
                     dirty = True
+                elif message.payload.startswith("SPEED CORRECTED"):
+                    # The DLL turned the boost off after the server corrected
+                    # the player's position (the 2026-11-20 teleport/kick).
+                    if self.speed_boost_spin is not None:
+                        self.speed_boost_spin.set_value(0)
+                    self._set_status(
+                        "speed boost disabled: the server corrected the "
+                        "player's position"
+                    )
                 elif message.payload.startswith(
                     "unknown command: TARGET"
                 ):

@@ -27,3 +27,8 @@ bool client_position(int& x, int& y, unsigned long& char_id, int& resting,
 // as a safety net; validates the client build prologue before calling.
 bool client_speed_set(int speed, int& previous, int& applied,
                       std::string& error);
+
+// Read the local player entity's current speed byte. Used as the base when
+// the DLL starts after the last `cond`, so +1 applies without waiting for the
+// next one.
+bool client_speed_get(int& speed, std::string& error);

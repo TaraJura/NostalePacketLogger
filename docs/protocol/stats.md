@@ -94,11 +94,12 @@ cond 1 14881134 0 0 10
 *TODO: Decode the unknown fields (possibly buff/debuff flags, movement lock)*
 
 The client takes its own movement speed from this packet: the live logs show
-`cond 1 <id> 0 0 12` followed by `walk … 12`. The GUI's **Speed +** control
-therefore has the DLL add a flat bonus (+1, +2...) to the speed field here
-before the client parses it, and keep the outgoing `walk` speed consistent (see
+`cond 1 <id> 0 0 12` followed by `walk … 12`. The GUI's **Speed +** control only **reads** this packet to learn the base
+speed, then calls the client's own entity speed setter on the local player
+actor (see
 [bot-config.md](../bot-config.md#speed-boost--client-side-movement-speed)).
-The host's packet stream keeps the server's original value.
+The packet itself is never modified; the host's stream and the client both
+keep the server's value.
 
 ---
 

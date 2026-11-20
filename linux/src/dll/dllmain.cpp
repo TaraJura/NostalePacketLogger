@@ -368,11 +368,13 @@ DWORD WINAPI main_thread(LPVOID module) {
     }
 
     DWORD last_status_tick = GetTickCount();
+    DWORD last_speed_tick = 0;
+    int logged_speed_target = -1;
 
     while (!g_quit) {
         if (server_up && !tcpserver::is_connected()) {
-            // The host is gone (closed or crashed). Never leave a speed patch
-            // in the client: the next host starts from the configured value.
+            // The host is gone (closed or crashed). Stop re-applying the
+            // boost; the server's next `cond` returns the player to normal.
             if (packetlogger::speed_boost() != 0) {
                 packetlogger::set_speed_boost(0);
             }
@@ -393,6 +395,34 @@ DWORD WINAPI main_thread(LPVOID module) {
         drain(g_send_queue, "SEND");
 
         const DWORD now = GetTickCount();
+        // Speed +: re-apply the flat bonus to the local player entity every
+        // 100 ms. The client's own cond handler resets the entity to the
+        // server value whenever a cond arrives, so a one-shot set would be
+        // undone; this watchdog keeps it applied without touching packets.
+        // The client's walk builder reads this same entity, so the wire only
+        // carries a speed the player is actually moving at.
+        if (now - last_speed_tick >= 25) {
+            last_speed_tick = now;
+            const int target = packetlogger::speed_target();
+            if (target > 0) {
+                int previous = 0;
+                int applied = 0;
+                std::string error;
+                if (client_speed_set(target, previous, applied, error) &&
+                    target != logged_speed_target) {
+                    logged_speed_target = target;
+                    ntpl::logf(
+                        "speed: player actor %d -> %d (target %d)", previous,
+                        applied, target);
+                }
+            }
+        }
+        if (packetlogger::take_speed_correction()) {
+            ntpl::logf("speed boost turned off after a server correction");
+            if (tcpserver::is_connected()) {
+                tcpserver::send_line("STATUS|SPEED CORRECTED");
+            }
+        }
         if (now - last_status_tick >= 5000) {
             last_status_tick = now;
             if (tcpserver::is_connected() &&

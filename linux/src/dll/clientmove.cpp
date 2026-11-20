@@ -136,6 +136,53 @@ bool client_move(int x, int y, std::string& error)
     return true;
 }
 
+namespace {
+
+// The local player entity whose speed byte the walk packet builder reads:
+// manager = [[0x7954B4]], entity = [manager + 0x20].
+bool player_entity(std::uintptr_t& entity, std::string& error)
+{
+    if (!readable(kPlayerGlobal)) {
+        error = "player global not readable";
+        return false;
+    }
+    const std::uintptr_t holder =
+        *reinterpret_cast<const std::uintptr_t*>(kPlayerGlobal);
+    if (!readable(holder)) {
+        error = "player holder not readable";
+        return false;
+    }
+    const std::uintptr_t manager =
+        *reinterpret_cast<const std::uintptr_t*>(holder);
+    if (!readable(manager) ||
+        IsBadReadPtr(reinterpret_cast<const void*>(manager + 0x20),
+                     sizeof(std::uintptr_t))) {
+        error = "player object not readable";
+        return false;
+    }
+    entity = *reinterpret_cast<const std::uintptr_t*>(manager + 0x20);
+    if (!readable(entity) ||
+        IsBadReadPtr(reinterpret_cast<const void*>(entity), 0xC0)) {
+        error = "player entity not readable";
+        return false;
+    }
+    return true;
+}
+
+}  // namespace
+
+bool client_speed_get(int& speed, std::string& error)
+{
+    speed = 0;
+    std::uintptr_t entity = 0;
+    if (!player_entity(entity, error)) {
+        error = "SPEED: " + error;
+        return false;
+    }
+    speed = *reinterpret_cast<const std::uint8_t*>(entity + 0xAA);
+    return true;
+}
+
 bool client_speed_set(int speed, int& previous, int& applied,
                       std::string& error)
 {
@@ -154,32 +201,9 @@ bool client_speed_set(int speed, int& previous, int& applied,
         return false;
     }
 
-    // The same chain client_position uses; the entity at manager+0x20 is the
-    // one the walk packet builder (0x00720017) reads its speed from.
-    if (!readable(kPlayerGlobal)) {
-        error = "SPEED: player global not readable";
-        return false;
-    }
-    const std::uintptr_t holder =
-        *reinterpret_cast<const std::uintptr_t*>(kPlayerGlobal);
-    if (!readable(holder)) {
-        error = "SPEED: player holder not readable";
-        return false;
-    }
-    const std::uintptr_t manager =
-        *reinterpret_cast<const std::uintptr_t*>(holder);
-    if (!readable(manager) ||
-        IsBadReadPtr(reinterpret_cast<const void*>(manager + 0x20),
-                     sizeof(std::uintptr_t))) {
-        error = "SPEED: player object not readable";
-        return false;
-    }
-    const std::uintptr_t entity =
-        *reinterpret_cast<const std::uintptr_t*>(manager + 0x20);
-    if (!readable(entity) ||
-        IsBadReadPtr(reinterpret_cast<const void*>(entity + 0xAA), 1) ||
-        IsBadReadPtr(reinterpret_cast<const void*>(entity), 0xC0)) {
-        error = "SPEED: player entity not readable";
+    std::uintptr_t entity = 0;
+    if (!player_entity(entity, error)) {
+        error = "SPEED: " + error;
         return false;
     }
 
