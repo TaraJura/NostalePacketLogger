@@ -81,7 +81,7 @@ make -C linux all test-host                  # DLL + injector + test fixtures
 make -C linux host-test                      # 293 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux gui-test                       # headless GTK4 smokes (xvfb)
-make -C linux bot-test                       # 40 fake-server bot smokes
+make -C linux bot-test                       # 39 fake-server bot smokes
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path
 linux/scripts/dev-test-wine.sh 25
@@ -147,7 +147,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 ## Status
 
 The Linux port builds, its 293 unit tests pass, the five GTK4 window smokes
-and 40 bot smoke tests pass, and the real injector has been run against
+and 39 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 
 - both hooks `ACTIVE` (`recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`),
@@ -218,15 +218,14 @@ first value above the client's own 59 limit the DLL raises that check and
 extends the client's speed table, and values past the byte's 255 are emulated
 through its top entry. It applies immediately without the bot. If the server
 corrects the player, it settles at +1 instead of dropping to 0, or turns off
-if even +1 is rejected. **Cast speed** (same tab, a plain on/off switch)
-works with or without the bot and keeps the client's cooldowns visible.
-Manually, a spell pressed while the server is mid-cast is refused; the host
-keeps that exact packet and re-sends it the moment the server finishes the
-cast or the cooldown ends, so the press is not lost and the gap is only the
-server's cast time. With the bot running, it sends one cast at a time, waits
-for the server's answer (`su`/`cancel`) and sends the next spell or attack on
-that same tick, with no rule cooldown or post-cast pause. The server's own
-cast time and cooldown are the hard floor.
+if even +1 is rejected. **Cast speed** (same tab, a plain on/off switch) removes the
+client-side waits and works with or without the bot. Live packet data
+shows this server accepts overlapping casts, so manual presses go out
+the moment you press them and are never held. The bot sends the next
+eligible spell or attack at once instead of waiting for the previous
+cast, drops the rule cooldown and post-cast pause, and re-casts a skill
+when its `sr` cooldown-end packet arrives. The server's own cast time
+and per-skill cooldown are the hard floor.
 This is a client hack: the game rules prohibit client manipulation, and bot
 vendors themselves label speed hacks high ban risk. A third top-level **Bot log** tab keeps a
 timestamped, selectable record of every action (attacks, TARGET selections and

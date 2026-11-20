@@ -38,7 +38,8 @@ from ntpl.gui import Application
 SELF_ID = 14881134
 SKILL = 869          # Mana Shield: cast 1 s, cooldown 60 s, 300 MP, self
 SKILL_SLOT = 3       # position in the fake `ski` list below
-CAST_PACKET = f"SEND|u_s {SKILL_SLOT} 1 {SELF_ID}"
+SECOND_SKILL = 873   # Group Healing: 20 s cooldown, self
+SECOND_SLOT = 7
 SERVER_CAST_TIME = 0.6
 
 
@@ -106,7 +107,10 @@ class FakeServer:
                         )
                     except OSError:
                         return
-                elif text == CAST_PACKET:
+                elif (
+                    text.startswith("SEND|u_s ")
+                    and text.endswith(f" 1 {SELF_ID}")
+                ):
                     with self.answer_lock:
                         self.cast_count += 1
                         number = self.cast_count
@@ -140,7 +144,11 @@ def main() -> int:
     state: dict[str, float] = {}
 
     def casts() -> int:
-        return sum(1 for line in server.received if line == CAST_PACKET)
+        return sum(
+            1
+            for line in server.received
+            if line.startswith("SEND|u_s ") and line.endswith(f" 1 {SELF_ID}")
+        )
 
     def cast_times() -> list[float]:
         # The fake server sees packets, not monotonic times; approximate the
@@ -199,6 +207,20 @@ def main() -> int:
         result["off_one_only"] = result["off_casts"] == 1
         # Turn the hack on. The sr from the first cast is already in the
         # world state; the next tick must use it.
+        # A second, never-cast spell is eligible immediately: after the
+        # next cast it must go out on the same/next tick, overlapping the
+        # first spell's cast instead of waiting for its `su`.
+        app._add_spell_rule(
+            SpellRule(
+                enabled=True,
+                spell=SECOND_SKILL,
+                subject="always",
+                comparator="below",
+                threshold=50,
+                cooldown=30,
+                target="self",
+            )
+        )
         state["switch_at"] = time.monotonic()
         app.cast_boost_switch.set_active(True)
         GLib.timeout_add(50, wait_second)
@@ -229,17 +251,15 @@ def main() -> int:
         note_casts()
         if casts() >= 3:
             result["third_gap"] = cast_times()[2] - state["second_at"]
-            # Never before the server's answer (0.6 s), and immediately after
-            # it (no extra rule/cast delay).
-            result["third_after_answer"] = (
-                SERVER_CAST_TIME - 0.15 <= result["third_gap"] <= 1.3
-            )
+            # The next spell overlaps the current cast: it goes out at once,
+            # not after the delayed server answer.
+            result["third_overlaps"] = result["third_gap"] <= 0.3
             result["no_zeroing"] = "CAST|1" not in server.received
             result["ok"] = bool(
                 result.get("slot")
                 and result.get("off_one_only")
                 and result.get("second_fast")
-                and result.get("third_after_answer")
+                and result.get("third_overlaps")
                 and result.get("no_zeroing")
             )
             observed = cast_times()
@@ -248,6 +268,7 @@ def main() -> int:
                 f"off_casts={result.get('off_casts')} "
                 f"second_latency={result.get('second_latency', -1):.2f}s "
                 f"third_gap={result.get('third_gap', -1):.2f}s "
+                f"third_overlaps={result.get('third_overlaps')} "
                 f"no_zeroing={result.get('no_zeroing')} "
                 f"casts={observed} lines={server.received[-8:]}"
             )
@@ -255,8 +276,8 @@ def main() -> int:
             return False
         if time.monotonic() - state["second_at"] > 3.0:
             result["detail"] = (
-                "no third cast after the server answered the second "
-                f"(busy gate stuck); gap={time.monotonic() - state['second_at']:.2f}s "
+                "no overlapping third cast after the second; "
+                f"gap={time.monotonic() - state['second_at']:.2f}s "
                 f"lines={server.received[-8:]}"
             )
             app.quit()

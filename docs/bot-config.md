@@ -333,48 +333,37 @@ Limits and safety:
 **Cast speed** (**Malicious** tab) is a plain on/off switch, not a value: the
 request was "lower the cast speed and delay between spells to the minimum
 possible", so there is nothing to tune. It works with or without the bot.
-The server's own cast time and cooldown are the floor, and the client's
-skill-bar cooldowns stay accurate and visible.
+The server's own cast time and per-skill cooldown are the floor, and the
+client's skill-bar cooldowns stay accurate and visible.
 
-**Manual play:** the client sends `u_s` as soon as a skill is pressed. If
-the server is casting the previous skill it answers `cancel 0 <slot> -1`.
-With Cast speed on (the bot may be running or stopped), the GUI keeps that exact packet and
-re-sends it when the server finishes the current cast (a self `su`) or the
-skill's cooldown ends (`sr <slot>`), so pressing the next spell early is not
-lost and it fires at the server's first free moment. Only the latest press
-is kept (a newer press replaces it; 15 s TTL, two retries); the DLL's echo of the host's own send is
-ignored. This needs no DLL update and no game restart.
+**Live finding (2026-11-20, PID 676):** the server **accepts overlapping
+casts**. In the client log, 385 casts sent while another cast was still
+outstanding were accepted (`su`) and only 21 were refused (`cancel`), so
+pressing the next spell during the current one works. An earlier build held
+refused presses and re-sent them after the current cast; that delayed exactly
+the presses the server accepts, so it was removed. Manual presses now go out
+the moment the client sends them and the GUI never holds them.
 
-**Bot:** one cast is allowed at a time: after a spell or
-attack, the bot waits for the server's answer — a self `su` (accepted) or the
-`cancel` of that cast (refused / animation end) — and sends the next cast on
-the same tick it arrives. Sending earlier only gets `cancel 0 <castId> -1`
-and looks like no speedup. The bot also drops the per-rule cooldown and its
-post-cast pause, and it stops relying on its own Skill.dat timer: this server
-sends `sr <castSlot>` when a skill's cooldown ends, the engine stores it in
-`WorldState.skill_ready_at` (monotonic), and a rule or the basic attack is
-allowed as soon as that readiness is newer than the last cast. The walk guard
-(`attack_walk_delay`) is kept so a walk is not sent inside the skill
-animation. The setting is saved as `cast_boost`; an old `cast_speed`
+The bot also never waits for the previous `su`: as soon as a rule or the
+basic attack is eligible it sends the next cast, which overlaps the current
+one. It drops the per-rule cooldown and post-cast pause, and a spell is
+re-cast only when its server `sr <castSlot>` cooldown-end packet arrives
+(`WorldState.skill_ready_at`, monotonic). Sending the **same** skill faster
+than its own cooldown is still refused, so the `sr` gate stays for repeats.
+The walk guard (`attack_walk_delay`) is kept so a walk is not sent inside a
+skill animation. The setting is saved as `cast_boost`; an old `cast_speed`
 percentage above 100 imports as on. The GUI sends `CAST|0` on attach and
 shutdown to undo the earlier DLL zeroing, so the client cooldown display
-comes back; old DLLs ignore the command. No game restart is needed for the
-Cast speed switch.
+stays; old DLLs ignore the command. No game restart is needed.
 
 Fake-server proof (`gui_cast_ready_smoke.py`): Mana Shield has a 60 s
 Skill.dat cooldown and the rule is set to 30 s. With Cast speed off the bot
 casts it once, receives `sr 3`, and sends no second cast (the local 60 s gate
 holds). Flipping the switch on makes the next tick use that readiness — the
-second `u_s 3` goes out **0.05 s** later. The fake server then answers the
-second cast only after a 0.6 s cast time: no premature cast is sent in that
-window, and the third cast follows **0.63 s** after the second — the server's
-own cast time, not a rule or Skill.dat delay.
-
-Fake-server proof for manual play (`gui_manual_cast_smoke.py`, bot stopped):
-a `u_s 1 3 500` press answered by `cancel 0 1 -1` is held by the GUI and
-re-sent when `sr 1` arrives; the same press is held and re-sent on the next
-self `su`; and the DLL's echo of the host's own `SEND|u_s` does not start a
-loop.
+second `u_s 3` goes out **0.05 s** later. A second, never-cast spell added at
+the same time (Group Healing) then goes out **0.05 s** after the second cast,
+while the fake server is still holding its 0.6 s cast answer: the casts
+overlap, which is what the live server allows.
 
 ## Follow a player — trail a character
 

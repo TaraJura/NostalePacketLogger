@@ -274,17 +274,16 @@ turns it off and the GUI resets the spin to 0. This is a client hack, high ban
 risk — see
 [bot-config.md](bot-config.md#speed-boost--client-side-movement-speed).
 
-**Cast speed** is a plain on/off switch, not a value, and it is host-side. It
-works **without the bot** too: press the next spell while the previous one is
-casting; the server refuses that press, and the GUI keeps the exact packet
-and re-sends it when the server finishes the cast or the skill's cooldown
-ends, so the press is not lost. With the bot running it sends one cast at a
-time, waits for the server's answer (`su`/`cancel`), and sends the next
-spell/attack on that same tick; it drops the per-rule cooldown and post-cast
-pause and re-casts as soon as the server's `sr` readiness packet arrives.
-The client's cooldown display stays visible and accurate. The server keeps
-its own cooldown and cast time; the switch removes the client-side extra
-wait, not the server limit. High ban risk — see
+**Cast speed** is a plain on/off switch, not a value, and it is host-side.
+It works with or without the bot: manual presses are sent by the client
+immediately and this server accepts overlapping casts, so pressing the
+next spell during the current one starts it too — nothing is queued.
+The bot sends the next eligible spell/attack immediately instead of
+waiting for the previous cast, drops the per-rule cooldown and
+post-cast pause, and re-casts a skill when the server's `sr`
+cooldown-end packet arrives. The client's cooldown display stays
+visible and accurate. Each spell still lands after the server's own
+cast time. High ban risk — see
 [bot-config.md](bot-config.md#cast-speed--minimum-delay-between-spells-and-attacks).
 
 See [bot-config.md](bot-config.md) for the target filter, spell-rule semantics
@@ -529,7 +528,7 @@ never sees the `at` packet.
 ```bash
 make -C linux host-test   # 190 cases incl. synthetic NOS, 8-way A*, checksum, config
 make -C linux gui-test    # GUI + map surface + tooltips + unknown-position guard
-make -C linux bot-test    # 40 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, follow nameless/char id, portal blocking, speed boost control, cast speed control, cast-ready pacing, manual cast queue, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, follow mirror, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
+make -C linux bot-test    # 39 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, follow nameless/char id, portal blocking, speed boost control, cast speed control, cast-ready pacing, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, follow mirror, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
 ```
 
 The bot test sends a fake player at (25,117) on map 20, a monster at
