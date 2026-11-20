@@ -46,7 +46,12 @@ class FakeServer:
             self.connection.sendall(
                 b"STATUS|ready\n"
                 b"RECV|at 14881134 20 25 117 0 0 0 0 0 0 0\n"
-                b"RECV|in 1 NoFam - 5001 25 118 2 0 1 0 9 2 -1.0 "
+                b"RECV|in 1 NoFam - 5001 25 118 2 0 1 0 9 2 "
+                b"-1.0.0.-1.-1.885.-1.-1.-1.-1 "
+                b"100 100 0 -1 0 2 0 0 0 1000009 75 75 -1 - -2 0 0 0 0 81 "
+                b"0 0|0|0 0 0 100 0 0\n"
+                b"RECV|in 1 NoFairy - 5004 25 121 2 0 1 0 9 2 "
+                b"-1.0.0.-1.-1.-1.-1.-1.-1.-1 "
                 b"100 100 0 -1 0 2 0 0 0 1000009 75 75 -1 - -2 0 0 0 0 81 "
                 b"0 0|0|0 0 0 100 0 0\n"
                 b"RECV|in 1 FamGuy - 5002 25 119 2 0 1 0 9 2 -1.0 "
@@ -138,6 +143,7 @@ def main() -> int:
                 return False
             app.family_invite_interval = 0.2
             app.family_confirm_timeout = 2.0
+            app.family_only_fairy.set_active(True)
             app.family_auto_toggle.set_active(True)
             GLib.timeout_add(1200, phase2)
         except Exception as exc:  # noqa: BLE001
@@ -151,6 +157,9 @@ def main() -> int:
             result["one_invite"] = chosen == ["SEND|%Familyinvite NoFam"]
             result["no_family_player_skipped"] = not any(
                 "FamGuy" in line for line in chosen
+            )
+            result["no_fairy_skipped"] = not any(
+                "NoFairy" in line for line in chosen
             )
             result["unknown_family_skipped"] = not any(
                 "UnknownFam" in line for line in chosen
@@ -257,6 +266,7 @@ def main() -> int:
         for key in (
             "one_invite",
             "no_family_player_skipped",
+            "no_fairy_skipped",
             "unknown_family_skipped",
             "remembered",
             "list_visible",
@@ -278,6 +288,7 @@ def main() -> int:
         for key in (
             "one_invite",
             "no_family_player_skipped",
+            "no_fairy_skipped",
             "unknown_family_skipped",
             "remembered",
             "list_visible",

@@ -37,6 +37,16 @@ class Entity:
     family_id: int = -1
     family_name: str = ""
     family_known: bool = False
+    # Fairy presence: the equipment sub-packet carries the fairy item vnum;
+    # `pairy` carries the element and confirms a fairy. No-fairy players are
+    # the fresh/alt accounts the family auto-invite filter excludes.
+    fairy_vnum: int = -1
+    fairy_element: int = -1
+    fairy_known: bool = False
+
+    @property
+    def has_fairy(self) -> bool:
+        return self.fairy_vnum > 0 or self.fairy_element > 0
 
 
 @dataclass
@@ -536,6 +546,16 @@ def _on_spawn(world: WorldState, packet: Packet) -> None:
                 "" if values[23] in ("-", "") else values[23]
             )
             entity.family_known = True
+        # Equipment sub-packet: hat.armor.main.secondary.mask.fairy...
+        # FairyVNum is the sixth dot-separated value; -1 means no fairy.
+        if len(values) > 9:
+            equipment = values[9].split(".")
+            if len(equipment) > 5:
+                try:
+                    entity.fairy_vnum = int(equipment[5])
+                except ValueError:
+                    entity.fairy_vnum = -1
+                entity.fairy_known = True
         world.player_names[char_id] = name
         if len(world.player_names) > 2000:
             # The id -> name map only feeds the bazaar owner check; a busy
@@ -590,6 +610,27 @@ def _on_family_index(world: WorldState, packet: Packet) -> None:
     entity.family_id = _parse_family_id(args[2])
     entity.family_name = "" if args[3] in ("-", "") else args[3]
     entity.family_known = True
+
+
+def _on_fairy_info(world: WorldState, packet: Packet) -> None:
+    # pairy <type> <entityId> <moveType> <element> <elementRate> <morphVNum>
+    # Sent for players accompanied by a fairy; the element is 1..4.
+    args = packet.args
+    if len(args) < 4:
+        return
+    try:
+        kind = int(args[0])
+        entity_id = int(args[1])
+        element = int(args[3])
+    except ValueError:
+        return
+    if kind != 1:
+        return
+    entity = world.entities.get(entity_id)
+    if entity is None or entity.kind != 1:
+        return
+    entity.fairy_element = element
+    entity.fairy_known = True
 
 
 def _on_despawn(world: WorldState, packet: Packet) -> None:
@@ -863,6 +904,7 @@ class Engine:
                 "c_slist": _on_bazar_client_open,  # SEND: bazaar sellers
                 "in": _on_spawn,        # RECV: entity spawned
                 "gidx": _on_family_index,  # RECV: player family id/name
+                "pairy": _on_fairy_info,  # RECV: player fairy element
                 "out": _on_despawn,     # RECV: entity despawned
                 "st": _on_status,       # RECV: entity HP/status (death)
                 "tp": _on_teleport,     # RECV: entity teleported / server position

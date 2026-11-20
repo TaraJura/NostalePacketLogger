@@ -72,6 +72,12 @@ players whose family state is known and who have none.
   no-reply); the header shows the total on the map. Hidden `family unknown`
   rows are not rebuilt, which keeps a busy 150+ player town responsive.
   The visible list refreshes every second.
+- **Only players with a fairy** is a second auto-invite filter. It uses the
+  fairy vnum in the `in 1` equipment sub-packet (sixth dot-separated value)
+  and the `pairy` element; both are backfilled from the log. No-fairy players
+  are usually fresh alt accounts. The option is saved with the invited list
+  and defaults off; the map list labels each candidate `fairy`, `no fairy` or
+  `fairy unknown`.
 - Candidates are invited nearest first, one at a time. The tab waits for the
   server's `infoi2 234` confirmation before the next one (2.5 s pacing).
 - The live server also has an invite cooldown. Sending too early returns

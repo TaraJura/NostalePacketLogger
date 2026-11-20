@@ -25,6 +25,7 @@ from pathlib import Path
 
 _IN_MARKER = "[RECV] in "
 _GIDX_MARKER = "[RECV] gidx "
+_PAIRY_MARKER = "[RECV] pairy "
 _SKI_MARKER = "[RECV] ski "
 _AT_MARKER = "[RECV] at "
 _US_MARKER = "[SEND] u_s "
@@ -262,15 +263,18 @@ def _family_fields(token: str) -> int:
         return -1
 
 
-def load_player_families(
+def load_player_metadata(
     path: str | Path | None = None,
-) -> dict[int, tuple[int, str, bool]]:
-    """Return ``charId -> (familyId, familyName, known)`` from the log.
+) -> dict[int, tuple[int, str, bool, int, int, bool]]:
+    """Return family and fairy fields for the logged players.
 
-    The live `in 1` and `gidx` packets carry the same family fields as the
-    packet stream. A GUI that attaches after the players spawned never sees
-    those `in` packets, so without this backfill everyone on the map looked
-    like "family unknown" and auto-invite could not select them.
+    ``charId -> (familyId, familyName, familyKnown,
+                 fairyVnum, fairyElement, fairyKnown)``.
+    `in 1` carries the family fields and the equipment sub-packet's fairy
+    vnum; `gidx` and `pairy` update family and fairy element. A GUI that
+    attaches after the players spawned never sees those `in` packets, so
+    without this backfill everyone looked "family unknown"/"no fairy" and the
+    auto-invite filters could not select the right players.
     """
     source = Path(path) if path is not None else default_log_path()
     if source is None:
@@ -280,7 +284,7 @@ def load_player_families(
     except OSError:
         return {}
 
-    families: dict[int, tuple[int, str, bool]] = {}
+    metadata: dict[int, tuple[int, str, bool, int, int, bool]] = {}
     with log:
         for line in log:
             marker = line.find(_GIDX_MARKER)
@@ -291,9 +295,36 @@ def load_player_families(
                         char_id = int(parts[1])
                     except ValueError:
                         continue
-                    families[char_id] = (
+                    old = metadata.get(
+                        char_id, (-1, "", False, -1, -1, False)
+                    )
+                    metadata[char_id] = (
                         _family_fields(parts[2]),
                         "" if parts[3] in ("-", "") else parts[3],
+                        True,
+                        old[3],
+                        old[4],
+                        old[5],
+                    )
+                continue
+            marker = line.find(_PAIRY_MARKER)
+            if marker >= 0:
+                parts = line[marker + len(_PAIRY_MARKER):].split()
+                if len(parts) >= 4 and parts[0] == "1":
+                    try:
+                        char_id = int(parts[1])
+                        element = int(parts[3])
+                    except ValueError:
+                        continue
+                    old = metadata.get(
+                        char_id, (-1, "", False, -1, -1, False)
+                    )
+                    metadata[char_id] = (
+                        old[0],
+                        old[1],
+                        old[2],
+                        old[3],
+                        element,
                         True,
                     )
                 continue
@@ -303,25 +334,55 @@ def load_player_families(
                 match = _PLAYER.match(record)
                 if match is None:
                     continue
+                char_id = int(match.group(2))
                 rest = record[len(match.group(0)):].split()
+                old = metadata.get(
+                    char_id, (-1, "", False, -1, -1, False)
+                )
+                family_id, family_name, family_known = old[:3]
                 if len(rest) >= 23:
-                    families[int(match.group(2))] = (
-                        _family_fields(rest[21]),
-                        "" if rest[22] in ("-", "") else rest[22],
-                        True,
-                    )
+                    family_id = _family_fields(rest[21])
+                    family_name = "" if rest[22] in ("-", "") else rest[22]
+                    family_known = True
+                fairy_vnum, fairy_element, fairy_known = old[3:]
+                if len(rest) > 8:
+                    equipment = rest[8].split(".")
+                    if len(equipment) > 5:
+                        try:
+                            fairy_vnum = int(equipment[5])
+                        except ValueError:
+                            fairy_vnum = -1
+                        fairy_known = True
+                metadata[char_id] = (
+                    family_id,
+                    family_name,
+                    family_known,
+                    fairy_vnum,
+                    fairy_element,
+                    fairy_known,
+                )
                 continue
             change = _ints_after(line, _CMAP_MARKER, 3)
             if change and change[2] == 1:
-                families.clear()
+                metadata.clear()
                 continue
             if _MAPOUT_MARKER in line:
-                families.clear()
+                metadata.clear()
                 continue
             despawn = _ints_after(line, _OUT_MARKER, 2)
             if despawn and despawn[0] == 1:
-                families.pop(despawn[1], None)
-    return families
+                metadata.pop(despawn[1], None)
+    return metadata
+
+
+def load_player_families(
+    path: str | Path | None = None,
+) -> dict[int, tuple[int, str, bool]]:
+    """Family-only projection of :func:`load_player_metadata`."""
+    return {
+        char_id: (fields[0], fields[1], fields[2])
+        for char_id, fields in load_player_metadata(path).items()
+    }
 
 
 def load_skill_list(

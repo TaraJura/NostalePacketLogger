@@ -86,7 +86,7 @@ from .spawnlog import (
     load_gates,
     load_inventory as load_log_inventory,
     load_last_position,
-    load_player_families,
+    load_player_metadata,
     load_player_spawns,
     load_portals as load_log_portals,
     load_skill_list,
@@ -605,6 +605,7 @@ class Application(Gtk.Application):
         self.family_name_entry = None
         self.family_invite_button = None
         self.family_auto_toggle = None
+        self.family_only_fairy = None
         self.family_invited_info = None
         self.family_invited_list = None
         self.family_invited_scroll = None
@@ -628,10 +629,13 @@ class Application(Gtk.Application):
         self._family_no_reply_streak = 0
         self._family_auto_timer: int | None = None
         self._family_auto_guard = False
+        self._family_only_fairy_guard = False
         self._family_auto_last = 0.0
         self._family_status_hold_until = 0.0
         self._family_players_sig: tuple | None = None
         self._family_players_next_at = 0.0
+        self._family_invited_next_at = 0.0
+        self._family_invited_dirty = False
         self._family_timer_source: int | None = None
         # Right-click "Copy item name" in the NosBazar items/results lists.
         self._install_copy_action()
@@ -3078,15 +3082,38 @@ class Application(Gtk.Application):
                 "waits for the server's confirmation, then waits out the "
                 "server's invite cooldown (the countdown on the right). "
                 "Every confirmed name is saved per client and never retried, "
-                "even if the player declines. It stops if the server stops "
-                "confirming, so a client without family permission cannot "
-                "spam invites.",
+                "even if the player declines. The Only players with a fairy "
+                "option excludes fresh/alt accounts. It stops if the server "
+                "stops confirming, so a client without family permission "
+                "cannot spam invites.",
             )
         )
         self.family_timer_label = Gtk.Label(label="")
         self.family_timer_label.add_css_class("dim-label")
         auto_row.append(self.family_timer_label)
         page.append(auto_row)
+
+        fairy_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6
+        )
+        fairy_row.set_halign(Gtk.Align.START)
+        self.family_only_fairy = Gtk.CheckButton(
+            label="Only players with a fairy"
+        )
+        self.family_only_fairy.set_active(False)
+        self.family_only_fairy.connect(
+            "toggled", lambda *_: self._on_family_only_fairy_toggled()
+        )
+        fairy_row.append(self.family_only_fairy)
+        fairy_row.append(
+            self._help_button(
+                "Fairy filter",
+                "When auto-invite is on, invite only known no-family players "
+                "who have a fairy. Players without a fairy are usually fresh "
+                "alt accounts. The setting is saved with the invited list.",
+            )
+        )
+        page.append(fairy_row)
 
         self.family_status = Gtk.Label(label="")
         self.family_status.set_xalign(0)
@@ -3149,7 +3176,7 @@ class Application(Gtk.Application):
 
         self.family_state_path = self._family_path_for(None)
         self._family_load_state()
-        self._family_render_invited()
+        self._family_render_invited(force=True)
         if self._family_timer_source is None:
             self._family_timer_source = GLib.timeout_add(
                 1000, self._family_ui_tick
@@ -3194,10 +3221,16 @@ class Application(Gtk.Application):
             data = json.loads(raw)
         except (TypeError, ValueError):
             return
+        only_with_fairy = None
         if isinstance(data, dict):
+            only_with_fairy = data.get("only_with_fairy")
             data = data.get("invited", [])
         if not isinstance(data, list):
             return
+        if isinstance(only_with_fairy, bool) and self.family_only_fairy is not None:
+            self._family_only_fairy_guard = True
+            self.family_only_fairy.set_active(only_with_fairy)
+            self._family_only_fairy_guard = False
         for item in data:
             if isinstance(item, str) and item.strip():
                 name = item.strip()
@@ -3216,7 +3249,11 @@ class Application(Gtk.Application):
                         "invited": sorted(
                             self._family_invited.values(),
                             key=str.casefold,
-                        )
+                        ),
+                        "only_with_fairy": bool(
+                            self.family_only_fairy is not None
+                            and self.family_only_fairy.get_active()
+                        ),
                     },
                     indent=2,
                 )
@@ -3227,7 +3264,9 @@ class Application(Gtk.Application):
         except OSError as exc:
             self._log_line(f"family list: cannot save {path}: {exc}")
 
-    def _family_render_invited(self) -> None:
+    def _family_render_invited(self, force: bool = False) -> None:
+        if self.family_invited_list is None:
+            return
         count = len(self._family_invited)
         no_reply = len(self._family_no_reply)
         if self.family_invited_info is not None:
@@ -3235,52 +3274,58 @@ class Application(Gtk.Application):
             if no_reply:
                 text += f" · {no_reply} no reply"
             self.family_invited_info.set_text(text)
-        if self.family_invited_list is not None:
-            while (
-                child := self.family_invited_list.get_first_child()
-            ) is not None:
-                self.family_invited_list.remove(child)
-            entries = dict(self._family_invited)
-            for key, name in self._family_no_reply.items():
-                entries.setdefault(key, name)
-            for key, name in sorted(
-                entries.items(), key=lambda item: item[1].casefold()
-            ):
-                silent = (
-                    key in self._family_no_reply
-                    and key not in self._family_invited
-                )
-                row = Gtk.ListBoxRow()
-                row.set_activatable(False)
-                row.set_selectable(False)
-                box = Gtk.Box(
-                    orientation=Gtk.Orientation.HORIZONTAL, spacing=6
-                )
-                box.set_margin_top(2)
-                box.set_margin_bottom(2)
-                label = Gtk.Label(
-                    label=name + ("  ·  no reply" if silent else "")
-                )
-                label.set_xalign(0)
-                label.set_hexpand(True)
-                if silent:
-                    label.add_css_class("bazar-warn")
-                box.append(label)
-                remove = Gtk.Button(label="Remove")
-                remove.add_css_class("flat")
-                remove.set_valign(Gtk.Align.CENTER)
-                remove.connect(
-                    "clicked",
-                    lambda _button, chosen=name: self._family_remove(chosen),
-                )
-                box.append(remove)
-                row.set_child(box)
-                self.family_invited_list.append(row)
         if self.family_invited_scroll is not None:
             self.family_invited_scroll.set_visible(
                 count > 0 or no_reply > 0
             )
-
+        # The count/visibility above are cheap; the row rebuild is throttled
+        # so a burst of confirmations cannot rebuild dozens of rows each.
+        now = time.monotonic()
+        if not force and now < self._family_invited_next_at:
+            self._family_invited_dirty = True
+            return
+        self._family_invited_next_at = now + 1.0
+        self._family_invited_dirty = False
+        while (
+            child := self.family_invited_list.get_first_child()
+        ) is not None:
+            self.family_invited_list.remove(child)
+        entries = dict(self._family_invited)
+        for key, name in self._family_no_reply.items():
+            entries.setdefault(key, name)
+        for key, name in sorted(
+            entries.items(), key=lambda item: item[1].casefold()
+        ):
+            silent = (
+                key in self._family_no_reply
+                and key not in self._family_invited
+            )
+            row = Gtk.ListBoxRow()
+            row.set_activatable(False)
+            row.set_selectable(False)
+            box = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=6
+            )
+            box.set_margin_top(2)
+            box.set_margin_bottom(2)
+            label = Gtk.Label(
+                label=name + ("  ·  no reply" if silent else "")
+            )
+            label.set_xalign(0)
+            label.set_hexpand(True)
+            if silent:
+                label.add_css_class("bazar-warn")
+            box.append(label)
+            remove = Gtk.Button(label="Remove")
+            remove.add_css_class("flat")
+            remove.set_valign(Gtk.Align.CENTER)
+            remove.connect(
+                "clicked",
+                lambda _button, chosen=name: self._family_remove(chosen),
+            )
+            box.append(remove)
+            row.set_child(box)
+            self.family_invited_list.append(row)
     def _family_remove(self, name: str) -> None:
         key = name.casefold()
         if key not in self._family_invited and key not in self._family_no_reply:
@@ -3318,6 +3363,13 @@ class Application(Gtk.Application):
         )
         self._log_line(f"family list: added {name}")
 
+    def _on_family_only_fairy_toggled(self) -> None:
+        if self._family_only_fairy_guard:
+            return
+        self._family_players_sig = None
+        self._family_save_state()
+        self._family_render_players()
+
     def _family_cooldown_remaining(self) -> int:
         return max(
             0, math.ceil(self._family_next_invite_at - time.monotonic())
@@ -3344,6 +3396,8 @@ class Application(Gtk.Application):
         ):
             return True
         self._family_update_timer()
+        if self._family_invited_dirty:
+            self._family_render_invited(force=True)
         now = time.monotonic()
         if now >= self._family_players_next_at:
             self._family_players_next_at = now + 1.0
@@ -3375,7 +3429,16 @@ class Application(Gtk.Application):
                 and entity.family_id <= 0
                 and entity.family_name in ("", "-")
             )
-            if known_no_family and not invited and not silent:
+            only_fairy = bool(
+                self.family_only_fairy is not None
+                and self.family_only_fairy.get_active()
+            )
+            if (
+                known_no_family
+                and not invited
+                and not silent
+                and (not only_fairy or entity.has_fairy)
+            ):
                 to_invite += 1
             # Show only actionable rows: invite candidates and names already
             # in a list. A busy town's 167 "family unknown" rows made the GTK
@@ -3388,6 +3451,13 @@ class Application(Gtk.Application):
                 family = "no family"
             else:
                 family = "family unknown"
+            if entity.has_fairy:
+                fairy = "fairy"
+            elif entity.fairy_known:
+                fairy = "no fairy"
+            else:
+                fairy = "fairy unknown"
+            family = f"{family} · {fairy}"
             rows.append(
                 (
                     name,
@@ -3494,7 +3564,7 @@ class Application(Gtk.Application):
         self._family_players_next_at = 0.0
         self.family_state_path = self._family_path_for(winpid)
         self._family_load_state()
-        self._family_render_invited()
+        self._family_render_invited(force=True)
         self._family_render_players()
         self._family_update_timer()
         self._set_family_status("")
@@ -3633,6 +3703,12 @@ class Application(Gtk.Application):
                 continue
             key = name.casefold()
             if key in self._family_invited or key in self._family_no_reply:
+                continue
+            if (
+                self.family_only_fairy is not None
+                and self.family_only_fairy.get_active()
+                and not entity.has_fairy
+            ):
                 continue
             distance = 0
             if own_cell is not None:
@@ -3904,7 +3980,7 @@ class Application(Gtk.Application):
         # Follow can find them by name instead of reporting "not in sight".
         # Family fields are seeded too: otherwise every pre-attach player
         # looked "family unknown" and auto-invite could never select them.
-        families = load_player_families(self.log_file)
+        metadata = load_player_metadata(self.log_file)
         for player_id, (name, px, py) in load_player_spawns(
             self.log_file
         ).items():
@@ -3924,11 +4000,16 @@ class Application(Gtk.Application):
                 entity.x, entity.y = px, py
                 if not entity.name:
                     entity.name = name
-            family = families.get(player_id)
-            if family is not None:
-                entity.family_id, entity.family_name, entity.family_known = (
-                    family
-                )
+            meta = metadata.get(player_id)
+            if meta is not None:
+                (
+                    entity.family_id,
+                    entity.family_name,
+                    entity.family_known,
+                    entity.fairy_vnum,
+                    entity.fairy_element,
+                    entity.fairy_known,
+                ) = meta
         merged = False
         # `gp` is the server's own portal list: exact and complete per map.
         for (map_id, x, y), destination in load_gates(self.log_file).items():
@@ -7037,11 +7118,20 @@ class Application(Gtk.Application):
 
     def _drain(self) -> bool:
         dirty = False
-        for _ in range(1000):
+        # A busy town can deliver thousands of packets per tick. Draining
+        # 1000 of them in one main-loop callback froze the window ("Not
+        # Responding"). Process a bounded batch with a 15 ms budget so GTK
+        # can paint and handle input between batches.
+        deadline = time.monotonic() + 0.015
+        processed = 0
+        while processed < 500:
+            if processed % 32 == 0 and time.monotonic() >= deadline:
+                break
             try:
                 message = self.inbox.get_nowait()
             except queue.Empty:
                 break
+            processed += 1
 
             if message.kind is Kind.STATUS:
                 self.status_received = True

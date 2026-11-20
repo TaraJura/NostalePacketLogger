@@ -7,7 +7,7 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 287 unittest cases, 5 GTK4 smokes, 37 fake-server bot
+- **Linux host**: 291 unittest cases, 5 GTK4 smokes, 37 fake-server bot
   smokes, and the native `speed-test` pass. Build: `make -C linux all
   test-host`, tests above.
 - **Speed +** (**Malicious** tab, default 0): the DLL reads the server's

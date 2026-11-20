@@ -174,6 +174,53 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(world.entities[3913].family_id, -1)
         self.assertEqual(world.entities[3913].family_name, "")
 
+    def test_player_spawn_reads_fairy_from_equipment(self):
+        world = self.engine.feed(
+            packet(
+                Kind.RECV,
+                "in 1 FairyGuy - 5002 25 119 2 0 1 0 9 2 "
+                "-1.0.0.-1.-1.885.-1.-1.-1.-1 "
+                "100 100 0 -1 0 2 0 0 0 1000009 75 75 "
+                "70.918 SomeFam 14 0 0 0 0 85 1 0|0|0 0 0 100 10 0",
+            )
+        )
+        entity = world.entities[5002]
+        self.assertTrue(entity.fairy_known)
+        self.assertEqual(entity.fairy_vnum, 885)
+        self.assertTrue(entity.has_fairy)
+
+    def test_player_spawn_without_fairy(self):
+        world = self.engine.feed(
+            packet(
+                Kind.RECV,
+                "in 1 NoFairy - 5004 25 121 2 0 1 0 9 2 "
+                "-1.0.0.-1.-1.-1.-1.-1.-1.-1 "
+                "100 100 0 -1 0 2 0 0 0 1000009 75 75 "
+                "-1 - -2 0 0 0 0 81 0 0|0|0 0 0 100 0 0",
+            )
+        )
+        entity = world.entities[5004]
+        self.assertTrue(entity.fairy_known)
+        self.assertEqual(entity.fairy_vnum, -1)
+        self.assertFalse(entity.has_fairy)
+
+    def test_pairy_marks_fairy_element(self):
+        self.engine.feed(
+            packet(
+                Kind.RECV,
+                "in 1 NoFairy - 5004 25 121 2 0 1 0 9 2 "
+                "-1.0.0.-1.-1.-1.-1.-1.-1.-1 "
+                "100 100 0 -1 0 2 0 0 0 1000009 75 75 "
+                "-1 - -2 0 0 0 0 81 0 0|0|0 0 0 100 0 0",
+            )
+        )
+        world = self.engine.feed(
+            packet(Kind.RECV, "pairy 1 5004 4 3 30 0")
+        )
+        entity = world.entities[5004]
+        self.assertEqual(entity.fairy_element, 3)
+        self.assertTrue(entity.has_fairy)
+
     def test_gidx_does_not_create_unknown_entities(self):
         world = self.engine.feed(
             packet(Kind.RECV, "gidx 1 9999 -1 - 0 0|0|0")

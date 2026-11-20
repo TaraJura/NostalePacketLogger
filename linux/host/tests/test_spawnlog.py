@@ -14,6 +14,7 @@ from ntpl.spawnlog import (
     load_inventory,
     load_last_position,
     load_player_families,
+    load_player_metadata,
     load_player_spawns,
     load_portals,
     load_skill_list,
@@ -83,6 +84,18 @@ class SpawnLogTests(unittest.TestCase):
                 12771: (163, "Kartushka", True),
                 3913: (-1, "", True),
             },
+        )
+
+    def test_reads_fairy_vnum_and_element_from_log(self):
+        log = self._write(
+            "1 [RECV] in 1 Fairy - 5005 25 121 2 0 1 0 9 2 "
+            "-1.0.0.-1.-1.885.-1.-1.-1.-1 100 100 0 -1 0 2 0 0 0 "
+            "1000009 75 75 -1 - -2 0 0 0 0 81 0 0|0|0 0 0 100 0 0\r\n"
+            "2 [RECV] pairy 1 5005 4 3 30 0\r\n"
+        )
+        self.assertEqual(
+            load_player_metadata(log)[5005],
+            (-1, "", True, 885, 3, True),
         )
 
     def test_family_backfill_clears_on_map_change(self):

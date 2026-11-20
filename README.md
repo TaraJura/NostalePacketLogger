@@ -78,7 +78,7 @@ the catalog/database side is in [docs/database.md](docs/database.md).
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 287 Python unit tests
+make -C linux host-test                      # 291 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux gui-test                       # headless GTK4 smokes (xvfb)
 make -C linux bot-test                       # 37 fake-server bot smokes
@@ -146,7 +146,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 287 unit tests pass, the five GTK4 window smokes
+The Linux port builds, its 291 unit tests pass, the five GTK4 window smokes
 and 37 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 
@@ -185,6 +185,8 @@ game, and shows the server's `infoi2 234` confirmation. **Auto-invite** scans
 map players whose family state is known and empty, invites each name once
 (nearest first), waits out the server's 15 s invite cooldown with a visible
 countdown, and keeps an editable persisted list so a decline is never retried.
+An **Only players with a fairy** filter excludes fresh alt accounts; the map
+list labels each candidate fairy / no fairy / fairy unknown.
 Live-tested on `redenkor` and `sjkrimer`; see
 [docs/family.md](docs/family.md).
 
