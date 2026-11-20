@@ -69,7 +69,7 @@ make -C linux speed-test         # DLL speed-boost cond parsing and walk clamp
 make -C linux gui-test           # headless GTK4: map switch, tooltips, toggles,
                                  # banner, help popovers, client picker,
                                  # multi-client locks, family invite, auto-invite
-make -C linux bot-test           # 38 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, cross-client follow mirror, follow nameless/char id, portal blocking, speed boost control, cast speed control, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
+make -C linux bot-test           # 39 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, cross-client follow mirror, follow nameless/char id, portal blocking, speed boost control, cast speed control, cast-ready pacing, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
 ./linux/scripts/dev-test-wine.sh 25
 ```
 

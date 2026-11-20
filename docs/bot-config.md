@@ -355,6 +355,14 @@ a walk is not sent inside the skill animation. The setting is saved as
 shutdown, and needs the 0.2.8 DLL. An old `cast_speed` percentage above 100
 imports as on.
 
+Fake-server proof (`gui_cast_ready_smoke.py`): Mana Shield has a 60 s
+Skill.dat cooldown and the rule is set to 30 s. With Cast speed off the bot
+casts it once, receives `sr 3`, and sends no second cast. Flipping the switch
+on (which sends `CAST|1`) makes the next tick use that readiness — the second
+`u_s 3` goes out **0.05 s** later, instead of waiting a minute. The bot half
+is host-side, so it works with the old DLL after only a GUI restart; the
+client-side cooldown zeroing needs DLL 0.2.8.
+
 ## Follow a player — trail a character
 
 Type a player's name (or their char id) in the **Follow** frame and turn

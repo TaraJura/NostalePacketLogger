@@ -7,7 +7,7 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 293 unittest cases, 5 GTK4 smokes, 38 fake-server bot
+- **Linux host**: 293 unittest cases, 5 GTK4 smokes, 39 fake-server bot
   smokes, and the native `speed-test` pass. Build: `make -C linux all
   test-host`, tests above.
 - **Speed +** (**Malicious** tab, default 0): the DLL reads the server's
@@ -30,7 +30,11 @@ the data layer in [database.md](database.md).
   (`WorldState.skill_ready_at`, monotonic), with no per-rule cooldown and no
   post-cast pause, so it acts at the server's real rate rather than a longer
   local timer. Saved as `cast_boost`, `CAST|1`/`CAST|0` on attach/change,
-  `CAST|0` on shutdown. Needs DLL 0.2.8; not yet live-verified.
+  `CAST|0` on shutdown. Needs DLL 0.2.8. Fake-server proof:
+  `gui_cast_ready_smoke.py` — with the 60 s-cast Mana Shield, OFF gives one
+  cast and no follow-up; flipping the switch makes the second `u_s` go out
+  0.05 s later on the server's `sr`. The bot half works with the current DLL;
+  only the client-side cooldown zeroing needs 0.2.8.
 - **NosBazar tab** (fourth GUI page): monitor + floor-protected relist ported
   from `TaraJura/Nostale-NB`. It learns the Bibi Basar entity id/option from
   the client's own `npc_req`/`n_run` or DLL log, searches `c_blist` at 2.5 s

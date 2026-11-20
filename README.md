@@ -81,7 +81,7 @@ make -C linux all test-host                  # DLL + injector + test fixtures
 make -C linux host-test                      # 293 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux gui-test                       # headless GTK4 smokes (xvfb)
-make -C linux bot-test                       # 38 fake-server bot smokes
+make -C linux bot-test                       # 39 fake-server bot smokes
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path
 linux/scripts/dev-test-wine.sh 25
@@ -147,7 +147,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 ## Status
 
 The Linux port builds, its 293 unit tests pass, the five GTK4 window smokes
-and 38 bot smoke tests pass, and the real injector has been run against
+and 39 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 
 - both hooks `ACTIVE` (`recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`),
