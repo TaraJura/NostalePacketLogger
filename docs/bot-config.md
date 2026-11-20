@@ -301,10 +301,17 @@ Limits and safety:
   (`STATUS|SPEED CORRECTED`, spin 0). This is the safety net against the
   teleport/kick loop seen on 2026-11-20: a value the server does not accept
   cannot keep correcting the character, and the highest accepted value is
-  kept instead of dropping straight to 0. Live 2026-11-20 (base 12): +1 (13)
-  was accepted for the 8 s probe and stayed; +4 (16) was corrected once after
-  ~9.6 s and the DLL settled at +1. Turning the boost off forces the entity
-  back to the server base (12) even while idle.
+  kept instead of dropping straight to 0. Turning the boost off forces the
+  entity back to the server base even while idle.
+- **Live limit (2026-11-20):** with base 12, the repeated moving tests show
+  the server corrects even **+1 (walk speed 13)** after 4–5 s
+  (`14:26:36`/`14:26:58` `tp 1 7001`). A single +1 probe happened to survive
+  8 s at 14:24, but the longer/repeated runs are definitive: this server
+  accepts only its own `cond` speed. The DLL then reports
+  `STATUS|SPEED UNSUPPORTED`; the GUI says "this server rejects even +1" and
+  leaves the spin at 0. A client-side movement boost is not usable on this
+  server; use an in-game speed buff or mount, which raises the server's
+  `cond` legitimately.
 - **This is a client hack.** The game rules prohibit client manipulation, and
   bot vendors themselves label speed hacks "high ban risk"; the account risk
   is the owner's. The default 0 keeps it off.

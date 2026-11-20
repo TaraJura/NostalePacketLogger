@@ -65,6 +65,7 @@ std::atomic<int>           g_logged_actor{-1};
 // value; a correction settles at +1 (or 0) instead of feeding a kick loop.
 std::atomic<int>           g_speed_correction{-1};
 std::atomic<bool>          g_speed_reset{false};
+std::atomic<bool>          g_speed_unsupported{false};
 std::atomic<unsigned long> g_self_id{0};
 std::atomic<unsigned long> g_self_id_at{0};
 
@@ -159,6 +160,9 @@ void ntpl_on_packet_recv(const char* packet) {
             id == local_char_id()) {
             const int effective = g_speed_boost.load(std::memory_order_relaxed);
             const int settle = effective > 1 ? 1 : 0;
+            if (effective <= 1) {
+                g_speed_unsupported.store(true, std::memory_order_release);
+            }
             g_speed_request.store(settle, std::memory_order_relaxed);
             g_speed_boost.store(settle, std::memory_order_release);
             g_speed_probe_until.store(0, std::memory_order_relaxed);
@@ -416,6 +420,10 @@ bool take_speed_correction(int& settle) {
     }
     settle = value;
     return true;
+}
+
+bool take_speed_unsupported() {
+    return g_speed_unsupported.exchange(false, std::memory_order_acq_rel);
 }
 
 bool take_speed_reset() {

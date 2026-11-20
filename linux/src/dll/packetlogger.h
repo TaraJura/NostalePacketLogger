@@ -62,6 +62,11 @@ int speed_request();    // bonus the host asked for
 // reports it to the host so the GUI can show the limit.
 bool take_speed_correction(int& settle);
 
+// True once after the server corrected even the +1 probe: this server does
+// not accept any client-side speed above its own cond value. The GUI shows
+// this as a definitive "not usable here" message.
+bool take_speed_unsupported();
+
 // Promote the +1 probe to the requested value after the 8 s probe window.
 // Called from the worker thread.
 void speed_maybe_promote(unsigned long now);

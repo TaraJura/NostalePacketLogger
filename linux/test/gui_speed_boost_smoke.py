@@ -198,8 +198,25 @@ def main() -> int:
             )
             status = app.status.get_text() if app.status is not None else ""
             result["tuned_status"] = "limited the speed boost to +1" in status
+            server.send("STATUS|SPEED UNSUPPORTED\n")
+            GLib.timeout_add(500, phase7)
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"phase6 exception: {exc!r}"
+            app.quit()
+        return False
+
+    def phase7() -> bool:
+        try:
+            result["unsupported_zero"] = (
+                int(app.speed_boost_spin.get_value()) == 0
+            )
+            result["unsupported_no_send"] = (
+                speed_lines(server.received)[-1:] == ["SPEED|35"]
+            )
+            status = app.status.get_text() if app.status is not None else ""
+            result["unsupported_status"] = "rejects even +1" in status
+        except Exception as exc:  # noqa: BLE001
+            result["detail"] = f"phase7 exception: {exc!r}"
         app.quit()
         return False
 
@@ -231,6 +248,9 @@ def main() -> int:
         and result.get("tuned_spin")
         and result.get("tuned_no_send")
         and result.get("tuned_status")
+        and result.get("unsupported_zero")
+        and result.get("unsupported_no_send")
+        and result.get("unsupported_status")
         and result.get("shutdown_zero")
     )
     if not result.get("detail") or result["detail"] == "not checked":
@@ -248,6 +268,9 @@ def main() -> int:
             f"tuned_spin={result.get('tuned_spin')} "
             f"tuned_no_send={result.get('tuned_no_send')} "
             f"tuned_status={result.get('tuned_status')} "
+            f"unsupported_zero={result.get('unsupported_zero')} "
+            f"unsupported_no_send={result.get('unsupported_no_send')} "
+            f"unsupported_status={result.get('unsupported_status')} "
             f"shutdown_zero={result.get('shutdown_zero')} "
             f"speeds={speeds} tail={lines[-8:]}"
         )

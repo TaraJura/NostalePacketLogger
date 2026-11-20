@@ -6251,6 +6251,17 @@ class Application(Gtk.Application):
                             "client DLL is older than 0.2.4 — restart the "
                             "game client to load the Speed + probe"
                         )
+                elif message.payload.startswith("SPEED UNSUPPORTED"):
+                    # Even the +1 probe was corrected. No client-side speed
+                    # above the server's cond is accepted here.
+                    self._speed_tuning = True
+                    if self.speed_boost_spin is not None:
+                        self.speed_boost_spin.set_value(0)
+                    self._speed_tuning = False
+                    self._set_status(
+                        "this server rejects even +1: Speed + is not usable "
+                        "here; use an in-game speed buff or mount"
+                    )
                 elif message.payload.startswith("SPEED TUNED"):
                     # The server rejected a higher value but accepted +N; the
                     # DLL settled on it. Show the accepted value without
