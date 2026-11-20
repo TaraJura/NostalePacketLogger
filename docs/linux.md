@@ -284,7 +284,7 @@ make host-test          # 293 stdlib unit tests: protocol, engine, map, config, 
 make speed-test         # DLL speed-boost parsing/clamp (native C++, no Wine)
 
 make gui-test           # headless GTK4: map, help standard, picker, multi-client, family invite
-make bot-test           # 39 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, follow nameless/char id, portal blocking, speed boost control, cast speed control, cast-ready pacing, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, follow mirror, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
+make bot-test           # 40 fake-server smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, follow nameless/char id, portal blocking, speed boost control, cast speed control, cast assist, cast-ready pacing, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, follow mirror, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
 make all test-host
 ./scripts/dev-test-wine.sh 25
 ```

@@ -167,9 +167,13 @@ MAX_CANCEL_STREAK = 3
 #: belong to the newest attack.
 CAST_PENDING_MAX = 8
 CAST_PENDING_TTL_S = 3.0
-#: Cast speed chaining: a cast with no `su`/`cancel` for this long is treated
-#: as lost (a dropped response must not freeze the bot's rotation for good).
-CAST_ANSWER_TIMEOUT_S = 3.0
+#: Cast speed manual assist: the last skill the player pressed is repeated
+#: when its server cooldown ends (`sr`). It stops after this long without a
+#: repeat, so it cannot keep casting for an idle player forever.
+CAST_ASSIST_TTL_S = 120.0
+#: Hard stop for one assist session, so a forgotten switch cannot keep
+#: casting for hours (the player can press again to start a new session).
+CAST_ASSIST_MAX_S = 300.0
 #: Refused attacks within this window (across targets) pause combat. The
 #: server refuses everything in a town/safe zone or through walls; hopping to
 #: the next target just looks like a robot spamming `u_s`.
@@ -450,6 +454,16 @@ class Application(Gtk.Application):
         self._speed_tuning = False
         # Client-side cast speed switch (on = zero the skill cooldowns).
         self.cast_boost_switch = None
+        # Cast speed assist (no bot): the last skill the player pressed is
+        # re-sent whenever the server says its cooldown ended, so one key
+        # press keeps that spell/attack going at the server's fastest rate.
+        self.assist_packet: str | None = None
+        self.assist_slot: int | None = None
+        self.assist_seen_at = 0.0
+        self.assist_started_at = 0.0
+        self.assist_status_at = 0.0
+        # Host `SEND|u_s ...` echoes; they are not key presses.
+        self._host_skill_sends: list[tuple[int, float, str]] = []
         # -- cross-client packet mirroring (Follow frame) ------------------
         # Every attached host publishes its own `walk`/`u_s` to the mirror
         # bus; a follower replays the followed character's actions with its
@@ -3885,20 +3899,17 @@ class Application(Gtk.Application):
                 "outgoing walk packets at the server's normal speed, keeps "
                 "the client faster, and turns the value down or off if the "
                 "server corrects the player. Saved as speed_boost. "
-                "Cast speed removes the client-side waits; it works with or "
-                "without the bot. Manual presses already go out the moment "
-                "you press them, and this server accepts overlapping casts, "
-                "so pressing the next spell during the current one starts it "
-                "too — nothing is queued or delayed. With the bot running it "
-                "sends the next spell immediately instead of waiting for the "
-                "previous cast, drops the rule cooldown and post-cast pause, "
-                "and re-casts a skill only when the server's `sr` cooldown-"
-                "end packet says it is ready. The client's skill-bar "
-                "cooldowns stay visible. Each spell still lands after the "
-                "server's own cast time, which no client hack can shorten; "
-                "this removes the waits around it. Saved as cast_boost. "
-                "These tweaks violate the game rules and are high ban "
-                "risk.",
+                "Cast speed works without the bot: press a skill once and it "
+                "repeats automatically every time the server says that "
+                "skill's cooldown ended (`sr`), so your character keeps "
+                "casting at the server's fastest rate; press another skill "
+                "to switch, or turn the switch off. With the bot running its "
+                "spell rules send the next eligible spell immediately too, "
+                "and casts overlap — this server accepts casts sent during "
+                "each other. The client's skill-bar cooldowns stay visible. "
+                "Each spell still lands after the server's own cast time, "
+                "which no client hack can shorten. Saved as cast_boost. "
+                "These tweaks violate the game rules and are high ban risk.",
             )
         )
         page.append(header)
@@ -3933,9 +3944,9 @@ class Application(Gtk.Application):
         self.cast_boost_switch.set_active(False)
         self.cast_boost_switch.set_valign(Gtk.Align.CENTER)
         self.cast_boost_switch.set_tooltip_text(
-            "On: nothing waits for the previous cast. Manual presses go "
-            "out immediately; the bot sends the next spell as soon as the "
-            "server cooldown allows. Client cooldowns stay visible."
+            "On: press a skill once — it repeats at the server's fastest "
+            "rate; press another skill to switch. With the bot running its "
+            "spells cast immediately too. Client cooldowns stay visible."
         )
         self.cast_boost_switch.connect(
             "notify::active", lambda *_: self._on_cast_speed_changed()
@@ -6761,13 +6772,86 @@ class Application(Gtk.Application):
         except (ConnectionLost, ValueError):
             pass
 
+    def _cast_assist_packet(self, packet: Packet) -> None:
+        """Cast speed without the bot: repeat the skill the player pressed.
+
+        The client sends `u_s` when a skill is pressed. With Cast speed on
+        (and the bot stopped) that packet is remembered, and every time the
+        server sends `sr <slot>` — the end of that skill's cooldown — the
+        same press is sent again. One key press therefore keeps casting at
+        the server's maximum rate; pressing another skill switches the
+        assist to it. The project's own casts are recognized via
+        `_host_skill_sends` and never start an assist.
+        """
+        if not self._cast_boost_on() or self.bot_running:
+            return
+        now = time.monotonic()
+        if packet.direction is Kind.SEND:
+            if packet.opcode != "u_s":
+                return
+            values = packet.ints(3)
+            if not values:
+                return
+            slot = values[0]
+            for index, (host_slot, when, _text) in enumerate(
+                self._host_skill_sends
+            ):
+                if host_slot == slot and now - when <= 2.0:
+                    self._host_skill_sends.pop(index)
+                    return
+            if self.assist_packet != packet.text or self.assist_slot != slot:
+                self.assist_packet = packet.text
+                self.assist_slot = slot
+                self.assist_started_at = now
+                self._log_line(
+                    f"cast speed assist: repeating {packet.text} "
+                    f"(press another skill to switch)"
+                )
+                self._set_status(
+                    "cast speed assist: repeating the skill you pressed; "
+                    "press another skill to switch"
+                )
+            self.assist_seen_at = now
+            return
+        if packet.direction is not Kind.RECV or packet.opcode != "sr":
+            return
+        values = packet.ints(1)
+        if (
+            not values
+            or self.assist_packet is None
+            or values[0] != self.assist_slot
+        ):
+            return
+        if now - self.assist_seen_at > CAST_ASSIST_TTL_S:
+            self.assist_packet = None
+            self.assist_slot = None
+            self._set_status("cast speed assist stopped (idle)")
+            return
+        if now - self.assist_started_at > CAST_ASSIST_MAX_S:
+            self.assist_packet = None
+            self.assist_slot = None
+            self._set_status(
+                "cast speed assist stopped (5 min limit); press a skill "
+                "to start again"
+            )
+            return
+        packet_text = self.assist_packet
+        self.assist_seen_at = now
+        if self._send(packet_text) and now >= self.assist_status_at:
+            self.assist_status_at = now + 5.0
+            self._set_status(
+                f"cast speed assist: repeating {packet_text}"
+            )
+
     def _on_cast_speed_changed(self) -> None:
         if not self._cast_boost_on():
+            self.assist_packet = None
+            self.assist_slot = None
             self._set_status("cast speed normal")
             return
         message = (
-            "cast speed ON: presses go out immediately and the bot casts "
-            "without waiting for the previous spell"
+            "cast speed ON: press a skill once — it repeats at the "
+            "server's fastest rate; press another to switch"
         )
         self._set_status(message)
         self._log_line(message)
@@ -7491,6 +7575,9 @@ class Application(Gtk.Application):
                 packet = Packet.from_message(message)
                 self.engine.feed(packet)
                 self._track_packet(packet)
+                # Cast speed without the bot: repeat the skill the player
+                # pressed when its server cooldown ends.
+                self._cast_assist_packet(packet)
                 self._bazar_on_packet(packet)
                 self._family_on_packet(packet)
                 self._learn_char_id(self.engine.world.self_id)
@@ -7784,6 +7871,18 @@ class Application(Gtk.Application):
         if self.client is None or not self.client.connected:
             self._set_status("not connected")
             return False
+        if text.startswith("u_s "):
+            # The DLL echoes our `SEND|u_s` twice (command + send hook); the
+            # Cast speed assist must not treat those as key presses.
+            parts = text.split(" ", 2)
+            try:
+                slot = int(parts[1])
+            except (IndexError, ValueError):
+                slot = 0
+            now = time.monotonic()
+            self._host_skill_sends.append((slot, now, text))
+            self._host_skill_sends.append((slot, now, text))
+            del self._host_skill_sends[:-16]
         try:
             self.client.send_packet(text)
         except (ConnectionLost, ValueError) as exc:
@@ -8037,6 +8136,8 @@ class Application(Gtk.Application):
         self.last_attack_sent_at = 0.0
         self.last_cancel_count = self.engine.world.cancel_count
         self.pending_casts.clear()
+        self.assist_packet = None
+        self.assist_slot = None
         self.hit_marks_seen = self.engine.world.self_hit_count
         self.hit_target_at.clear()
         self.cancel_warn_at = 0.0
@@ -8074,6 +8175,8 @@ class Application(Gtk.Application):
         self.recover_need_mp = False
         self.fight_target_id = None
         self.pending_casts.clear()
+        self.assist_packet = None
+        self.assist_slot = None
         self._mirror_reset()
         self._set_status("bot stopped")
         self._set_path_info("stopped")

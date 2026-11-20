@@ -68,7 +68,7 @@ From `linux/`:
 make host-test      # 293 unittest cases
 make speed-test     # DLL speed-boost parsing/clamp (native C++, no Wine)
 make gui-test       # 5 headless GTK4 smokes: packet window + help standard, picker, multi-client, family invite, auto-invite
-make bot-test       # 39 smokes: combat, rules/config, recovery, follow, follow mirror, follow nameless/char id, speed boost control, cast speed control, cast-ready pacing, NosBazar monitor/relist/copy, NosMall import filters
+make bot-test       # 40 smokes: combat, rules/config, recovery, follow, follow mirror, follow nameless/char id, speed boost control, cast speed control, cast assist, cast-ready pacing, NosBazar monitor/relist/copy, NosMall import filters
 ```
 
 The tests start a fake TCP server, so they need neither the DLL nor Wine. The

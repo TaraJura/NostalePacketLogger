@@ -7,7 +7,7 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 293 unittest cases, 5 GTK4 smokes, 39 fake-server bot
+- **Linux host**: 293 unittest cases, 5 GTK4 smokes, 40 fake-server bot
   smokes, and the native `speed-test` pass. Build: `make -C linux all
   test-host`, tests above.
 - **Speed +** (**Malicious** tab, default 0): the DLL reads the server's
@@ -22,17 +22,17 @@ the data layer in [database.md](database.md).
   disconnects. Needs the 0.2.6 DLL (a game-client restart/injection), not
   just a GUI restart.
 - **Cast speed** (**Malicious** tab, plain on/off switch, default off):
-  host-side, works with or without the bot; the client's skill-bar
-  cooldowns stay visible (the GUI sends `CAST|0` on attach to undo DLL
-  0.2.8's zeroing). Live analysis of PID 676 shows the server accepts
-  overlapping casts (385 overlapping casts accepted vs 21 refused), so
-  manual presses go out immediately and the GUI never holds them. The
-  bot sends the next eligible spell/attack at once, drops the rule
-  cooldown/post-cast pause, and re-casts on `sr <castSlot>`
-  (`WorldState.skill_ready_at`, monotonic). The server's cast time and
+  host-side, works with or without the bot; cooldowns stay visible
+  (`CAST|0` on attach undoes DLL 0.2.8's zeroing). Manual: pressing a
+  skill once starts an assist that re-sends that exact `u_s` on every
+  `sr <slot>` cooldown-end packet (press another skill to switch,
+  120 s idle / 5 min cap). Bot: no waiting for the previous `su`; the
+  next eligible spell/attack goes out immediately and overlaps the
+  current cast (live PID 676: 385 overlapping casts accepted vs 21
+  refused), re-casting a skill on `sr`. The server's cast time and
   per-skill cooldown remain the floor. Saved as `cast_boost`.
-  `gui_cast_ready_smoke.py`: ON = +0.05 s on `sr`, then a different
-  spell sent 0.05 s after the previous send (overlap). No game restart.
+  `gui_cast_assist_smoke.py` and `gui_cast_ready_smoke.py` cover it.
+  No game restart.
 - **NosBazar tab** (fourth GUI page): monitor + floor-protected relist ported
   from `TaraJura/Nostale-NB`. It learns the Bibi Basar entity id/option from
   the client's own `npc_req`/`n_run` or DLL log, searches `c_blist` at 2.5 s

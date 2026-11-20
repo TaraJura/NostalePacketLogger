@@ -336,18 +336,23 @@ possible", so there is nothing to tune. It works with or without the bot.
 The server's own cast time and per-skill cooldown are the floor, and the
 client's skill-bar cooldowns stay accurate and visible.
 
+**Without the bot (manual assist):** press a skill once. The GUI remembers
+that exact `u_s` packet, and every time the server sends `sr <slot>` — the
+end of that skill's cooldown — it sends the same press again. The character
+keeps casting at the server's fastest rate without further key presses.
+Pressing another skill switches the assist to it; turning the switch off
+stops it; a session stops after 120 s with no repeat or 5 minutes total. The
+DLL's two echo lines for the host's own send are recognized and never start
+an assist.
+
 **Live finding (2026-11-20, PID 676):** the server **accepts overlapping
 casts**. In the client log, 385 casts sent while another cast was still
-outstanding were accepted (`su`) and only 21 were refused (`cancel`), so
-pressing the next spell during the current one works. An earlier build held
-refused presses and re-sent them after the current cast; that delayed exactly
-the presses the server accepts, so it was removed. Manual presses now go out
-the moment the client sends them and the GUI never holds them.
-
-The bot also never waits for the previous `su`: as soon as a rule or the
-basic attack is eligible it sends the next cast, which overlaps the current
-one. It drops the per-rule cooldown and post-cast pause, and a spell is
-re-cast only when its server `sr <castSlot>` cooldown-end packet arrives
+outstanding were accepted (`su`) and only 21 were refused, so the next spell
+can start while the current one is casting. The bot uses that: it never
+waits for the previous `su`; as soon as a rule or the basic attack is
+eligible it sends the next cast, which overlaps the current one. It drops the
+per-rule cooldown and post-cast pause, and a skill is re-cast only when its
+server `sr <castSlot>` cooldown-end packet arrives
 (`WorldState.skill_ready_at`, monotonic). Sending the **same** skill faster
 than its own cooldown is still refused, so the `sr` gate stays for repeats.
 The walk guard (`attack_walk_delay`) is kept so a walk is not sent inside a
@@ -356,14 +361,11 @@ percentage above 100 imports as on. The GUI sends `CAST|0` on attach and
 shutdown to undo the earlier DLL zeroing, so the client cooldown display
 stays; old DLLs ignore the command. No game restart is needed.
 
-Fake-server proof (`gui_cast_ready_smoke.py`): Mana Shield has a 60 s
-Skill.dat cooldown and the rule is set to 30 s. With Cast speed off the bot
-casts it once, receives `sr 3`, and sends no second cast (the local 60 s gate
-holds). Flipping the switch on makes the next tick use that readiness — the
-second `u_s 3` goes out **0.05 s** later. A second, never-cast spell added at
-the same time (Group Healing) then goes out **0.05 s** after the second cast,
-while the fake server is still holding its 0.6 s cast answer: the casts
-overlap, which is what the live server allows.
+Fake-server proofs: `gui_cast_assist_smoke.py` (bot off: a press is repeated
+on each `sr <slot>`, a new press switches the assist, and turning it off
+stops it) and `gui_cast_ready_smoke.py` (bot: +0.05 s on `sr`, then a
+different spell 0.06 s after the previous send while the fake server is
+still "casting" — the overlap the live server allows).
 
 ## Follow a player — trail a character
 

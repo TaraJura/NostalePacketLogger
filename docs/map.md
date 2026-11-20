@@ -275,15 +275,13 @@ risk — see
 [bot-config.md](bot-config.md#speed-boost--client-side-movement-speed).
 
 **Cast speed** is a plain on/off switch, not a value, and it is host-side.
-It works with or without the bot: manual presses are sent by the client
-immediately and this server accepts overlapping casts, so pressing the
-next spell during the current one starts it too — nothing is queued.
-The bot sends the next eligible spell/attack immediately instead of
-waiting for the previous cast, drops the per-rule cooldown and
-post-cast pause, and re-casts a skill when the server's `sr`
-cooldown-end packet arrives. The client's cooldown display stays
-visible and accurate. Each spell still lands after the server's own
-cast time. High ban risk — see
+Without the bot, press a skill once: it is repeated whenever the
+server says that skill's cooldown ended, so the character keeps
+casting at the server's fastest rate; press another skill to switch.
+With the bot running, its spells are sent immediately and overlap the
+current cast, and a skill is re-cast on its cooldown-end packet. The
+client's cooldown display stays visible and accurate. Each spell still
+lands after the server's own cast time. High ban risk — see
 [bot-config.md](bot-config.md#cast-speed--minimum-delay-between-spells-and-attacks).
 
 See [bot-config.md](bot-config.md) for the target filter, spell-rule semantics
@@ -528,7 +526,7 @@ never sees the `at` packet.
 ```bash
 make -C linux host-test   # 190 cases incl. synthetic NOS, 8-way A*, checksum, config
 make -C linux gui-test    # GUI + map surface + tooltips + unknown-position guard
-make -C linux bot-test    # 39 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, follow nameless/char id, portal blocking, speed boost control, cast speed control, cast-ready pacing, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, follow mirror, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
+make -C linux bot-test    # 40 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, follow nameless/char id, portal blocking, speed boost control, cast speed control, cast assist, cast-ready pacing, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, follow mirror, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosMall import filters
 ```
 
 The bot test sends a fake player at (25,117) on map 20, a monster at
