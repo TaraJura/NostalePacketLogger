@@ -328,27 +328,32 @@ Limits and safety:
   bot vendors themselves label speed hacks "high ban risk"; the account risk
   is the owner's. The default 0 keeps it off.
 
-## Cast speed — client-side skill cooldowns
+## Cast speed — minimum client-side skill delays
 
-**Cast speed %** (**Malicious** tab, default **100** = normal, range
-100–1000) shortens the client-side part of a skill's cooldown. The server
-sends each skill's cooldown in its own `su` packet
-(`su … <vnum> <cooldown> …`, deciseconds). The DLL rewrites that field in the
-client's receive buffer at 100/percent of the original before the client
-parses it (same token width, leading zeros; the `65535` "no cooldown"
-sentinel is skipped). The host queue and file log keep the server's original
-value. The **server's own cooldown is not changed**: a cast sent too early is
-still answered with `cancel 0 <castId> -1`, so the hack only removes the
-client's extra wait, it cannot exceed the server's rate.
+**Cast speed** (**Malicious** tab) is a plain on/off switch, not a value: the
+request was "lower the cast speed and delay between spells to the minimum
+possible", so there is nothing to tune. While it is on, the server's own
+cooldown and cast time are the floor.
 
-Above 100% the bot also stops relying on its own Skill.dat timer: this server
-sends `sr <castSlot>` when a skill's cooldown ends, the engine stores it in
+The server sends each skill's cooldown in its own `su` packet
+(`su … <vnum> <cooldown> …`, deciseconds). The DLL zeroes that field in the
+client's receive buffer before the client parses it (same token width, all
+zeros; the `65535` "no cooldown" sentinel is skipped). The host queue and file
+log keep the server's original value. The server's cooldown is not changed: a
+cast sent too early is still answered with `cancel 0 <castId> -1`, so the
+switch removes the client's extra wait; it cannot exceed the server's rate.
+
+The bot also stops relying on its own Skill.dat timer: this server sends
+`sr <castSlot>` when a skill's cooldown ends, the engine stores it in
 `WorldState.skill_ready_at` (monotonic), and a spell rule or the basic attack
-is allowed as soon as that readiness is newer than the last cast, with only
-the rule's own cooldown still applying. The bot also scales its post-cast
-pause (and the Follow-attack pause) by 100/percent, so it resumes walking
-sooner. The value is saved as `cast_speed`, sent as `CAST|<percent>` on
-attach/change and `CAST|100` on shutdown, and needs the 0.2.7 DLL.
+is allowed as soon as that readiness is newer than the last cast — with no
+per-rule cooldown and no post-cast pause, so the next cast goes out at the
+server's ready moment (the server starts its cooldown after the cast; the
+local timer started at send). The walk guard (`attack_walk_delay`) is kept so
+a walk is not sent inside the skill animation. The setting is saved as
+`cast_boost`, sent as `CAST|1` / `CAST|0` on attach/change and `CAST|0` on
+shutdown, and needs the 0.2.8 DLL. An old `cast_speed` percentage above 100
+imports as on.
 
 ## Follow a player — trail a character
 
@@ -440,7 +445,7 @@ Example:
   "loop": true,
   "block_portals": false,
   "speed_boost": 0,
-  "cast_speed": 100,
+  "cast_boost": false,
   "follow": false,
   "follow_player": "Follower Friend",
   "follow_attack": false,

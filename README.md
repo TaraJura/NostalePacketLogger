@@ -218,12 +218,13 @@ first value above the client's own 59 limit the DLL raises that check and
 extends the client's speed table, and values past the byte's 255 are emulated
 through its top entry. It applies immediately without the bot. If the server
 corrects the player, it settles at +1 instead of dropping to 0, or turns off
-if even +1 is rejected. **Cast speed %** (same tab, default 100 = normal)
-shortens the skill cooldown the client takes from the server's own `su`
-packet, so the skill bar clears sooner; the bot also casts and basic-attacks
-as soon as the server's `sr` readiness packet arrives and skips its
-client-side cast pause. The server keeps its own cooldown, so a cast sent too
-early is still refused — this only removes the client's extra wait.
+if even +1 is rejected. **Cast speed** (same tab, a plain on/off switch)
+forces the minimum client-side delay: the DLL zeroes the skill cooldown the
+client takes from the server's own `su` packet, so the skill bar is always
+ready; the bot casts and basic-attacks as soon as the server's `sr` readiness
+packet arrives and skips its client-side cast pause and rule delay. The
+server keeps its own cooldown and cast time, so a cast sent too early is still
+refused — this removes the client's extra wait, not the server limit.
 This is a client hack: the game rules prohibit client manipulation, and bot
 vendors themselves label speed hacks high ban risk. A third top-level **Bot log** tab keeps a
 timestamped, selectable record of every action (attacks, TARGET selections and

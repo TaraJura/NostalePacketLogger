@@ -1,14 +1,15 @@
-"""Headless smoke test for the **Cast speed** control.
+"""Headless smoke test for the **Cast speed** switch.
 
-The DLL shortens the client's skill cooldown from the server's `su` packet;
-the GUI has to send the percentage to the DLL, round-trip it through the bot
-configuration, and restore 100% on exit. Checks:
+The DLL zeroes the client's skill cooldowns from the server's `su` packet;
+the GUI has to send the on/off state to the DLL, round-trip it through the
+bot configuration, and restore normal on exit. Checks:
 
-* attaching sends the default `CAST|100` (no stale hack from an earlier GUI),
-* the spin spans 100-1000%,
-* changing it sends the new value immediately,
-* the setting round-trips through the bot configuration,
-* closing the window sends `CAST|100` before the link goes away.
+* attaching sends `CAST|0` (no stale hack from an earlier GUI),
+* the switch defaults to off,
+* turning it on sends `CAST|1` immediately and drops the bot's cast pause,
+* the setting round-trips through the bot configuration as a boolean,
+* turning it off sends `CAST|0`,
+* closing the window sends `CAST|0` before the link goes away.
 
 Run through scripts/dev-test-bot.sh (Xvfb).
 """
@@ -112,13 +113,9 @@ def main() -> int:
                     result["detail"] = "GUI never sent CAST| on attach"
                     app.quit()
                 return False
-            result["attach_normal"] = cast_lines(server.received)[0] == "CAST|100"
-            adjustment = app.cast_speed_spin.get_adjustment()
-            result["spin_range"] = (
-                int(adjustment.get_lower()) == 100
-                and int(adjustment.get_upper()) == 1000
-            )
-            app.cast_speed_spin.set_value(200)
+            result["attach_off"] = cast_lines(server.received)[0] == "CAST|0"
+            result["switch_off"] = not app.cast_boost_switch.get_active()
+            app.cast_boost_switch.set_active(True)
             GLib.timeout_add(400, phase2)
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"phase1 exception: {exc!r}"
@@ -127,14 +124,23 @@ def main() -> int:
 
     def phase2() -> bool:
         try:
-            result["sent200"] = "CAST|200" in server.received
-            config = BotConfig(cast_speed=250)
-            result["config_value"] = config.cast_speed == 250
+            result["sent_on"] = "CAST|1" in server.received
+            result["collect_on"] = app._collect_config().cast_boost is True
+            result["scale_zero"] = app._cast_speed_scale() == 0.0
+            config = BotConfig(cast_boost=True)
+            result["config_value"] = config.cast_boost is True
             result["round_trip"] = (
-                config.to_dict().get("cast_speed") == 250
-                and BotConfig.from_dict(config.to_dict()).cast_speed == 250
+                config.to_dict().get("cast_boost") is True
+                and BotConfig.from_dict(config.to_dict()).cast_boost is True
             )
-            app.cast_speed_spin.set_value(config.cast_speed)
+            # An old percentage config maps to "on".
+            result["legacy_on"] = BotConfig.from_dict(
+                {"cast_speed": 200}
+            ).cast_boost is True
+            result["legacy_off"] = BotConfig.from_dict(
+                {"cast_speed": 100}
+            ).cast_boost is False
+            app.cast_boost_switch.set_active(False)
             GLib.timeout_add(400, phase3)
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"phase2 exception: {exc!r}"
@@ -143,9 +149,10 @@ def main() -> int:
 
     def phase3() -> bool:
         try:
-            result["sent250"] = "CAST|250" in server.received
-            result["collected"] = app._collect_config().cast_speed == 250
-            result["scale_half"] = abs(app._cast_speed_scale() - 0.4) < 1e-9
+            result["sent_off"] = cast_lines(server.received).count(
+                "CAST|0"
+            ) >= 2
+            result["scale_one"] = app._cast_speed_scale() == 1.0
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"phase3 exception: {exc!r}"
         app.quit()
@@ -153,37 +160,43 @@ def main() -> int:
 
     GLib.timeout_add(300, phase1)
     app.run([])
-    # do_shutdown sends CAST|100; give the fake server a moment to read it.
+    # do_shutdown sends CAST|0; give the fake server a moment to read it.
     deadline = time.time() + 1.0
-    while time.time() < deadline and server.received[-1:] != ["CAST|100"]:
+    while time.time() < deadline and server.received[-1:] != ["CAST|0"]:
         time.sleep(0.02)
     server.close()
 
     lines = list(server.received)
     casts = cast_lines(lines)
-    result["shutdown_normal"] = bool(casts) and casts[-1] == "CAST|100"
+    result["shutdown_off"] = bool(casts) and casts[-1] == "CAST|0"
     result["casts"] = casts
     result["ok"] = bool(
-        result.get("attach_normal")
-        and result.get("spin_range")
-        and result.get("sent200")
+        result.get("attach_off")
+        and result.get("switch_off")
+        and result.get("sent_on")
+        and result.get("collect_on")
+        and result.get("scale_zero")
         and result.get("config_value")
         and result.get("round_trip")
-        and result.get("sent250")
-        and result.get("collected")
-        and result.get("scale_half")
-        and result.get("shutdown_normal")
+        and result.get("legacy_on")
+        and result.get("legacy_off")
+        and result.get("sent_off")
+        and result.get("scale_one")
+        and result.get("shutdown_off")
     )
     if not result.get("detail") or result["detail"] == "not checked":
         result["detail"] = (
-            f"attach_normal={result.get('attach_normal')} "
-            f"spin_range={result.get('spin_range')} "
-            f"sent200={result.get('sent200')} "
+            f"attach_off={result.get('attach_off')} "
+            f"switch_off={result.get('switch_off')} "
+            f"sent_on={result.get('sent_on')} "
+            f"collect_on={result.get('collect_on')} "
+            f"scale_zero={result.get('scale_zero')} "
             f"round_trip={result.get('round_trip')} "
-            f"sent250={result.get('sent250')} "
-            f"collected={result.get('collected')} "
-            f"scale_half={result.get('scale_half')} "
-            f"shutdown_normal={result.get('shutdown_normal')} "
+            f"legacy_on={result.get('legacy_on')} "
+            f"legacy_off={result.get('legacy_off')} "
+            f"sent_off={result.get('sent_off')} "
+            f"scale_one={result.get('scale_one')} "
+            f"shutdown_off={result.get('shutdown_off')} "
             f"casts={casts} tail={lines[-8:]}"
         )
     print("CAST SPEED SMOKE:", "PASS" if result["ok"] else "FAIL",

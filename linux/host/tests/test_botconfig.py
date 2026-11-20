@@ -61,21 +61,25 @@ class BotConfigTests(unittest.TestCase):
             BotConfig.from_dict(config.to_dict()).speed_boost, 35
         )
 
-    def test_cast_speed_defaults_to_normal_and_is_clamped(self):
-        self.assertEqual(BotConfig().cast_speed, 100)
-        self.assertEqual(
-            BotConfig.from_dict({"cast_speed": 200}).cast_speed, 200
+    def test_cast_boost_defaults_off_and_migrates_the_percentage(self):
+        self.assertFalse(BotConfig().cast_boost)
+        self.assertTrue(
+            BotConfig.from_dict({"cast_boost": True}).cast_boost
         )
-        self.assertEqual(
-            BotConfig.from_dict({"cast_speed": 10}).cast_speed, 100
+        self.assertFalse(
+            BotConfig.from_dict({"cast_boost": False}).cast_boost
         )
-        self.assertEqual(
-            BotConfig.from_dict({"cast_speed": 5000}).cast_speed, 1000
+        # The first build saved a percentage; any raised value means "on".
+        self.assertTrue(
+            BotConfig.from_dict({"cast_speed": 200}).cast_boost
         )
-        config = BotConfig(cast_speed=250)
-        self.assertEqual(config.to_dict()["cast_speed"], 250)
-        self.assertEqual(
-            BotConfig.from_dict(config.to_dict()).cast_speed, 250
+        self.assertFalse(
+            BotConfig.from_dict({"cast_speed": 100}).cast_boost
+        )
+        config = BotConfig(cast_boost=True)
+        self.assertIs(config.to_dict()["cast_boost"], True)
+        self.assertTrue(
+            BotConfig.from_dict(config.to_dict()).cast_boost
         )
 
     def test_invalid_values_are_clamped_without_crashing(self):

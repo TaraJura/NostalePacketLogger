@@ -71,13 +71,13 @@ std::atomic<bool>          g_speed_unsupported{false};
 std::atomic<unsigned long> g_self_id{0};
 std::atomic<unsigned long> g_self_id_at{0};
 
-// Client-side cast speed (100 = normal). The server sends each own skill's
-// cooldown in `su` (arg 5, deciseconds) and this server's custom
-// `sr -10 <vnum> <duration> <elapsed>` form; scaling that field in the
-// receive buffer before the client parses it shortens the skill bar's
-// cooldown. The wire still carries the server's values: the host queue is
-// filled before the rewrite.
-std::atomic<int> g_cast_speed{100};
+// Client-side cast speed: when on, every cooldown the client stores for our
+// own skills is zeroed in the receive buffer before the client parses it.
+// The server sends the cooldown in `su` (arg 5, deciseconds) and in this
+// server's custom `sr -10 <vnum> <duration> <elapsed>` form; the wire still
+// carries the server's values (the host queue is filled first), and the
+// server's own cooldown enforcement is untouched.
+std::atomic<bool> g_cast_zero{false};
 
 // The local character id, read from the client's own player object. Cached
 // briefly: the recv hook runs on the network thread and a cond arrives every
@@ -156,9 +156,8 @@ bool is_portal_request(const char* packet) {
 // player's casts matter: the client applies the cooldown to its own skill
 // bar. The custom `sr -10 <vnum> <duration> <elapsed>` form carries the
 // duration as raw field 3.
-void scale_cast_packet(char* packet) {
-    const int percent = g_cast_speed.load(std::memory_order_relaxed);
-    if (percent <= 100 || packet == nullptr) {
+void zero_cast_packet(char* packet) {
+    if (!g_cast_zero.load(std::memory_order_relaxed) || packet == nullptr) {
         return;
     }
     if (std::memcmp(packet, "su ", 3) == 0) {
@@ -170,11 +169,11 @@ void scale_cast_packet(char* packet) {
             id != local_char_id()) {
             return;
         }
-        castspeed::scale_field(packet, 6, percent);
+        castspeed::zero_field(packet, 6);
         return;
     }
     if (std::memcmp(packet, "sr -10 ", 7) == 0) {
-        castspeed::scale_field(packet, 3, percent);
+        castspeed::zero_field(packet, 3);
     }
 }
 
@@ -205,10 +204,10 @@ void ntpl_on_packet_recv(const char* packet) {
     // entity, not on the wire.
     g_recv->push(packet);
     note_cond_packet(packet);
-    // Cast speed: shorten the cooldown the client stores for our own skills.
+    // Cast speed: zero the cooldown the client stores for our own skills.
     // This changes only the client's copy of the packet, in its receive
     // buffer; the server's cooldown enforcement is untouched.
-    scale_cast_packet(const_cast<char*>(packet));
+    zero_cast_packet(const_cast<char*>(packet));
     // A server correction while the boost is active means the server did not
     // accept the faster walk (the 2026-11-20 teleports/kick). Drop the boost
     // at the first one instead of feeding it more corrections.
@@ -469,22 +468,17 @@ int speed_request() {
     return g_speed_request.load(std::memory_order_relaxed);
 }
 
-void set_cast_speed(int percent) {
-    if (percent < 100) {
-        percent = 100;
-    }
-    if (percent > 1000) {
-        percent = 1000;
-    }
-    const int previous = g_cast_speed.exchange(percent,
+void set_cast_zero(bool enabled) {
+    const bool previous = g_cast_zero.exchange(enabled,
                                                std::memory_order_release);
-    if (previous != percent) {
-        ntpl::logf("cast speed %d%% (client-side) -- high ban risk", percent);
+    if (previous != enabled) {
+        ntpl::logf("cast speed %s (client-side) -- high ban risk",
+                   enabled ? "ON: skill cooldowns zeroed" : "off");
     }
 }
 
-int cast_speed() {
-    return g_cast_speed.load(std::memory_order_relaxed);
+bool cast_zero() {
+    return g_cast_zero.load(std::memory_order_relaxed);
 }
 
 bool take_speed_correction(int& settle) {

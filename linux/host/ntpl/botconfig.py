@@ -24,7 +24,7 @@ Schema (version 1)::
       "loop": true,
       "block_portals": false,    # off: portals stay usable by default
       "speed_boost": 0,          # flat client-side speed bonus (+1, +2...)
-      "cast_speed": 100,         # client-side cast speed, percent (100 normal)
+      "cast_boost": false,       # zero the client-side skill cooldowns
       "follow": false,           # follow a player instead of fighting
       "follow_player": "Name",    # player name, or char id as text
       "follow_attack": false,     # attack the monster the player hits
@@ -71,10 +71,6 @@ MAX_WAYPOINTS = 500
 #: Speed + is not clamped at the client's 59 any more (the DLL lifts it);
 #: this only keeps a hand-edited file from carrying a nonsense int.
 MAX_SPEED_BOOST = 1000000
-#: Cast speed is a percentage: 100 = normal, 200 = half the client-side
-#: cooldown/cast pause. The DLL clamps to the same range.
-MIN_CAST_SPEED = 100
-MAX_CAST_SPEED = 1000
 
 
 class ConfigError(ValueError):
@@ -140,7 +136,7 @@ class BotConfig:
     loop: bool = True
     block_portals: bool = False
     speed_boost: int = 0
-    cast_speed: int = MIN_CAST_SPEED
+    cast_boost: bool = False
     follow: bool = False
     follow_player: str = ""
     follow_attack: bool = False
@@ -173,7 +169,7 @@ class BotConfig:
             "loop": self.loop,
             "block_portals": self.block_portals,
             "speed_boost": self.speed_boost,
-            "cast_speed": self.cast_speed,
+            "cast_boost": self.cast_boost,
             "follow": self.follow,
             "follow_player": self.follow_player,
             "follow_attack": self.follow_attack,
@@ -228,6 +224,16 @@ class BotConfig:
             for value in raw_rules[:MAX_SPELL_RULES]:
                 rules.append(SpellRule.from_dict(value))
 
+        # Cast speed used to be a percentage spin (`cast_speed`). It is now a
+        # plain on/off hack that zeroes the client cooldowns; an old file with
+        # any raised percentage means "on".
+        cast_boost = _as_bool(data.get("cast_boost"), False)
+        if "cast_boost" not in data:
+            legacy = data.get("cast_speed")
+            cast_boost = (
+                isinstance(legacy, (int, float)) and legacy > 100
+            )
+
         return cls(
             auto_attack=_as_bool(data.get("auto_attack"), False),
             retaliate=_as_bool(data.get("retaliate"), True),
@@ -252,10 +258,7 @@ class BotConfig:
             speed_boost=_as_int(
                 data.get("speed_boost"), 0, 0, MAX_SPEED_BOOST
             ),
-            cast_speed=_as_int(
-                data.get("cast_speed"), MIN_CAST_SPEED,
-                MIN_CAST_SPEED, MAX_CAST_SPEED
-            ),
+            cast_boost=cast_boost,
             follow=_as_bool(data.get("follow"), False),
             follow_player=_as_text(data.get("follow_player"), "")[:40],
             follow_attack=_as_bool(data.get("follow_attack"), False),

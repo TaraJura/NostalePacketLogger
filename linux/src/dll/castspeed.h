@@ -5,25 +5,24 @@
 // Linux). The packet rewriting itself lives in packetlogger.cpp, which knows
 // the client's `su`/`sr` field layout.
 //
-// The server sends each skill's cooldown in deciseconds. The DLL shortens the
+// The server sends each skill's cooldown in deciseconds. The DLL zeroes the
 // number in the client's receive buffer before the client parses it; the host
-// queue and the file log keep the original. Only scaling down is supported,
-// so the rewritten token never needs more digits than the original and the
-// packet's length/format stays valid.
+// queue and the file log keep the original. The token keeps its width (all
+// zeros), so the packet's length/format stays valid.
 
 #include <cstddef>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 namespace castspeed {
 
-// Rewrite the decimal token at `field` (zero-based, space-separated) in
-// place, keeping the token's width by left-padding with '0'. Returns true
-// when the packet changed. `percent` must be > 100.
-inline bool scale_field(char* packet, int field, int percent)
+// Replace the decimal token at `field` (zero-based, space-separated) with
+// zeros in place. Returns true when the packet changed. The 65535 "no
+// cooldown" sentinel is left alone, as are empty, negative and non-numeric
+// fields.
+inline bool zero_field(char* packet, int field)
 {
-    if (packet == nullptr || field < 0 || percent <= 100) {
+    if (packet == nullptr || field < 0) {
         return false;
     }
     char* token = packet;
@@ -49,20 +48,11 @@ inline bool scale_field(char* packet, int field, int percent)
         return false;
     }
     if (value == 0xFFFF) {
-        // The skill packet's "no cooldown" sentinel; scaling it would turn a
-        // ready skill into a very long cooldown.
-        return false;
-    }
-    const long scaled = value * 100 / percent;
-    char digits[16] = {0};
-    const int written =
-        std::snprintf(digits, sizeof(digits), "%ld", scaled);
-    if (written <= 0 || static_cast<std::size_t>(written) > length) {
+        // This protocol's "no cooldown" sentinel; zeroing is harmless but
+        // pointless, and leaving it alone keeps the test intent clear.
         return false;
     }
     std::memset(token, '0', length);
-    std::memcpy(token + (length - static_cast<std::size_t>(written)), digits,
-                static_cast<std::size_t>(written));
     return true;
 }
 
