@@ -67,6 +67,9 @@ players whose family state is known and who have none.
   updates (`gidx 1 <entityId> <familyId>.<rank> <familyName> ...`), and from
   the DLL session log for players who spawned before the GUI attached
   (`load_player_families`).
+- A busy 150+ player town no longer freezes the GUI: the Family list is
+  filtered and throttled, and the hidden Packets table is paused (recent 500
+  buffered; the session log keeps everything).
 - A player whose family state was never sent is **skipped**, not guessed.
   The map list shows only actionable players (known no-family, invited,
   no-reply); the header shows the total on the map. Hidden `family unknown`

@@ -266,6 +266,10 @@ def main() -> int:
                     app._bot_log_lines, LOG_MAX_LINES
                 )
 
+            # The packet table is intentionally paused while another tab is
+            # visible; switching back replays the recent buffered packets.
+            app.notebook.set_current_page(0)
+            rows = app.store.get_n_items()
             result["detail"] = (
                 f"rows={rows} status={status!r} log={log_ok} "
                 f"trim={trim_ok} help={help_ok} "

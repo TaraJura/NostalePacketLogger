@@ -12,6 +12,7 @@ import json
 import math
 import os
 import queue
+from collections import deque
 import threading
 import time
 from pathlib import Path
@@ -610,6 +611,10 @@ class Application(Gtk.Application):
         self.family_invited_list = None
         self.family_invited_scroll = None
         self.family_page = None
+        self.packet_page = None
+        self.packets_skipped_while_hidden = 0
+        self._hidden_packets: deque[Packet] = deque(maxlen=500)
+        self._packet_scroll_scheduled = False
         self.family_timer_label = None
         self.family_players_info = None
         self.family_players_list = None
@@ -735,6 +740,7 @@ class Application(Gtk.Application):
         header.pack_start(client_button)
 
         packet_page = self._build_packet_page()
+        self.packet_page = packet_page
         map_page = self._build_map_page()
         log_page = self._build_log_page()
         bazar_page = self._build_bazar_page()
@@ -6645,6 +6651,19 @@ class Application(Gtk.Application):
         self._ensure_map_loaded()
         if self.map_area is not None:
             self.map_area.queue_draw()
+        if _page is self.packet_page:
+            replay = list(self._hidden_packets)
+            self._hidden_packets.clear()
+            for packet in replay:
+                self._append(packet)
+            if self.packets_skipped_while_hidden:
+                skipped = self.packets_skipped_while_hidden
+                self.packets_skipped_while_hidden = 0
+                self._set_status(
+                    f"packet view was paused while hidden; showing the last "
+                    f"{len(replay)} of {skipped} packet(s), the session log "
+                    "has all"
+                )
 
     # -- connection -----------------------------------------------------
 
@@ -7336,7 +7355,20 @@ class Application(Gtk.Application):
                         or map_id != self.map_grid.map_id
                     ):
                         self._auto_map_tick()
-                self._append(packet)
+                if (
+                    self.packet_page is not None
+                    and self.notebook is not None
+                    and self.notebook.get_current_page()
+                    == self.notebook.page_num(self.packet_page)
+                ):
+                    self._append(packet)
+                else:
+                    # The table is a view, not the capture: the DLL session
+                    # log already has every packet. Feeding 500 hidden rows a
+                    # second blocked the GTK main loop ("Not Responding").
+                    # Keep the recent 500 for when the tab is reopened.
+                    self.packets_skipped_while_hidden += 1
+                    self._hidden_packets.append(packet)
                 dirty = True
 
         if (
@@ -7499,10 +7531,12 @@ class Application(Gtk.Application):
         self.store.append(PacketRow(packet))
         if self.store.get_n_items() > MAX_ROWS:
             self.store.splice(0, TRIM_ROWS, [])
-        if self.follow.get_active():
+        if self.follow.get_active() and not self._packet_scroll_scheduled:
+            self._packet_scroll_scheduled = True
             GLib.idle_add(self._scroll_to_end)
 
     def _scroll_to_end(self) -> bool:
+        self._packet_scroll_scheduled = False
         adjustment = self.scrolled.get_vadjustment()
         adjustment.set_value(
             max(0.0, adjustment.get_upper() - adjustment.get_page_size())
