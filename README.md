@@ -77,7 +77,8 @@ with a **second-level navbar**: **Inventory**, **Relist**, **Monitor**,
   NosMall…** adds catalog groups with a known ND cost (pets/fairies/partner
   supplies excluded), **New** and **Delete** edit the list.
 - **Configuration** — **Bibi id**, **Refresh (s)**, the per-client JSON path,
-  **Save config** and **Reload**.
+  **Save config**, **Reload**, and **Reload names** (re-read item names after
+  rebuilding the database).
 - **Copy names** — right-click a result's item name or an item row to copy
   the real name; **Copy** next to **Name** copies the configured label.
 - **Per client** — each game window keeps its own configuration at

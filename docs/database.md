@@ -56,8 +56,9 @@ archives. The NosBazar **Inventory** section and the item names in
 categories, and fall back to `Item.dat` (`nosmall.load_item_info`) when the
 database is missing or empty. Rebuild the database with `ntpl db build` if an
 item still shows as `item <vnum>` or a configured shortcut; an empty lookup
-retries on the next NosBazar page show, so leaving and reopening the tab is
-enough (no GUI restart). The same fields are in `items`.
+retries on the next NosBazar page show, and **Configuration → Reload names**
+forces a reload (use it after rebuilding a stale, non-empty database). No GUI
+restart is needed. The same fields are in `items`.
 
 ### Public sources indexed
 

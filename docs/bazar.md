@@ -169,9 +169,10 @@ the **Items** list — shows the real name instead:
   and Relist lists update in place when they arrive (unsaved editor values
   and scroll positions are kept) and the Monitor table re-renders. An empty
   lookup retries on a later page show or when the **Inventory** section is
-  opened, at most every 5 s, so after rebuilding the database
-  (`PYTHONPATH=linux/host python3 -m ntpl db build`) leaving and reopening
-  NosBazar is enough — no GUI restart.
+  opened, at most every 5 s. If the database was stale but non-empty (a row
+  still shows a shortcut), rebuild it with
+  `PYTHONPATH=linux/host python3 -m ntpl db build` and click
+  **Configuration → Reload names**; no GUI restart is needed either way.
 - the editor's **Name** field is the shortcut label; renaming it does not
   change what the Monitor shows. **Copy** next to it copies the label;
   right-clicking a result's Item cell or an item row copies the real name.
@@ -231,9 +232,10 @@ Each attached game client gets its own file:
 temporary file). Before a client is attached the tab starts empty; when a
 client attaches and has no per-client file, `~/.config/ntpl/bazar.json` is
 loaded as a seed and saved per-client on the next change. The **Configuration**
-section holds the Bibi id, refresh interval and this file; the Character name
-and live-relisting gate live in the **Relist** section because they only apply
-to relisting.
+section holds the Bibi id, refresh interval, this file and **Reload names**
+(re-read item names after rebuilding the database); the Character name and
+live-relisting gate live in the **Relist** section because they only apply to
+relisting.
 
 Example:
 
@@ -349,8 +351,9 @@ and asserts the profit column, that the Item cell shows the real Item.dat name
 for a configured shortcut (`bubbl` → **Speech Bubble**, with the shortcut in
 the tooltip), that a late name load updates the Monitor, the Items list and
 the Relist list from the shortcut to the real name without overwriting
-unsaved editor values, that the row copy label and the Delete message use the
-real name, and that no `c_reg` was sent.
+unsaved editor values, that the row copy label and the Delete message (even
+while a pass stops) use the real name, that **Reload names** drops the
+one-shot name cache, and that no `c_reg` was sent.
 `gui_bazar_relist_smoke.py` checks that the live-relist gate blocks the first
 attempt and then asserts the exact `c_reg` packet and the `register-sent`
 status. `gui_inventory_scan_smoke.py` feeds the live inventory shapes

@@ -1557,10 +1557,11 @@ class Application(Gtk.Application):
     def _ensure_item_info_loaded(self, after=None) -> None:
         """Resolve item names once, off the GTK loop, then run ``after``.
 
-        A completed lookup with no data is retried on a later trigger (page
-        show, section switch, inventory add) after ``ITEM_INFO_RETRY_S``, so
-        a database built while the window stays open takes effect without a
-        restart. A non-empty lookup is final.
+        A completed lookup with no data retries on a later page show or
+        Inventory section switch after ``ITEM_INFO_RETRY_S``. A non-empty
+        lookup is otherwise final; after rebuilding a stale database use the
+        Configuration section's **Reload names** button
+        (:meth:`_bazar_reload_names`), which drops the latch explicitly.
         """
         if self.item_info_loaded and self.item_info:
             if after is not None:
@@ -1607,13 +1608,38 @@ class Application(Gtk.Application):
 
         threading.Thread(target=work, daemon=True).start()
 
+    def _bazar_reload_names(self) -> None:
+        """Drop the name-cache latch and look item names up again.
+
+        A non-empty lookup is normally final, so a database rebuilt after the
+        first load (e.g. one that was missing a vnum) would otherwise need a
+        GUI restart. This is the explicit retry for that case.
+        """
+        if self._item_info_loading:
+            self._bazar_log("item names are still loading")
+            return
+        self.item_info_loaded = False
+        self._item_info_retry_at = 0.0
+        self._bazar_log("reloading item names…")
+        self._ensure_item_info_loaded()
+
     def _finish_item_info_load(self, info: dict[int, ItemInfo]) -> bool:
         if self._closing:
             return False
-        self.item_info = info or {}
+        had_names = bool(self.item_info)
+        if info:
+            self.item_info = info
+        elif not self.item_info:
+            self.item_info = {}
+        # A failed explicit reload keeps the names already on screen.
         self.item_info_loaded = True
         self._item_info_loading = False
-        if not self.item_info:
+        if not info and had_names:
+            self._bazar_log(
+                "item names: reload found no source; keeping the names "
+                "already shown"
+            )
+        elif not self.item_info:
             self._bazar_log(
                 "inventory: item names unavailable; set NTPL_NSGTD or run: "
                 "PYTHONPATH=linux/host python3 -m ntpl db build"
@@ -2594,11 +2620,13 @@ class Application(Gtk.Application):
         items = [
             entry for entry in self.bazar.config.items if entry.name != name
         ]
-        self._bazar_log(f"deleted {label}")
         self.bazar_selected_name = None
         self._bazar_set_items(items)
         self._bazar_new_item()
         self._bazar_save_config(quiet=True)
+        # Last: _bazar_set_items stops a running pass and logs the stop, which
+        # would otherwise replace this confirmation in the status bar.
+        self._bazar_log(f"deleted {label}")
 
     def _bazar_item_from_form(self) -> BazarItem | None:
         form = self.bazar_form
@@ -3910,8 +3938,16 @@ class Application(Gtk.Application):
             "Discard the in-memory items and read the JSON file again"
         )
         reload_button.connect("clicked", lambda *_: self._bazar_load_config())
+        names_button = Gtk.Button(label="Reload names")
+        names_button.set_tooltip_text(
+            "Read item names again; use after rebuilding the database."
+        )
+        names_button.connect(
+            "clicked", lambda *_: self._bazar_reload_names()
+        )
         config_row.append(save_button)
         config_row.append(reload_button)
+        config_row.append(names_button)
         config_box.append(config_row)
         page.append(
             self._frame(
@@ -3921,7 +3957,9 @@ class Application(Gtk.Application):
                     "Saved automatically per game client as bazar-<pid>.json. "
                     "Copy it to bazar.json to use the same items in another "
                     "client. Reload discards unsaved edits and reads the JSON "
-                    "file again."
+                    "file again. Reload names re-reads item names from the "
+                    "local database; use it after ntpl db build if a row "
+                    "still shows a shortcut."
                 ),
             )
         )

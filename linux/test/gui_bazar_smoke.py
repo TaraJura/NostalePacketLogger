@@ -223,6 +223,21 @@ def main() -> int:
                 label = getattr(row, "name_label", None)
                 return None if label is None else label.get_text()
 
+            # Configuration -> Reload names must drop the one-shot latch and
+            # start a fresh lookup (a stale non-empty database otherwise stays
+            # cached until a restart).
+            reload_calls: list = []
+            ensure = app._ensure_item_info_loaded
+            app._ensure_item_info_loaded = (
+                lambda after=None: reload_calls.append(after)
+            )
+            app.item_info_loaded = True
+            app._bazar_reload_names()
+            reload_ok = (
+                app.item_info_loaded is False and reload_calls == [None]
+            )
+            app._ensure_item_info_loaded = ensure
+
             # The real path: the Monitor may render before the DB/Item.dat
             # lookup finishes. A late load must switch the Monitor and both
             # item lists from the configured shortcut to the real name
@@ -293,6 +308,7 @@ def main() -> int:
                 and late_ok
                 and forms_ok
                 and copy_label_ok
+                and reload_ok
                 and app.bazar.mode == "monitor"
             )
             result["detail"] = (
@@ -304,13 +320,13 @@ def main() -> int:
                 f"lists={items_before!r}/{relist_before!r}->"
                 f"{items_after!r}/{relist_after!r} "
                 f"forms_kept={forms_ok} copy={copy_label_ok} "
+                f"reload={reload_ok} "
                 f"saved={saved} separators={separators} "
                 f"mode={app.bazar.mode} phase={app.bazar.phase} "
                 f"status={app.bazar_status.get_text()!r}"
             )
-            # The Delete confirmation must not resurface the shortcut.
-            # Stop first so the stop log cannot hide the delete line.
-            app._bazar_stop("smoke done")
+            # The Delete confirmation must not resurface the shortcut, and it
+            # must survive the stop log emitted by deleting during a pass.
             app.bazar_selected_name = "bubbl"
             app._bazar_delete_item()
             delete_status = app.bazar_status.get_text() or ""
