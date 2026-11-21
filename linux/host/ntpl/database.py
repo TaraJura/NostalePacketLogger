@@ -46,6 +46,7 @@ from .monsternames import (
     read_archive_entries,
 )
 from .nosmall import (
+    ItemInfo,
     NosMallEntry,
     NosMallGroup,
     bazar_items,
@@ -973,6 +974,44 @@ def search_packets(
         (*values, max(1, min(500, limit))),
     ).fetchall()
     return [dict(row) for row in rows]
+
+
+def item_info(connection: sqlite3.Connection) -> dict[int, ItemInfo]:
+    """Item.dat names, NPC prices and categories keyed by template vnum.
+
+    The GUI prefers this over re-parsing ``NSgtdData.NOS``: the database is
+    already built and the lookup is a few milliseconds. Rows whose name is
+    only the untranslated ``zts...e`` key fall back to ``item <vnum>``.
+    """
+    rows = connection.execute(
+        """
+        SELECT i.vnum, i.name, i.price, i.category
+        FROM items i
+        JOIN (SELECT vnum, MAX(id) AS id FROM items GROUP BY vnum) last
+          ON last.id = i.id
+        """
+    ).fetchall()
+    info: dict[int, ItemInfo] = {}
+    for row in rows:
+        try:
+            vnum = int(row["vnum"])
+        except (TypeError, ValueError):
+            continue
+        if vnum <= 0:
+            continue
+        name = str(row["name"] or "").strip()
+        if not name or re.fullmatch(r"zts\d+e", name):
+            name = f"item {vnum}"
+        try:
+            price = max(0, int(row["price"] or 0))
+        except (TypeError, ValueError):
+            price = 0
+        try:
+            category = int(row["category"] or 0)
+        except (TypeError, ValueError):
+            category = 0
+        info[vnum] = ItemInfo(vnum, name, price, category)
+    return info
 
 
 def search_items(

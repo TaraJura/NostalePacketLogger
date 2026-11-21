@@ -43,9 +43,10 @@ with a **second-level navbar**: **Inventory**, **Relist**, **Monitor**,
 **Items** and **Configuration**.
 
 - **Inventory** — lists every slot the client reports (Main/Etc, Equip, and
-  the extra equipment bags 6/7) with the Item.dat name, bag/slot, vnum,
-  quantity, equipment fields, NPC price and known ND cost. Search by name or
-  vnum; **Set up relist…** adds one checked item with its exact vnum/tab/amount
+  the extra equipment bags 6/7) with the item name (local DB first, then
+  Item.dat), bag/slot, vnum, quantity, equipment fields, NPC price and known
+  ND cost. Search by name or vnum; **Set up relist…** adds one checked item
+  with its exact vnum/tab/amount
   and opens Relist; **Add selected** adds checked items; **Add all** adds
   every distinct item; **Price all** also starts Monitor.
   Equipment quantity 0 counts as one; bound negative vnums are searched by
@@ -90,7 +91,7 @@ the catalog/database side is in [docs/database.md](docs/database.md).
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 315 Python unit tests
+make -C linux host-test                      # 316 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux gui-test                       # headless GTK4 smokes (xvfb)
 make -C linux bot-test                       # 41 fake-server bot smokes
@@ -159,7 +160,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 315 unit tests pass, the five GTK4 window smokes
+The Linux port builds, its 316 unit tests pass, the five GTK4 window smokes
 and 41 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 

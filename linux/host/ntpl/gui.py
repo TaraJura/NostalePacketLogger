@@ -1557,10 +1557,26 @@ class Application(Gtk.Application):
         self._item_info_loading = True
 
         def work() -> None:
+            info: dict[int, ItemInfo] = {}
+            # The local SQLite DB is already built and resolves all item
+            # names in milliseconds. Fall back to Item.dat only when the DB
+            # is missing or empty.
             try:
-                info = load_item_info()
+                from . import database
+
+                if database.DEFAULT_DB_PATH.is_file():
+                    connection = database.connect()
+                    try:
+                        info = database.item_info(connection)
+                    finally:
+                        connection.close()
             except Exception:  # noqa: BLE001 - names are optional
                 info = {}
+            if not info:
+                try:
+                    info = load_item_info()
+                except Exception:  # noqa: BLE001 - names are optional
+                    info = {}
             GLib.idle_add(self._finish_item_info_load, info)
 
         threading.Thread(target=work, daemon=True).start()
@@ -1573,7 +1589,8 @@ class Application(Gtk.Application):
         self._item_info_loading = False
         if not self.item_info:
             self._bazar_log(
-                "inventory: item names unavailable (NSgtdData.NOS not found)"
+                "inventory: item names unavailable; set NTPL_NSGTD or run: "
+                "PYTHONPATH=linux/host python3 -m ntpl db build"
             )
         callbacks = self._item_info_callbacks
         self._item_info_callbacks = []
@@ -1673,7 +1690,7 @@ class Application(Gtk.Application):
                         "relog with this window open for the full list"
                     )
             if self._item_info_loading:
-                text += " · loading item names…"
+                text = "Loading item names… · " + text
             self._inventory_status.set_text(text)
 
         for slot in matches:
@@ -3202,7 +3219,9 @@ class Application(Gtk.Application):
         for key, title, child in pages:
             index = sections.append_page(child, Gtk.Label(label=title))
             self._bazar_section_index[key] = index
+        sections.connect("switch-page", self._bazar_section_switched)
         page.append(sections)
+        page.connect("map", self._bazar_page_mapped)
 
         self.bazar_status = Gtk.Label(label="NosBazar idle")
         self.bazar_status.set_xalign(0)
@@ -3228,6 +3247,25 @@ class Application(Gtk.Application):
         index = self._bazar_section_index.get(key)
         if index is not None:
             self.bazar_section_notebook.set_current_page(index)
+
+    def _bazar_page_mapped(self, *_args) -> None:
+        """Load item names when the NosBazar page becomes visible."""
+        self._ensure_item_info_loaded()
+        if self._inventory_list is not None:
+            self._inventory_render()
+
+    def _bazar_section_switched(
+        self, _notebook: Gtk.Notebook, _page: Gtk.Widget, index: int
+    ) -> None:
+        if index != self._bazar_section_index.get("inventory"):
+            return
+        # Do not parse names at startup while the page is hidden; the map
+        # signal handles the first real display.
+        if self.bazar_page is not None and not self.bazar_page.get_mapped():
+            return
+        self._ensure_item_info_loaded()
+        if self._inventory_list is not None:
+            self._inventory_render()
 
     def _build_bazar_inventory_section(self) -> Gtk.Widget:
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)

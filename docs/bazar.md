@@ -117,11 +117,15 @@ ivn 0 30.885.0.0.0.0.0                     # one equipment slot
 - **Negative vnums** are limited/bound ids. They are stored for display and
   scanned by their absolute template vnum, but `find_inventory` never returns
   them, so `c_reg` relisting skips them.
-- Names, NPC prices and categories come from `Item.dat`
-  (`nosmall.load_item_info`), parsed once in a worker thread. The list shows
+- Names, NPC prices and categories come from the local game/packet database
+  (`database.item_info`, built from `Item.dat`) first, so the list resolves
+  as soon as the Inventory section opens. If the database is missing, the
+  worker parses `Item.dat` directly (`nosmall.load_item_info`). The list shows
   the full name, `Bag slot · vnum · qty`, the raw equipment fields, the NPC
   gold price and any known ND cost from the curated NosMall price map or an
-  item already configured with a cost.
+  item already configured with a cost. A row still reading `item 1092` means
+  neither source had it: run
+  `PYTHONPATH=linux/host python3 -m ntpl db build` or set `NTPL_NSGTD`.
 - **Add selected** and **Add all** group slots by `abs(vnum)`: one
   bazaar item per distinct template, never a duplicate of an item already in
   the list. The representative slot is Main, then Etc, then Equip; its
@@ -315,7 +319,8 @@ status. `gui_inventory_scan_smoke.py` feeds the live inventory shapes
 (3/5/7-field tokens, quantity 0, negative vnums), asserts the Inventory
 section rows/names/fields, adds one item and then prices the whole inventory
 without duplicates, checks **Set up relist…** switches to the Relist section
-with the exact vnum/tab/amount, saves a floor and starts Relist mode, and
-checks that a complete snapshot is saved/restored while a partial list is
-marked and never cached. `gui_smoke.py` enforces the help popover on every
+with the exact vnum/tab/amount, saves a floor and starts Relist mode, checks
+that opening the NosBazar page loads item names automatically (DB first) and
+that a complete snapshot is saved/restored while a partial list is marked and
+never cached. `gui_smoke.py` enforces the help popover on every
 frame, including the new section frames.

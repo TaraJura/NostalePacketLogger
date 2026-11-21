@@ -50,9 +50,11 @@ are stored per source.
 The decrypted `Item.dat`, `monster.dat`, `Skill.dat`, `npctalk.dat`,
 `shoptype.dat`, `MapIDData.dat` and the NosMall data are also kept in
 `source_files`, so a future parser can re-read them without touching the client
-archives. The NosBazar inventory picker reads those `Item.dat` records directly
-(`nosmall.load_item_info`) for names, NPC prices and categories, so it works
-without a built database; the same fields are in the `items` table.
+archives. The NosBazar **Inventory** section reads names, NPC prices and
+categories from the `items` table first (`database.item_info`, a few
+milliseconds), and falls back to `Item.dat` (`nosmall.load_item_info`) when
+the database is missing or empty. Rebuild the database with `ntpl db build`
+if an item still shows as `item <vnum>`; the same fields are in `items`.
 
 ### Public sources indexed
 

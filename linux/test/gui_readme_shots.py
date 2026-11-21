@@ -278,6 +278,9 @@ def main() -> int:
             "NTPL_INVENTORY_DIR",
             tempfile.mkdtemp(prefix="ntpl-shot-inventory-"),
         )
+        os.environ.setdefault(
+            "NTPL_DB", tempfile.mktemp(prefix="ntpl-shot-db-")
+        )
         # A full demo table should be on screen when the capture runs, not a
         # half-finished 2.5 s-paced pass.
         bazar_module.SEARCH_INTERVAL_S = 0.15

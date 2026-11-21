@@ -131,6 +131,25 @@ def main() -> int:
             return False
         state["started"] = True
         try:
+            # Simulate the user opening the NosBazar tab: the page map signal
+            # must start the item-name lookup by itself.
+            if app.bazar_page is not None and app.notebook is not None:
+                app.notebook.set_current_page(
+                    app.notebook.page_num(app.bazar_page)
+                )
+            GLib.timeout_add(1500, begin_scan)
+        except Exception as exc:  # noqa: BLE001
+            result["detail"] = f"setup exception: {exc!r}"
+            app.quit()
+        return False
+
+    def begin_scan() -> bool:
+        try:
+            # The page map must have loaded names (DB first, Item.dat
+            # fallback) before we replace them with deterministic test names.
+            result["auto_count"] = len(app.item_info)
+            auto = app.item_info.get(1092)
+            result["auto_name"] = None if auto is None else auto.name
             app.item_info = {
                 2174: ItemInfo(2174, "Speech Bubble", 3000, 0),
                 1362: ItemInfo(1362, "Soulstone Blessing", 100, 0),
@@ -145,7 +164,7 @@ def main() -> int:
             result["sections"] = app.bazar_section_notebook.get_n_pages()
             GLib.timeout_add(200, check_scan)
         except Exception as exc:  # noqa: BLE001
-            result["detail"] = f"setup exception: {exc!r}"
+            result["detail"] = f"begin_scan exception: {exc!r}"
             app.quit()
         return False
 
@@ -353,6 +372,10 @@ def main() -> int:
                 and result["relist_saved_amount"] == 5
                 and result["relist_mode"] == "relist"
                 and result["sections"] == 5
+                and (
+                    not result["auto_count"]
+                    or result["auto_name"] == "Group Time-Space Piece"
+                )
             )
             result["ok"] = bool(ok)
             result["detail"] = (
@@ -360,6 +383,8 @@ def main() -> int:
                 f"after_all={result['after_all']} mode={result['mode']} "
                 f"saved={result['saved']} unique={result['unique_packets']} "
                 f"sections={result['sections']} "
+                f"auto_names={result['auto_count']}/"
+                f"{result['auto_name']!r} "
                 f"status={result['status']!r} names={result['names']!r} "
                 f"first=({result['first_tab']},{result['first_amount']},"
                 f"{result['first_nos']}) gun=({result['gun_tab']},"

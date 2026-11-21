@@ -75,6 +75,13 @@ class LocalDatabaseTests(unittest.TestCase):
         rows = database.search_items(self.connection, vnum=2174)
         self.assertEqual(rows[0]["name"], "Speech Bubble")
 
+    def test_item_info_names_and_prices(self) -> None:
+        info = database.item_info(self.connection)
+        self.assertGreater(len(info), 7000)
+        self.assertEqual(info[1092].name, "Group Time-Space Piece")
+        self.assertEqual(info[1092].npc_price, 3000)
+        self.assertEqual(info[2174].name, "Speech Bubble")
+
     def test_nosmall_group_and_export(self) -> None:
         groups = database.nosmall_groups(
             self.connection, query="Soulstone Blessing", limit=10

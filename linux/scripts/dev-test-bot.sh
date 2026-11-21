@@ -26,7 +26,8 @@ BOTLOG="$(mktemp)"
 BAZAR="$(mktemp)"
 MIRROR="$(mktemp -d)"
 INVENTORY="$(mktemp -d)"
-trap 'rm -f "$LOG" "$PORTALS" "$BOTLOG" "$BAZAR"; rm -rf "$MIRROR" "$INVENTORY"' EXIT
+DB="$(mktemp)"
+trap 'rm -f "$LOG" "$PORTALS" "$BOTLOG" "$BAZAR" "$DB"; rm -rf "$MIRROR" "$INVENTORY"' EXIT
 
 run() {
     xvfb-run -a env GDK_BACKEND=x11 \
@@ -37,6 +38,7 @@ run() {
         NTPL_BAZAR_CONFIG="$BAZAR" \
         NTPL_MIRROR_DIR="$MIRROR" \
         NTPL_INVENTORY_DIR="$INVENTORY" \
+        NTPL_DB="$DB" \
         python3 "$ROOT/test/$1"
 }
 
