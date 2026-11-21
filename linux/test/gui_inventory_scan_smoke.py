@@ -142,6 +142,7 @@ def main() -> int:
             app.item_info_loaded = True
             app._open_inventory_picker()
             app._inventory_render()
+            result["sections"] = app.bazar_section_notebook.get_n_pages()
             GLib.timeout_add(200, check_scan)
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"setup exception: {exc!r}"
@@ -256,6 +257,34 @@ def main() -> int:
             app._maybe_load_inventory_cache()
             result["cache_slots"] = len(app._inventory_slots())
             result["cache_note"] = app._inventory_cache_note
+            # Select one inventory item and set up relisting through the new
+            # second-level section navbar.
+            app._inventory_checks = {(1, 0)}
+            app._inventory_update_add_button()
+            app._inventory_set_up_relist()
+            result["relist_page"] = app.bazar_section_notebook.get_current_page()
+            result["relist_expected"] = app._bazar_section_index.get("relist")
+            result["relist_selected"] = app.bazar_relist_selected
+            form = app.bazar_relist_form
+            result["relist_vnum"] = form["vnum"].get_text()
+            result["relist_tab"] = form["tab"].get_selected()
+            result["relist_amount"] = int(form["amount"].get_value())
+            form["min"].set_value(1000)
+            app._bazar_relist_save()
+            relist_item = find_item(2174)
+            result["relist_saved_min"] = (
+                None if relist_item is None else relist_item.min_price
+            )
+            result["relist_saved_tab"] = (
+                None if relist_item is None else relist_item.inv_tab
+            )
+            result["relist_saved_amount"] = (
+                None if relist_item is None else relist_item.amount
+            )
+            app.bazar_character_entry.set_text("root1")
+            app.bazar_live_relist.set_active(True)
+            app._bazar_start_relist()
+            result["relist_mode"] = app.bazar.mode
             # A list rebuilt from later updates alone must be marked partial
             # and must never replace the complete cache with a partial list.
             try:
@@ -314,12 +343,23 @@ def main() -> int:
                 and bool(result["cache_note"])
                 and "partial inventory" in result["partial_status"]
                 and result["partial_not_cached"] is True
+                and result["relist_page"] == result["relist_expected"]
+                and result["relist_selected"] == "Speech Bubble"
+                and result["relist_vnum"] == "2174"
+                and result["relist_tab"] == 2
+                and result["relist_amount"] == 5
+                and result["relist_saved_min"] == 1000
+                and result["relist_saved_tab"] == 1
+                and result["relist_saved_amount"] == 5
+                and result["relist_mode"] == "relist"
+                and result["sections"] == 5
             )
             result["ok"] = bool(ok)
             result["detail"] = (
                 f"slots={result['slots']} after_one={result['after_one']} "
                 f"after_all={result['after_all']} mode={result['mode']} "
                 f"saved={result['saved']} unique={result['unique_packets']} "
+                f"sections={result['sections']} "
                 f"status={result['status']!r} names={result['names']!r} "
                 f"first=({result['first_tab']},{result['first_amount']},"
                 f"{result['first_nos']}) gun=({result['gun_tab']},"
@@ -333,6 +373,13 @@ def main() -> int:
                 f"cache_note={result['cache_note']!r} "
                 f"partial={result['partial_status']!r} "
                 f"partial_not_cached={result['partial_not_cached']} "
+                f"relist=({result['relist_page']},"
+                f"{result['relist_selected']},{result['relist_vnum']},"
+                f"{result['relist_tab']},{result['relist_amount']},"
+                f"{result['relist_saved_min']},"
+                f"{result['relist_saved_tab']},"
+                f"{result['relist_saved_amount']},"
+                f"{result['relist_mode']}) "
                 f"fields={result['equipment_fields']!r}"
             )
         except Exception as exc:  # noqa: BLE001

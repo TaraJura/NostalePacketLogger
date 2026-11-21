@@ -39,10 +39,13 @@ the data layer in [database.md](database.md).
   pacing, parses the real 15-field `rc_blist` (minimum visible price,
   truncation-aware), keeps old rows across refresh cycles, sorts by profit
   and has an **Only priced** filter. Relist is double-gated and reports
-  `register sent (no ack)`. The **Inventory** frame scans every bag the
-  client reports (including equipment bags 0/6/7, quantity-0 rows and bound
-  negative vnums), shows Item.dat names, NPC prices and known ND costs, and
-  can add one search per distinct owned item or **Price all** in one action.
+  `register sent (no ack)`. The page has a second-level navbar (**Inventory**,
+  **Relist**, **Monitor**, **Items**, **Configuration**). **Inventory** scans
+  every bag the client reports (including equipment bags 0/6/7, quantity-0
+  rows and bound negative vnums), shows Item.dat names, NPC prices and known
+  ND costs, and **Set up relist…** opens **Relist** with the exact
+  vnum/tab/amount for the floor and start; **Price all** adds one search per
+  distinct owned item.
 - **Game/packet database**: `~/.config/ntpl/nostale.db` (`NTPL_DB`) built by
   `PYTHONPATH=linux/host python3 -m ntpl db build`. 7,805 items, 2,723
   monsters, 1,964 skills, 779 maps, 3,639 NosMall records / 1,184 groups,

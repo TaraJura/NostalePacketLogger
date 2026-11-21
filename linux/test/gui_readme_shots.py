@@ -5,7 +5,7 @@ opens the real GTK4 window against a real map from NStcData, draws a route,
 spawns a few monsters with their real names, and leaves the window on screen
 for ``linux/scripts/readme-shots.sh`` to capture with ffmpeg/Xvfb.
 
-    NTPL_SHOT_MODE=map|packets|picker|spells|bazar|inventory \
+    NTPL_SHOT_MODE=map|packets|picker|spells|bazar|inventory|relist \
         PYTHONPATH=linux/host python3 linux/test/gui_readme_shots.py
 """
 
@@ -124,7 +124,7 @@ def start_fake_client(scene) -> int:
     port = listener.getsockname()[1]
     first, middle, last = path[len(path) // 4], path[len(path) // 2], path[-1]
     player = path[len(path) // 3]
-    bazar_mode = MODE in ("bazar", "inventory")
+    bazar_mode = MODE in ("bazar", "inventory", "relist")
     lines = [
         "STATUS|ready",
         "RECV|walk 1 2 3 4",
@@ -153,7 +153,7 @@ def start_fake_client(scene) -> int:
                 "RECV|gold 100000 0",
             ]
         )
-        if MODE == "inventory":
+        if MODE in ("inventory", "relist"):
             # A real mix: normal stacks, equipment rows (quantity 0 and a
             # bound negative vnum) and the extra bags 6/7.
             lines.extend(
@@ -263,7 +263,7 @@ def picker_discovery(port: int) -> Discovery:
 
 
 def main() -> int:
-    if MODE in ("bazar", "inventory"):
+    if MODE in ("bazar", "inventory", "relist"):
         # Never touch the developer's real bazar config or mirror bus.
         if not os.environ.get("NTPL_BAZAR_CONFIG"):
             handle = tempfile.NamedTemporaryFile(
@@ -290,7 +290,12 @@ def main() -> int:
     port = start_fake_client(scene)
     app = Application("127.0.0.1", port, unique=False, select_client=False)
     waypoints = [path[-1]]
-    scheduled = {"late": False, "bazar": False, "inventory": False}
+    scheduled = {
+        "late": False,
+        "bazar": False,
+        "inventory": False,
+        "relist": False,
+    }
 
     def start_bazar() -> bool:
         if app.window is None:
@@ -317,6 +322,7 @@ def main() -> int:
         app.bazar_refresh_spin.set_value(30)
         if not app.bazar_npc_entry.get_text().strip():
             app.bazar_npc_entry.set_text("9584")
+        app._bazar_show_section("monitor")
         app._bazar_start_monitor()
         app._set_status(
             f"NosBazar monitor · {len(items)} priced items · "
@@ -335,11 +341,49 @@ def main() -> int:
             app.item_info = {}
         app.item_info_loaded = True
         app._open_inventory_picker()
-        if app.inventory_window is not None:
-            app.inventory_window.set_default_size(900, 660)
+        app._bazar_show_section("inventory")
+        if app.window is not None:
+            app.window.set_default_size(1440, 900)
         app._set_status(
             "inventory · every owned slot with Item.dat name, "
             "NPC price and known ND cost"
+        )
+        return False
+
+    def start_relist_shot() -> bool:
+        if app.window is None or not app.engine.world.inventory:
+            return True
+        from ntpl.nosmall import load_item_info
+
+        try:
+            app.item_info = load_item_info()
+        except Exception:  # noqa: BLE001 - shot works without names
+            app.item_info = {}
+        app.item_info_loaded = True
+        items = [
+            BazarItem(
+                name=name,
+                search_packet=build_search_packet(list(vnums)),
+                vnum=vnums[0],
+                amount=5,
+                min_price=0,
+                nos_cost=cost,
+                enabled=True,
+            )
+            for name, vnums, cost, _price, _seller in BAZAR_ITEMS
+        ]
+        app._bazar_set_items(items)
+        app.bazar_character_entry.set_text("BotMule")
+        app._bazar_select_relist_item("Wings of Friendship")
+        form = app.bazar_relist_form
+        form["tab"].set_selected(3)  # Etc
+        form["min"].set_value(10000)
+        app._bazar_relist_save()
+        app._bazar_select_relist_item("Wings of Friendship")
+        app._bazar_show_section("relist")
+        app._set_status(
+            "relist setup · Wings of Friendship · vnum 2160 · Etc · "
+            "floor 10,000"
         )
         return False
 
@@ -436,6 +480,15 @@ def main() -> int:
             if not scheduled["inventory"]:
                 scheduled["inventory"] = True
                 GLib.timeout_add(1500, start_inventory)
+            return False
+        if MODE == "relist":
+            if app.window is None:
+                return True
+            app.window.set_default_size(1440, 900)
+            app.notebook.set_current_page(3)
+            if not scheduled["relist"]:
+                scheduled["relist"] = True
+                GLib.timeout_add(1500, start_relist_shot)
             return False
         if app.map_grid is None or app.window is None:
             return True

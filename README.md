@@ -37,52 +37,50 @@ plus the attached client's DLL version.
 
 ## NosBazar
 
-![NosBazar tab: inventory frame, cheapest listing and profit per item](docs/assets/gui-bazar.png)
+![NosBazar section tabs: Inventory, Relist, Monitor, Items, Configuration](docs/assets/gui-bazar.png)
+
+![NosBazar Relist section: readiness list and compact vnum/tab/amount/floor editor](docs/assets/gui-relist.png)
 
 The fourth tab turns the live packet stream into the player-auction-house
-workflow of [`TaraJura/Nostale-NB`](https://github.com/TaraJura/Nostale-NB):
+workflow of [`TaraJura/Nostale-NB`](https://github.com/TaraJura/Nostale-NB),
+with a **second-level navbar**: **Inventory**, **Relist**, **Monitor**,
+**Items** and **Configuration**.
 
-- **Monitor** — opens the Bibi Basar dialog through the client's own send
-  path, learns the map/session-specific NPC entity id and dialog option from
-  your own opening (or the client's DLL log), and searches the configured
-  `c_blist` groups at the required 2.5 s pacing. Timed-out items get one retry
-  pass; the next refresh starts after the configured interval.
-- **Results** — parses the real 15-field `rc_blist` response, keeps the
-  cheapest visible listing per item, and shows the seller, gold price, profit
-  (gold per NosMall ND or an NPC-gold markup) and status. Rows are separated by thin rules so each item's **Cost** (ND) and
-  **NB Price** stay aligned with the right row. Results are sorted
-  **most profitable first**; the **Only priced** filter (on by default) hides
-  rows with no listing/answer yet, so timeouts and idle rows never crowd the
-  table. Item names are rendered in full (wrapped, never ellipsized). Rows
-  are updated in place across refresh cycles — a failed update keeps the last
-  price marked stale instead of clearing the table.
-- **Relist** — undercuts the cheapest listing by one gold with a configurable
-  floor. It is double-gated: **Allow live re-listing** must be on, and the
-  character name, a positive floor and an inventory slot must be known. The
-  status reports `register sent (no ack)` because the server sends no
-  confirmation for `c_reg`.
-- **Inventory scan** — the **Inventory** frame lists every slot the client
-  reports (Main/Etc, Equip, and the extra equipment bags 6/7), with the
-  Item.dat name, bag/slot, vnum, quantity, equipment fields, NPC price and
-  known ND cost. **Scan inventory…** opens a searchable picker for adding
-  just what you own (one bazaar search per distinct item, no duplicates);
-  **Price all** adds every inventory item and starts Monitor. Equipment rows
-  with quantity 0 count as one, and bound negative vnums are searched by
-  their absolute template. The server sends the full inventory only at
-  login; if the host attached later and the DLL log was truncated, the list
-  is empty or marked **partial** — relog once with the window open and the
-  scan fills automatically. The last complete inventory is cached per
-  character, so later attaches survive another log truncation. The scan never
-  relists.
-- **Copy names** — right-click an item row in the **Items** list or a result
-  row, or use the **Copy** button next to **Name**, to put the full item name
-  on the clipboard.
-- **Import NosMall…** — reads the local game/packet database and offers only
-  items with a known **ND cost** (an unpriced item cannot show a profit), with
-  pets, fairies and partner supplies excluded. Search by name/vnum, click a
-  row or **Add all matching**, and use **Remove unpriced & pets** to clean an
-  existing item list. The curated price map comes from Nostale-NB plus any
-  item already configured with its cost.
+- **Inventory** — lists every slot the client reports (Main/Etc, Equip, and
+  the extra equipment bags 6/7) with the Item.dat name, bag/slot, vnum,
+  quantity, equipment fields, NPC price and known ND cost. Search by name or
+  vnum; **Set up relist…** adds one checked item with its exact vnum/tab/amount
+  and opens Relist; **Add selected** adds checked items; **Add all &
+  monitor**/**Price all** add every distinct item and start Monitor.
+  Equipment quantity 0 counts as one; bound negative vnums are searched by
+  their absolute template but cannot be relisted. If the server's login dump
+  was missed, the list is empty or marked **partial** — relog once with the
+  window open and it fills automatically; the last complete inventory is
+  cached per character, so later attaches survive another log truncation.
+- **Relist** — select an item (or arrive from Set up relist…), set its
+  **Item vnum**, **Tab**, **Amount** and a positive **Min price**, and the
+  list marks it **ready** / **needs floor** / **monitor only**. Fill
+  **Character** with your own name, tick **Allow live re-listing**, then
+  **Relist Start**. Each pass undercuts the cheapest other listing by one
+  gold, never below the floor; the status reports `register sent (no ack)`
+  because the server sends no confirmation for `c_reg`.
+- **Monitor** — starts/stops searches, opens the Bibi Basar dialog through
+  the client's own send path, learns the map/session NPC id and dialog option
+  from your own opening (or the DLL log), and searches at the required 2.5 s
+  pacing. Timed-out items get one retry; the next refresh follows the
+  configured interval. Results show the cheapest listing, seller, price,
+  profit (gold per NosMall ND or NPC-gold markup) and status, sorted **most
+  profitable first**; thin rules keep each row aligned, and **Only priced**
+  hides unanswered rows.
+- **Items** — the full editor for one item: **Name**, **Search vnums**,
+  **Raw packet**, **Item vnum**, **Tab**, **Amount**, **Min price**, **Cost**
+  and the advanced `c_reg` fields. **Import NosMall…** adds catalog groups
+  with a known ND cost (pets/fairies/partner supplies excluded), **New** and
+  **Delete** edit the list.
+- **Configuration** — **Bibi id**, **Refresh (s)**, the per-client JSON path,
+  **Save config** and **Reload**.
+- **Copy names** — right-click an item row or result row, or use **Copy** next
+  to **Name**.
 - **Per client** — each game window keeps its own configuration at
   `~/.config/ntpl/bazar-<winpid>.json`; selections are saved when the item
   list changes and on shutdown.
@@ -193,9 +191,9 @@ is controlled by the `rest` packet. Some targets are still ignored (blocked
 tile/entity); the bot stops after three rejected steps.
 
 The **NosBazar** tab (fourth page) is described in
-[NosBazar](#nosbazar) above: inventory scan and price-all, cheapest-listing
-monitor, profit-sorted results, floor-protected relisting and the priced,
-non-pet NosMall importer. Each client keeps its own
+[NosBazar](#nosbazar) above: its second-level navbar splits Inventory scan
+(with Set up relist…), Relist setup, Monitor results, the full Items editor
+and Configuration. Each client keeps its own
 `~/.config/ntpl/bazar-<pid>.json`; see [docs/bazar.md](docs/bazar.md).
 
 The **Family** tab (fifth page) invites members with the client's own

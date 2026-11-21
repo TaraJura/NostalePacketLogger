@@ -15,68 +15,52 @@ client:
    cost; add items you already own to the monitor, or price the whole
    inventory in one action.
 
+The page is split by a **second-level navbar** into **Inventory**, **Relist**,
+**Monitor**, **Items** and **Configuration** sections.
+
 The packet formats and live captures are in
 [protocol/bazaar.md](protocol/bazaar.md).
 
 ## Quick start
 
+The NosBazar page has a **second-level navbar** so each workflow has its own
+full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
+**Configuration**.
+
 1. Attach the GUI to a game client as usual.
 2. Walk to a **Bibi Basar** NPC and open the NosBazar **by hand once**. The
-   client learns the map-specific NPC entity id and the dialog option from
-   your own `npc_req`/`n_run` packets (or from this client's DLL log if the
-   GUI attached later). The id appears in **Bibi id** on the tab.
-3. To add items you already own, use the **Inventory** frame:
-   - **Scan inventory…** lists every slot from the live `inv`/`ivn` stream
-     (backfilled from the DLL log after a late attach) with the Item.dat
-     name, bag/slot, vnum, quantity, equipment fields, NPC price and known
-     ND cost. Search by name or vnum, select rows and **Add selected**, or
-     **Add all & monitor**. If it is empty, the login dump was missed:
-     relog once with the window open and the list fills automatically (then
-     it is cached for later attaches).
-   - **Price all** adds one search per distinct inventory item and starts
-     Monitor. It never relists (that is a separate mode), and each search
-     keeps the 2.5 s pacing, so a large inventory takes a while per pass.
-4. Add items in the right-hand **Item editor**:
-   - **Name** — display label only; the server searches by vnum. Item names
-     are rendered in full (wrapped, never ellipsized) in both the Items list
-     and the results table. The **Copy** button next to Name puts the full
-     name on the clipboard; right-clicking an item row or a result row does
-     the same.
-   - **Search vnums** — e.g. `1261 2174`; sent as
-     `c_blist 0 0 0 0 0 0 0 0 2 1261 2174`. One vnum per item gives that
-     item's cheapest listing. Several vnums form the same group search as
-     Nostale-NB; the answer is grouped in the searched order, and the tab
-     uses the minimum visible price across the intact entries. A truncated
-     answer is marked `ok: truncated answer`.
-   - **Item vnum / Tab / Amount / Min price** — needed only for relisting.
-     `Tab` is Equip (0), Main (1) or Etc (2); `Min price` is the floor.
-   - **Cost** — `NosMall ND` (fractional allowed) or `NPC gold`; this drives
-     the profit column. Leave `No cost` for reference-only rows.
-   - Thin rules separate the result rows (and one under the header), so the
-     **Cost** (ND) and **NB Price** columns stay visually tied to their item.
-   - The results table is always sorted by profit ratio, highest first. The
-     **Only priced** filter (on by default) hides rows with no listing,
-     timeout, or no answer yet; untick it to see those rows at the bottom.
-   - **Advanced c_reg fields** — the reference's `unk1=9`, `unk2=4`,
-     `durability=1`, `medal=2`; change only if a captured packet differs.
-5. To find more items, click **Import NosMall…**: it lists only catalog
-   groups with a **known ND cost** and excludes pets, fairies and partner
-   supplies (currently 18 of 1,184 groups). A group without a cost cannot
-   show a profit, so it is not offered at all. Search by name or vnum, then
-   click a row or **Add all matching** to seed several groups. ND prices are
-   not in the client data; the curated `known_reference_costs` fill the ones
-   known, and an item already in the window contributes its vnums too — add
-   an item with **New**, set its Cost, then reopen the picker to offer that
-   group. **Remove unpriced & pets** cleans an existing item list: click it
-   twice within five seconds and every row without an ND cost, plus every
-   pet/fairy/partner row, is deleted (priced ordinary items are kept). The
-   unfiltered full catalog can still be exported with
-   `PYTHONPATH=linux/host python3 -m ntpl db nosmall --export ~/bazar-nosmall-all.json --all`.
-6. Click **Monitor Start**. The tab opens the bazaar if needed, searches one
-   item at a time (2.5 s pacing), retries timed-out items once, then refreshes
-   after **Refresh (s)** (default 30).
-7. To relist, tick **Allow live re-listing**, fill **Character** (your own
-   name, so your listing is never undercut), then **Relist Start**.
+   client learns the map-specific NPC entity id and dialog option from your
+   own `npc_req`/`n_run` packets (or from this client's DLL log if the GUI
+   attached later). The id appears under **Configuration → Bibi id**.
+3. Open the **Inventory** section. It lists every slot you own automatically
+   from the live `inv`/`ivn` stream (backfilled from the DLL log after a late
+   attach): Item.dat name, bag/slot, vnum, quantity, equipment fields, NPC
+   price and known ND cost. Search by name or vnum, then:
+   - tick **one** row and click **Set up relist…** — it adds the item with the
+     exact vnum, tab and stack amount and opens the **Relist** section with
+     that item selected;
+   - **Add selected** — adds the checked items to the monitor list;
+   - **Add all & monitor** / **Price all** — add every distinct item and
+     start Monitor (search only, never relisting).
+   If the list is empty or marked **partial**, the login dump was missed:
+   relog once with the window open and it fills automatically (then it is
+   cached for later attaches).
+4. In **Relist**, set the selected item's **Item vnum**, **Tab**, **Amount**
+   and a positive **Min price** (the per-unit floor), then **Save relist
+   settings**. Fill **Character** with your own name so the host recognises
+   your listing. The list marks each item **ready**, **needs floor** or
+   **monitor only**.
+5. Open the **Monitor** section, click **Monitor Start** and watch the
+   cheapest listing and profit. Searches use 2.5 s pacing; timed-out items
+   get one retry and the next pass starts after **Configuration → Refresh
+   (s)** (default 30).
+6. Use the **Items** section when you need more than the relist fields: the
+   full editor has **Name**, **Search vnums**, **Raw packet**, **Item vnum**,
+   **Tab**, **Amount**, **Min price**, **Cost** and the advanced `c_reg`
+   fields. **Import NosMall…** adds whole catalog groups with a ready
+   `c_blist` packet; **New** and **Delete** edit the list.
+7. To relist, tick **Allow live re-listing (changes your listings)** in the
+   **Relist** section and click **Relist Start**. **Relist Stop** stops it.
 
 ## What the controller does
 
@@ -110,7 +94,7 @@ The bazaar/entity state lives in `WorldState.bazar`; inventory slots are
 
 ## Inventory scan
 
-![NosBazar inventory picker: every owned slot with Item.dat name, bag/slot, vnum, quantity, equipment fields, NPC price and known ND cost](assets/gui-inventory.png)
+![NosBazar Inventory section: every owned slot with Item.dat name, bag/slot, vnum, quantity, equipment fields, NPC price and known ND cost](assets/gui-inventory.png)
 
 The engine keeps **every** bag the server sends, not only the Main/Etc bags
 relisting uses. Live captures (2026-11-20) show:
@@ -126,7 +110,7 @@ ivn 0 30.885.0.0.0.0.0                     # one equipment slot
   equipment-style bags `6` and `7`, shown as **Bag 6**/**Bag 7**.
 - Equipment tokens carry extra dot fields after quantity. The engine does not
   decode them; it keeps them verbatim in `InventorySlot.fields` and the
-  picker shows them as **fields 7.1.0.0**.
+  list shows them as **fields 7.1.0.0**.
 - An equipment row with **quantity 0** is occupied and counts as one item;
   the server removes it with `ivn <bag> <slot>.0…`, not quantity 0. Standard
   bags keep the documented rule: quantity 0 removes the slot.
@@ -134,7 +118,7 @@ ivn 0 30.885.0.0.0.0.0                     # one equipment slot
   scanned by their absolute template vnum, but `find_inventory` never returns
   them, so `c_reg` relisting skips them.
 - Names, NPC prices and categories come from `Item.dat`
-  (`nosmall.load_item_info`), parsed once in a worker thread. The picker shows
+  (`nosmall.load_item_info`), parsed once in a worker thread. The list shows
   the full name, `Bag slot · vnum · qty`, the raw equipment fields, the NPC
   gold price and any known ND cost from the curated NosMall price map or an
   item already configured with a cost.
@@ -144,12 +128,60 @@ ivn 0 30.885.0.0.0.0.0                     # one equipment slot
   quantity becomes the listing `amount` (clamped to 1,000), and its bag
   becomes `inv_tab` when it is 0/1/2 with a positive vnum. A negative-only
   group is monitor-only (no tab, amount 1).
+- **Set up relist…** (enabled with exactly one checked row) adds that exact
+  slot and switches to the **Relist** section with its vnum, tab and amount
+  filled in; only a positive **Min price** is then needed before **Relist
+  Start**. Bound negative vnums and bags 6/7 are not relistable and are added
+  as monitor-only with a status message.
 - A new item gets a known ND cost when the curated map or the configured list
   has one; otherwise a positive Item.dat NPC price becomes **NPC gold** cost,
   so the profit column still works. Both can be cleared in the editor.
 - **Price all** adds every distinct inventory item and starts **Monitor**
   (search only). It does not change listings even when live re-listing is
   armed; use **Relist Start** for that.
+
+## Relisting
+
+![NosBazar Relist section: item readiness list and compact vnum/tab/amount/floor editor](assets/gui-relist.png)
+
+The **Relist** section is the setup and control surface. Pick an item from
+its list (or arrive from **Set up relist…**) and edit the compact fields:
+
+- **Item vnum** — the exact template vnum in the inventory, not the search
+  group. `Set up relist…` fills it from the slot.
+- **Tab** — `Tab none` for monitor-only, or Equip/Main/Etc for relisting.
+- **Amount** — how many from that slot; must not exceed the stack.
+- **Min price** — the per-unit floor; **must be positive** or the item stays
+  monitor-only.
+
+The list marks each item **ready**, **needs floor**, **monitor only**,
+**no search** or **disabled**, and the line above it shows the character and
+Bibi readiness. **Save relist settings** writes the config.
+
+To run it:
+1. Tick **Allow live re-listing (changes your listings)**.
+2. Fill **Character** with your exact character name (used to recognise your
+   own listing).
+3. Click **Relist Start**.
+
+The controller opens the bazaar if needed, searches every enabled item at the
+2.5 s pacing, and for each relist-ready item sends one `c_reg` per pass:
+
+```
+c_reg 0 <tab> <slot> 9 4 1 0 <amount> <cheapest-1> <tax> 2
+```
+
+- The price is the cheapest listing − 1 gold, never below **Min price**.
+- If the cheapest listing is already yours, that item is skipped (`own`).
+- If the cheapest listing is at/below the floor, it is skipped (`floor`).
+- Missing slot / insufficient stack → `no-slot` / `quantity`.
+- The server sends **no acknowledgement** for `c_reg`; the status reads
+  `register sent (no ack)` and the new price. Verify the listing in the game.
+- The listing fee/tax is charged. `Relist Stop` ends the mode and unchecks
+  the live gate; editing items while running stops the controller
+  (`items changed`).
+- Items without a search packet, positive vnum, tab and positive floor are
+  monitor-only and never touched.
 
 ## Configuration
 
@@ -162,7 +194,10 @@ Each attached game client gets its own file:
 `NTPL_BAZAR_CONFIG` overrides the path for every window (the test suite uses a
 temporary file). Before a client is attached the tab starts empty; when a
 client attaches and has no per-client file, `~/.config/ntpl/bazar.json` is
-loaded as a seed and saved per-client on the next change.
+loaded as a seed and saved per-client on the next change. The **Configuration**
+section holds the Bibi id, refresh interval and this file; the Character name
+and live-relisting gate live in the **Relist** section because they only apply
+to relisting.
 
 Example:
 
@@ -221,7 +256,7 @@ Example:
   in place at 16 MB. If the GUI attached after login and the log was
   truncated before the dump, the frame says
   `DLL log truncated before the inventory`; relog or change channel with the
-  window open and the scan (and an open picker) fills automatically. If some
+  window open and the scan (and an open Inventory section) fills automatically. If some
   later `ivn` updates were captured, the list is shown but marked
   **partial (relog for all)**; it is never cached as a complete inventory.
 - **Snapshot cache**: every complete inventory is saved per character id at
@@ -277,7 +312,10 @@ and asserts the profit column and that no `c_reg` was sent.
 `gui_bazar_relist_smoke.py` checks that the live-relist gate blocks the first
 attempt and then asserts the exact `c_reg` packet and the `register-sent`
 status. `gui_inventory_scan_smoke.py` feeds the live inventory shapes
-(3/5/7-field tokens, quantity 0, negative vnums), asserts the picker names and
-fields, adds one item and then prices the whole inventory without duplicates,
-and checks that a complete snapshot is saved/restored while a partial list is
-marked and never cached.
+(3/5/7-field tokens, quantity 0, negative vnums), asserts the Inventory
+section rows/names/fields, adds one item and then prices the whole inventory
+without duplicates, checks **Set up relist…** switches to the Relist section
+with the exact vnum/tab/amount, saves a floor and starts Relist mode, and
+checks that a complete snapshot is saved/restored while a partial list is
+marked and never cached. `gui_smoke.py` enforces the help popover on every
+frame, including the new section frames.

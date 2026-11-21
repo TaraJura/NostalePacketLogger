@@ -632,6 +632,18 @@ class Application(Gtk.Application):
         self.bazar_refresh_spin = None
         self.bazar_npc_entry = None
         self.bazar_character_entry = None
+        # Second-level navbar: Inventory, Relist, Monitor, Items, Config.
+        self.bazar_section_notebook = None
+        self._bazar_section_index: dict[str, int] = {}
+        self.bazar_relist_list = None
+        self.bazar_relist_info = None
+        self.bazar_relist_editor_label = None
+        self.bazar_relist_hint = None
+        self.bazar_relist_form: dict[str, Gtk.Widget] = {}
+        self.bazar_relist_form_box = None
+        self.bazar_relist_save_button = None
+        self.bazar_relist_open_button = None
+        self.bazar_relist_selected: str | None = None
         self._bazar_render_version = -1
         self._bazar_character_autofilled = False
         self._bazar_npc_autofilled = False
@@ -641,15 +653,14 @@ class Application(Gtk.Application):
         # Item.dat name/NPC price for the picker. Item info loads once in a
         # worker thread because the archive parse is too slow for the loop.
         self.bazar_inventory_info = None
-        self.bazar_scan_button = None
         self.bazar_price_all_button = None
-        self.inventory_window = None
         self._inventory_list = None
         self._inventory_scroll = None
         self._inventory_status = None
         self._inventory_search = None
         self._inventory_add_button = None
         self._inventory_add_all_button = None
+        self._inventory_setup_button = None
         self._inventory_checks: set[tuple[int, int]] = set()
         self._inventory_matches: list[InventorySlot] = []
         self._inventory_render_pending = False
@@ -1235,8 +1246,10 @@ class Application(Gtk.Application):
                 self.bazar_config_label.set_text(str(target))
             self._bazar_render_items()
             self._bazar_render_results()
+            self._bazar_render_relist_items()
             self._update_bazar_inventory_info()
-            if self.inventory_window is not None:
+            self._bazar_update_relist_info()
+            if self._inventory_list is not None:
                 self._inventory_schedule_render()
             self._bazar_update_info()
             self._bazar_log(
@@ -1252,6 +1265,8 @@ class Application(Gtk.Application):
             self.bazar_config_label.set_text(str(target))
         self._bazar_render_items()
         self._bazar_render_results()
+        self._bazar_render_relist_items()
+        self._bazar_update_relist_info()
         return False
 
     def _bazar_apply_settings(self) -> None:
@@ -1272,6 +1287,7 @@ class Application(Gtk.Application):
                 self.bazar.config.npc_id = int(text)
             else:
                 self.bazar.config.npc_id = None
+        self._bazar_update_relist_info()
 
     def _bazar_save_config(self, quiet: bool = False) -> bool:
         self._bazar_apply_settings()
@@ -1307,6 +1323,7 @@ class Application(Gtk.Application):
         if self.bazar_live_relist is not None:
             self.bazar_live_relist.set_active(False)
         self._bazar_update_info()
+        self._bazar_update_relist_info()
 
     def _bazar_open(self) -> None:
         if self.client is None or not self.client.connected:
@@ -1492,7 +1509,7 @@ class Application(Gtk.Application):
             f"{self._inventory_cache_note}"
         )
         self._update_bazar_inventory_info()
-        if self.inventory_window is not None:
+        if self._inventory_list is not None:
             self._inventory_schedule_render()
         return True
 
@@ -1560,7 +1577,7 @@ class Application(Gtk.Application):
             )
         callbacks = self._item_info_callbacks
         self._item_info_callbacks = []
-        if self.inventory_window is not None:
+        if self._inventory_list is not None:
             self._inventory_render()
         self._update_bazar_inventory_info()
         for callback in callbacks:
@@ -1581,117 +1598,11 @@ class Application(Gtk.Application):
         return 0 if info is None else max(0, info.npc_price)
 
     def _open_inventory_picker(self) -> None:
-        if self.inventory_window is not None:
-            self.inventory_window.present()
-            return
+        """Show the inline inventory section and refresh it."""
+        self._bazar_show_section("inventory")
         self._ensure_item_info_loaded()
-        window = Gtk.Window(title="Inventory")
-        window.set_application(self)
-        window.set_transient_for(self.window)
-        window.set_modal(True)
-        window.set_default_size(860, 640)
-        window.connect("close-request", self._close_inventory_picker)
-
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        box.set_margin_top(8)
-        box.set_margin_bottom(8)
-        box.set_margin_start(8)
-        box.set_margin_end(8)
-
-        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self._inventory_search = Gtk.SearchEntry()
-        self._inventory_search.set_placeholder_text(
-            "search inventory by item name or vnum"
-        )
-        self._inventory_search.set_hexpand(True)
-        self._inventory_search.connect(
-            "search-changed", lambda *_: self._inventory_render()
-        )
-        top.append(self._inventory_search)
-        rescan = Gtk.Button(label="Rescan")
-        rescan.set_tooltip_text(
-            "Read the live inventory and the client log again."
-        )
-        rescan.connect("clicked", lambda *_: self._inventory_reload())
-        top.append(rescan)
-        top.append(
-            self._help_button(
-                "Inventory",
-                "Every slot the client sent in inv/ivn, including the "
-                "equipment bags (Equip, Bag 6, Bag 7). Each row shows the "
-                "Item.dat name, bag and slot, vnum, quantity, equipment "
-                "fields, NPC price and known ND cost. Equipment rows report "
-                "quantity 0 and count as one item. Negative vnums are "
-                "limited/bound ids; their template (absolute vnum) is "
-                "searched. Add selected adds one bazaar item per distinct "
-                "item; Add all & monitor adds every inventory item and "
-                "starts the monitor. Names load from Item.dat. The server "
-                "sends the full inventory only at login; if this list is "
-                "empty or marked partial, relog or change channel with this "
-                "window open and it fills automatically. The last complete "
-                "inventory is "
-                "cached per character, so a later attach survives the DLL "
-                "log truncation.",
-            )
-        )
-        box.append(top)
-
-        self._inventory_status = Gtk.Label(label="")
-        self._inventory_status.set_xalign(0)
-        self._inventory_status.set_wrap(True)
-        self._inventory_status.add_css_class("dim-label")
-        box.append(self._inventory_status)
-
-        self._inventory_list = Gtk.ListBox()
-        self._inventory_list.set_selection_mode(Gtk.SelectionMode.NONE)
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_child(self._inventory_list)
-        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_vexpand(True)
-        self._inventory_scroll = scrolled
-        box.append(scrolled)
-
-        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        select_all = Gtk.Button(label="Select shown")
-        select_all.connect(
-            "clicked", lambda *_: self._inventory_select_shown()
-        )
-        buttons.append(select_all)
-        clear = Gtk.Button(label="Clear")
-        clear.connect(
-            "clicked", lambda *_: self._inventory_clear_selection()
-        )
-        buttons.append(clear)
-        self._inventory_add_button = Gtk.Button(label="Add selected (0)")
-        self._inventory_add_button.add_css_class("suggested-action")
-        self._inventory_add_button.set_sensitive(False)
-        self._inventory_add_button.connect(
-            "clicked",
-            lambda *_: self._inventory_add(self._inventory_checked_slots()),
-        )
-        buttons.append(self._inventory_add_button)
-        self._inventory_add_all_button = Gtk.Button(
-            label="Add all & monitor"
-        )
-        self._inventory_add_all_button.set_tooltip_text(
-            "Add every inventory item and start the bazaar monitor."
-        )
-        self._inventory_add_all_button.connect(
-            "clicked",
-            lambda *_: self._inventory_add(
-                self._inventory_slots(), start=True
-            ),
-        )
-        buttons.append(self._inventory_add_all_button)
-        close = Gtk.Button(label="Close")
-        close.connect("clicked", lambda *_: window.close())
-        buttons.append(close)
-        box.append(buttons)
-
-        window.set_child(box)
-        self.inventory_window = window
-        self._inventory_render()
-        window.present()
+        if self._inventory_list is not None:
+            self._inventory_render()
 
     def _inventory_reload(self) -> None:
         """Read the log again, refreshing slots missed before the attach."""
@@ -1859,6 +1770,9 @@ class Application(Gtk.Application):
         count = len(self._inventory_checked_slots())
         self._inventory_add_button.set_label(f"Add selected ({count})")
         self._inventory_add_button.set_sensitive(count > 0)
+        if self._inventory_setup_button is not None:
+            self._inventory_setup_button.set_sensitive(count == 1)
+            self._inventory_setup_button.set_label("Set up relist…")
 
     def _inventory_checked_slots(self) -> list[InventorySlot]:
         if not self._inventory_checks:
@@ -1886,24 +1800,28 @@ class Application(Gtk.Application):
 
     def _inventory_idle_render(self) -> bool:
         self._inventory_render_pending = False
-        if not self._closing and self.inventory_window is not None:
+        if not self._closing and self._inventory_list is not None:
             self._inventory_render()
         return False
 
     def _inventory_add(
         self, slots: list[InventorySlot], start: bool = False
-    ) -> None:
-        """Add the distinct items in ``slots`` to the bazaar item list."""
+    ) -> list[BazarItem]:
+        """Add the distinct items in ``slots`` to the bazaar item list.
+
+        Returns the newly created items (empty when everything was already
+        tracked); the Relist setup uses that to select the right row.
+        """
         if not slots:
             self._bazar_log("inventory: no slots to add")
-            return
+            return []
         if not self.item_info_loaded:
             if self._inventory_status is not None:
                 self._inventory_status.set_text("Loading item names…")
             self._ensure_item_info_loaded(
                 lambda: self._inventory_add(slots, start)
             )
-            return
+            return []
         existing = list(self.bazar.config.items)
         names = {
             vnum: info.name
@@ -1922,6 +1840,7 @@ class Application(Gtk.Application):
             self._nosmall_costs(),
             npc_prices,
         )
+        created = list(plan.items)
         if plan.items:
             self._bazar_set_items(existing + plan.items)
             self._bazar_save_config(quiet=True)
@@ -1930,7 +1849,7 @@ class Application(Gtk.Application):
             f"{plan.tracked} already tracked"
         )
         self._update_bazar_inventory_info()
-        if self.inventory_window is not None:
+        if self._inventory_list is not None:
             self._inventory_render()
         if self._inventory_status is not None:
             # After the re-render: the render writes the live summary and
@@ -1941,6 +1860,80 @@ class Application(Gtk.Application):
             )
         if start:
             self._bazar_start_monitor()
+        return created
+
+    def _inventory_set_up_relist(self) -> None:
+        """Add one checked inventory slot and open its relist settings."""
+        slots = self._inventory_checked_slots()
+        if len(slots) != 1:
+            self._bazar_log(
+                "select exactly one inventory item to set up relisting"
+            )
+            return
+        slot = slots[0]
+        if slot.vnum <= 0:
+            self._bazar_log(
+                "bound/limited item (negative vnum) cannot be relisted"
+            )
+            return
+        if slot.bag not in (0, 1, 2):
+            self._inventory_add([slot])
+            self._bazar_log(
+                f"bag {slot.bag} is not a relistable tab; item added as "
+                "monitor-only"
+            )
+            self._bazar_show_section("items")
+            return
+        if not self.item_info_loaded:
+            self._ensure_item_info_loaded(self._inventory_set_up_relist)
+            return
+        created = self._inventory_add([slot])
+        item = (
+            created[0]
+            if created
+            else self._bazar_item_by_vnum(abs(slot.vnum))
+        )
+        if item is None:
+            self._bazar_log("could not add the item to the bazaar list")
+            return
+        vnum = abs(slot.vnum)
+        quantity = int(getattr(slot, "amount", slot.quantity) or 0)
+        amount = min(1000, max(1, quantity))
+        changed = False
+        if item.vnum != vnum:
+            item.vnum = vnum
+            changed = True
+        if item.inv_tab != slot.bag:
+            item.inv_tab = slot.bag
+            changed = True
+        if item.amount != amount:
+            item.amount = amount
+            changed = True
+        if changed:
+            self._bazar_set_items(list(self.bazar.config.items))
+            self._bazar_save_config(quiet=True)
+        self._bazar_render_relist_items()
+        self._bazar_select_relist_item(item.name)
+        self._bazar_show_section("relist")
+        self._bazar_update_relist_info()
+        if item.min_price <= 0:
+            self._bazar_log(
+                f"{item.name}: set a positive Min price, then Relist Start"
+            )
+            if self.bazar_relist_form:
+                self.bazar_relist_form["min"].grab_focus()
+        else:
+            self._bazar_log(
+                f"{item.name}: relist settings ready "
+                f"(floor {item.min_price:,})"
+            )
+
+    def _bazar_item_by_vnum(self, vnum: int) -> BazarItem | None:
+        target = abs(int(vnum))
+        for item in self.bazar.config.items:
+            if target in tracked_vnums([item]):
+                return item
+        return None
 
     def _bazar_price_inventory(self) -> None:
         """Add every inventory item and start the monitor."""
@@ -1952,19 +1945,6 @@ class Application(Gtk.Application):
             self._update_bazar_inventory_info()
             return
         self._inventory_add(slots, start=True)
-
-    def _close_inventory_picker(self, _window=None) -> bool:
-        self.inventory_window = None
-        self._inventory_list = None
-        self._inventory_scroll = None
-        self._inventory_status = None
-        self._inventory_search = None
-        self._inventory_add_button = None
-        self._inventory_add_all_button = None
-        self._inventory_matches = []
-        self._inventory_render_pending = False
-        self._inventory_checks.clear()
-        return False
 
     def _bazar_on_packet(self, packet: Packet) -> None:
         if packet.opcode in ("c_map", "mapout"):
@@ -1995,7 +1975,7 @@ class Application(Gtk.Application):
             self._inventory_cache_dirty = True
             self._schedule_inventory_cache_save()
             self._update_bazar_inventory_info()
-            if self.inventory_window is not None:
+            if self._inventory_list is not None:
                 self._inventory_schedule_render()
         if packet.opcode in (
             "rc_blist", "c_blist", "c_slist", "npc_req", "n_run", "in",
@@ -2026,6 +2006,7 @@ class Application(Gtk.Application):
                 self.bazar_npc_entry.set_text(value)
                 self._bazar_npc_autofilled = True
                 self._bazar_npc_autofill_value = value
+        self._bazar_update_relist_info()
 
     def _bazar_render_items(self) -> None:
         if self.bazar_items_list is None:
@@ -2104,6 +2085,298 @@ class Application(Gtk.Application):
                 self.bazar_selected_name = item.name
                 self._bazar_form_from_item(item)
                 return
+
+    # -- Relist section -------------------------------------------------
+
+    def _bazar_render_relist_items(self) -> None:
+        if self.bazar_relist_list is None:
+            return
+        selected = self.bazar_relist_selected
+        child = self.bazar_relist_list.get_first_child()
+        while child is not None:
+            self.bazar_relist_list.remove(child)
+            child = self.bazar_relist_list.get_first_child()
+        items = list(self.bazar.config.items)
+        if not items:
+            row = Gtk.ListBoxRow()
+            row.set_activatable(False)
+            row.set_selectable(False)
+            empty = Gtk.Label(
+                label="No items yet. Add them in Inventory or Items."
+            )
+            empty.set_xalign(0)
+            empty.add_css_class("dim-label")
+            row.set_child(empty)
+            self.bazar_relist_list.append(row)
+            self.bazar_relist_selected = None
+            self._bazar_relist_item_selected(self.bazar_relist_list, None)
+            self._bazar_update_relist_info()
+            return
+        for item in items:
+            row = Gtk.ListBoxRow()
+            row.item_name = item.name  # type: ignore[attr-defined]
+            box = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=1
+            )
+            name = Gtk.Label(label=item.name)
+            name.set_xalign(0)
+            name.set_hexpand(True)
+            name.set_wrap(True)
+            name.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            name.set_max_width_chars(36)
+            detail = Gtk.Label(label=self._bazar_relist_detail(item))
+            detail.set_xalign(0)
+            detail.add_css_class("dim-label")
+            detail.set_wrap(True)
+            detail.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            detail.set_max_width_chars(44)
+            box.append(name)
+            box.append(detail)
+            badge = Gtk.Label(label=self._bazar_relist_badge(item)[0])
+            badge.add_css_class(self._bazar_relist_badge(item)[1])
+            badge.set_valign(Gtk.Align.START)
+            content = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=8
+            )
+            content.set_margin_end(10)
+            content.append(box)
+            content.append(badge)
+            row.set_child(content)
+            self.bazar_relist_list.append(row)
+        if selected:
+            self._bazar_select_relist_item(selected)
+        else:
+            self._bazar_relist_item_selected(self.bazar_relist_list, None)
+        self._bazar_update_relist_info()
+
+    @staticmethod
+    def _bazar_relist_detail(item: BazarItem) -> str:
+        parts = []
+        if item.vnum:
+            parts.append(f"vnum {item.vnum}")
+        if item.inv_tab in (0, 1, 2):
+            tab = {0: "Equip", 1: "Main", 2: "Etc"}[item.inv_tab]
+            parts.append(tab)
+        parts.append(f"amount {item.amount}")
+        parts.append(f"min {item.min_price:,}")
+        if not item.search_packet:
+            parts.append("no search packet")
+        if not item.enabled:
+            parts.append("disabled")
+        return " · ".join(parts)
+
+    @staticmethod
+    def _bazar_relist_ready(item: BazarItem) -> bool:
+        return bool(
+            item.enabled
+            and item.search_packet
+            and item.vnum
+            and item.vnum > 0
+            and item.inv_tab in (0, 1, 2)
+            and item.min_price > 0
+        )
+
+    def _bazar_relist_badge(self, item: BazarItem) -> tuple[str, str]:
+        if not item.search_packet:
+            return "no search", "bazar-warn"
+        if not item.enabled:
+            return "disabled", "dim-label"
+        if self._bazar_relist_ready(item):
+            return "ready", "bazar-ok"
+        if item.vnum and item.inv_tab in (0, 1, 2):
+            return "needs floor", "bazar-warn"
+        return "monitor only", "dim-label"
+
+    def _bazar_relist_item_selected(
+        self, _listbox: Gtk.ListBox, row: Gtk.ListBoxRow | None
+    ) -> None:
+        if row is None:
+            self.bazar_relist_selected = None
+            if self.bazar_relist_editor_label is not None:
+                self.bazar_relist_editor_label.set_text("No item selected")
+            if self.bazar_relist_hint is not None:
+                self.bazar_relist_hint.set_text("")
+            self._bazar_set_relist_form_sensitive(False)
+            return
+        name = getattr(row, "item_name", None)
+        if not name:
+            return
+        item = next(
+            (
+                existing
+                for existing in self.bazar.config.items
+                if existing.name == name
+            ),
+            None,
+        )
+        if item is None:
+            return
+        self.bazar_relist_selected = item.name
+        self._bazar_relist_form_from_item(item)
+
+    def _bazar_relist_form_from_item(self, item: BazarItem) -> None:
+        form = self.bazar_relist_form
+        if not form:
+            return
+        form["vnum"].set_text(
+            "" if item.vnum is None else str(item.vnum)
+        )
+        form["tab"].set_selected(
+            0 if item.inv_tab is None else item.inv_tab + 1
+        )
+        form["amount"].set_value(item.amount)
+        form["min"].set_value(item.min_price)
+        searches = " ".join(str(vnum) for vnum in item.vnums) or "no search"
+        if self.bazar_relist_editor_label is not None:
+            self.bazar_relist_editor_label.set_text(
+                f"{item.name} · search {searches}"
+            )
+        self._bazar_set_relist_form_sensitive(True)
+        if self.bazar_relist_hint is not None:
+            if not item.search_packet:
+                hint = "No search packet: add one in Items."
+            elif item.vnum is None or item.vnum <= 0:
+                hint = "Set the item vnum."
+            elif item.inv_tab not in (0, 1, 2):
+                hint = "Choose Equip, Main or Etc."
+            elif item.min_price <= 0:
+                hint = "Set a positive Min price to enable relisting."
+            elif item.vnum not in item.vnums:
+                hint = (
+                    "Item vnum is not in the search group; edit Search "
+                    "vnums in Items or use the exact inventory vnum."
+                )
+            else:
+                hint = f"Ready · floor {item.min_price:,} per unit."
+            self.bazar_relist_hint.set_text(hint)
+
+    def _bazar_set_relist_form_sensitive(self, enabled: bool) -> None:
+        for widget in self.bazar_relist_form.values():
+            widget.set_sensitive(bool(enabled))
+        if self.bazar_relist_save_button is not None:
+            self.bazar_relist_save_button.set_sensitive(bool(enabled))
+        if self.bazar_relist_open_button is not None:
+            self.bazar_relist_open_button.set_sensitive(bool(enabled))
+
+    def _bazar_select_relist_item(self, name: str | None) -> None:
+        if self.bazar_relist_list is None:
+            return
+        if not name:
+            self.bazar_relist_list.unselect_all()
+            self._bazar_relist_item_selected(self.bazar_relist_list, None)
+            return
+        child = self.bazar_relist_list.get_first_child()
+        while child is not None:
+            if getattr(child, "item_name", None) == name:
+                self.bazar_relist_list.select_row(child)
+                return
+            child = child.get_next_sibling()
+        self.bazar_relist_selected = None
+        self.bazar_relist_list.unselect_all()
+        self._bazar_relist_item_selected(self.bazar_relist_list, None)
+
+    def _bazar_relist_save(self) -> None:
+        name = self.bazar_relist_selected
+        item = next(
+            (
+                existing
+                for existing in self.bazar.config.items
+                if existing.name == name
+            ),
+            None,
+        )
+        if item is None:
+            self._bazar_log("select an item to save its relist settings")
+            return
+        form = self.bazar_relist_form
+        if not form:
+            return
+        text = form["vnum"].get_text().strip()
+        vnum = None
+        if text:
+            if not text.isdigit() or int(text) <= 0:
+                self._bazar_log("item vnum must be a positive number")
+                return
+            vnum = int(text)
+        tab_index = form["tab"].get_selected()
+        inv_tab = None if tab_index == 0 else tab_index - 1
+        amount = int(form["amount"].get_value())
+        minimum = int(form["min"].get_value())
+        item.vnum = vnum
+        item.inv_tab = inv_tab
+        item.amount = amount
+        item.min_price = minimum
+        if vnum is not None and item.search_packet:
+            current = item.vnums
+            if len(current) == 1 and current[0] != vnum:
+                # A single-vnum search follows the relist target; a group or
+                # raw packet is deliberately left alone.
+                item.search_packet = build_search_packet([vnum])
+        self._bazar_set_items(list(self.bazar.config.items))
+        self._bazar_save_config(quiet=True)
+        self._bazar_render_relist_items()
+        self._bazar_select_relist_item(item.name)
+        self._bazar_update_relist_info()
+        if minimum <= 0:
+            self._bazar_log(
+                f"{item.name}: set a positive Min price to enable relisting"
+            )
+        else:
+            self._bazar_log(
+                f"{item.name}: relist settings saved "
+                f"(floor {minimum:,} per unit)"
+            )
+
+    def _bazar_open_full_editor(self) -> None:
+        name = self.bazar_relist_selected
+        self._bazar_show_section("items")
+        if name:
+            self._bazar_select_item(name)
+
+    def _bazar_select_item(self, name: str) -> None:
+        if self.bazar_items_list is None:
+            return
+        child = self.bazar_items_list.get_first_child()
+        while child is not None:
+            if getattr(child, "item_name", None) == name:
+                self.bazar_items_list.select_row(child)
+                return
+            child = child.get_next_sibling()
+
+    def _bazar_update_relist_info(self) -> None:
+        label = self.bazar_relist_info
+        if label is None:
+            return
+        character = ""
+        if self.bazar_character_entry is not None:
+            character = self.bazar_character_entry.get_text().strip()
+        if not character:
+            character = self.bazar.config.character.strip()
+        npc = ""
+        if self.bazar_npc_entry is not None:
+            npc = self.bazar_npc_entry.get_text().strip()
+        if not npc and self.engine.world.bazar.npc_id:
+            npc = str(self.engine.world.bazar.npc_id)
+        if not npc:
+            npc = next(
+                (
+                    str(entity.entity_id)
+                    for entity in self.engine.world.entities.values()
+                    if getattr(entity, "vnum", 0) == 793
+                ),
+                "",
+            )
+        ready = sum(
+            1
+            for item in self.bazar.config.items
+            if self._bazar_relist_ready(item)
+        )
+        parts = [
+            f"character {character}" if character else "character missing",
+            f"Bibi {npc}" if npc else "Bibi id missing",
+            f"{ready} relist-ready",
+        ]
+        label.set_text(" · ".join(parts))
 
     @staticmethod
     def _bazar_standard_search(packet: str | None) -> bool:
@@ -2282,8 +2555,10 @@ class Application(Gtk.Application):
         )
         self._bazar_render_items()
         self._bazar_render_results()
+        self._bazar_render_relist_items()
         self._update_bazar_inventory_info()
-        if self.inventory_window is not None:
+        self._bazar_update_relist_info()
+        if self._inventory_list is not None:
             self._inventory_schedule_render()
 
     def _load_nosmall_groups(self) -> list:
@@ -2842,7 +3117,7 @@ class Application(Gtk.Application):
         self._save_inventory_cache()
         self._bazar_sync_from_world()
         self._update_bazar_inventory_info()
-        if self.inventory_window is not None:
+        if self._inventory_list is not None:
             self._inventory_schedule_render()
 
     def _bazar_reset_for_attach(self, winpid: int) -> None:
@@ -2872,16 +3147,15 @@ class Application(Gtk.Application):
             self.bazar_npc_entry.set_text("")
         self._bazar_load_config(fallback=True)
         self._update_bazar_inventory_info()
-        if self.inventory_window is not None:
+        if self._inventory_list is not None:
             self._inventory_checks.clear()
             self._inventory_schedule_render()
 
     def _build_bazar_page(self):
-        """NosBazar market monitor and relisting controls.
+        """NosBazar monitor, inventory scan and relisting.
 
-        The page is a thin view over :class:`ntpl.bazar.BazarController`:
-        buttons start/stop it, the item list edits its config, and the left
-        side renders the controller's latest quotes.
+        The page is a second-level notebook so each workflow owns a full
+        section instead of squeezing every control into one sidebar.
         """
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         page.set_margin_top(6)
@@ -2896,29 +3170,6 @@ class Application(Gtk.Application):
         )
         open_button.connect("clicked", lambda *_: self._bazar_open())
         toolbar.append(open_button)
-
-        monitor_start = Gtk.Button(label="Monitor Start")
-        monitor_start.add_css_class("suggested-action")
-        monitor_start.set_tooltip_text(
-            "Search every item; sends search packets only."
-        )
-        monitor_start.connect("clicked", lambda *_: self._bazar_start_monitor())
-        toolbar.append(monitor_start)
-        monitor_stop = Gtk.Button(label="Monitor Stop")
-        monitor_stop.connect("clicked", lambda *_: self._bazar_stop())
-        toolbar.append(monitor_stop)
-
-        relist_start = Gtk.Button(label="Relist Start")
-        relist_start.add_css_class("destructive-action")
-        relist_start.set_tooltip_text(
-            "Relist one gold below the cheapest other seller, never below min price."
-        )
-        relist_start.connect("clicked", lambda *_: self._bazar_start_relist())
-        toolbar.append(relist_start)
-        relist_stop = Gtk.Button(label="Relist Stop")
-        relist_stop.connect("clicked", lambda *_: self._bazar_stop())
-        toolbar.append(relist_stop)
-
         self.bazar_info = Gtk.Label(label="NosBazar idle")
         self.bazar_info.set_xalign(0)
         self.bazar_info.set_hexpand(True)
@@ -2926,30 +3177,383 @@ class Application(Gtk.Application):
         toolbar.append(
             self._help_button(
                 "NosBazar",
-                "Search configured bazaar items, see the cheapest listing and "
-                "its profit, and optionally relist your inventory. Inventory "
-                "lists every slot you own and can price it all in one "
-                "action. Monitor only searches. Relist changes your prices "
-                "and needs live re-listing, your character name and a "
-                "positive min price. Open bazaar replays the Bibi Basar "
-                "dialog through the client's own send path.",
+                "Section tabs: Inventory scans every owned slot and can set "
+                "up relisting; Relist sets the floor, character and starts "
+                "registrations; Monitor searches and shows prices/profit; "
+                "Items edits the searches; Configuration has the Bibi id, "
+                "refresh and config file. Open bazaar replays the Bibi Basar "
+                "dialog through the client's own send path. Relist changes "
+                "real listings and spends the fee.",
             )
         )
         page.append(toolbar)
 
+        sections = Gtk.Notebook()
+        sections.set_vexpand(True)
+        sections.set_scrollable(True)
+        self.bazar_section_notebook = sections
+        pages = (
+            ("inventory", "Inventory", self._build_bazar_inventory_section()),
+            ("relist", "Relist", self._build_bazar_relist_section()),
+            ("monitor", "Monitor", self._build_bazar_monitor_section()),
+            ("items", "Items", self._build_bazar_items_section()),
+            ("config", "Configuration", self._build_bazar_config_section()),
+        )
+        for key, title, child in pages:
+            index = sections.append_page(child, Gtk.Label(label=title))
+            self._bazar_section_index[key] = index
+        page.append(sections)
+
+        self.bazar_status = Gtk.Label(label="NosBazar idle")
+        self.bazar_status.set_xalign(0)
+        self.bazar_status.set_wrap(True)
+        self.bazar_status.add_css_class("dim-label")
+        page.append(self.bazar_status)
+
+        self.bazar_page = page
+        self._bazar_render_items()
+        self._bazar_render_results()
+        self._bazar_render_relist_items()
+        self._update_bazar_inventory_info()
+        if self._inventory_list is not None:
+            self._inventory_render()
+        self._bazar_update_info()
+        self._bazar_update_relist_info()
+        self._bazar_show_section("inventory")
+        return page
+
+    def _bazar_show_section(self, key: str) -> None:
+        if self.bazar_section_notebook is None:
+            return
+        index = self._bazar_section_index.get(key)
+        if index is not None:
+            self.bazar_section_notebook.set_current_page(index)
+
+    def _build_bazar_inventory_section(self) -> Gtk.Widget:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        page.set_margin_top(6)
+        page.set_margin_bottom(6)
+        page.set_margin_start(6)
+        page.set_margin_end(6)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._inventory_search = Gtk.SearchEntry()
+        self._inventory_search.set_placeholder_text(
+            "search inventory by item name or vnum"
+        )
+        self._inventory_search.set_hexpand(True)
+        self._inventory_search.connect(
+            "search-changed", lambda *_: self._inventory_render()
+        )
+        top.append(self._inventory_search)
+        rescan = Gtk.Button(label="Rescan")
+        rescan.set_tooltip_text(
+            "Read the live inventory and the client log again."
+        )
+        rescan.connect("clicked", lambda *_: self._inventory_reload())
+        top.append(rescan)
+        self.bazar_price_all_button = Gtk.Button(label="Price all")
+        self.bazar_price_all_button.set_tooltip_text(
+            "Add every inventory item and start the monitor."
+        )
+        self.bazar_price_all_button.connect(
+            "clicked", lambda *_: self._bazar_price_inventory()
+        )
+        top.append(self.bazar_price_all_button)
+        content.append(top)
+
+        self._inventory_status = Gtk.Label(label="")
+        self._inventory_status.set_xalign(0)
+        self._inventory_status.set_wrap(True)
+        self._inventory_status.add_css_class("dim-label")
+        content.append(self._inventory_status)
+        # One live line for the summary and the filter result.
+        self.bazar_inventory_info = self._inventory_status
+
+        self._inventory_list = Gtk.ListBox()
+        self._inventory_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_child(self._inventory_list)
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_vexpand(True)
+        self._inventory_scroll = scrolled
+        content.append(scrolled)
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        select_all = Gtk.Button(label="Select shown")
+        select_all.connect(
+            "clicked", lambda *_: self._inventory_select_shown()
+        )
+        buttons.append(select_all)
+        clear = Gtk.Button(label="Clear")
+        clear.connect(
+            "clicked", lambda *_: self._inventory_clear_selection()
+        )
+        buttons.append(clear)
+        self._inventory_add_button = Gtk.Button(label="Add selected (0)")
+        self._inventory_add_button.add_css_class("suggested-action")
+        self._inventory_add_button.set_sensitive(False)
+        self._inventory_add_button.connect(
+            "clicked",
+            lambda *_: self._inventory_add(self._inventory_checked_slots()),
+        )
+        buttons.append(self._inventory_add_button)
+        self._inventory_add_all_button = Gtk.Button(
+            label="Add all & monitor"
+        )
+        self._inventory_add_all_button.set_tooltip_text(
+            "Add every inventory item and start the bazaar monitor."
+        )
+        self._inventory_add_all_button.connect(
+            "clicked",
+            lambda *_: self._inventory_add(
+                self._inventory_slots(), start=True
+            ),
+        )
+        buttons.append(self._inventory_add_all_button)
+        self._inventory_setup_button = Gtk.Button(
+            label="Set up relist…"
+        )
+        self._inventory_setup_button.set_tooltip_text(
+            "Add exactly one checked item and open its relist setup."
+        )
+        self._inventory_setup_button.set_sensitive(False)
+        self._inventory_setup_button.connect(
+            "clicked", lambda *_: self._inventory_set_up_relist()
+        )
+        buttons.append(self._inventory_setup_button)
+        content.append(buttons)
+
+        inventory_frame = self._frame(
+            "Inventory scan",
+            content,
+            help_text=(
+                "Every slot the client sent in inv/ivn, including the "
+                "equipment bags (Equip, Bag 6, Bag 7). Each row shows the "
+                "Item.dat name, bag and slot, vnum, quantity, equipment "
+                "fields, NPC price and known ND cost. Equipment rows "
+                "report quantity 0 and count as one item. Negative vnums "
+                "are limited/bound ids and cannot be relisted; their "
+                "template is still searched. Add selected adds one "
+                "bazaar item per distinct item; Set up relist adds the "
+                "checked item and opens its relist settings; Add all & "
+                "monitor adds every inventory item and starts Monitor. "
+                "The server sends the inventory only at login: if it is "
+                "missing or marked partial, relog or change channel with "
+                "this window open. The last complete inventory is cached "
+                "per character, so a later attach survives log "
+                "truncation."
+            ),
+        )
+        inventory_frame.set_vexpand(True)
+        page.append(inventory_frame)
+        return page
+
+    def _build_bazar_relist_section(self) -> Gtk.Widget:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        page.set_margin_top(6)
+        page.set_margin_bottom(6)
+        page.set_margin_start(6)
+        page.set_margin_end(6)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+
+        self.bazar_live_relist = Gtk.CheckButton(
+            label="Allow live re-listing (changes your listings)"
+        )
+        self.bazar_live_relist.set_active(False)
+        self.bazar_live_relist.set_tooltip_text(
+            "Required for Relist Start; changes your prices and spends the fee."
+        )
+        content.append(self.bazar_live_relist)
+
+        self.bazar_character_entry = Gtk.Entry()
+        self.bazar_character_entry.set_placeholder_text("your character")
+        self.bazar_character_entry.set_max_length(40)
+        self.bazar_character_entry.set_width_chars(18)
+        self.bazar_character_entry.set_tooltip_text(
+            "Your character, to recognise your own listing."
+        )
+        self.bazar_character_entry.connect(
+            "changed", lambda *_: self._bazar_update_relist_info()
+        )
+        content.append(
+            self._field_row(
+                Gtk.Label(label="Character"),
+                self.bazar_character_entry,
+            )
+        )
+
+        self.bazar_relist_info = Gtk.Label(label="")
+        self.bazar_relist_info.set_xalign(0)
+        self.bazar_relist_info.set_wrap(True)
+        self.bazar_relist_info.add_css_class("dim-label")
+        content.append(self.bazar_relist_info)
+
         body = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
         body.set_vexpand(True)
         body.set_wide_handle(True)
-
         left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        result_tools = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, spacing=6
+        left.set_size_request(380, -1)
+        left.set_vexpand(True)
+        left_info = Gtk.Label(label="Relist items")
+        left_info.set_xalign(0)
+        left_info.add_css_class("dim-label")
+        left.append(left_info)
+        self.bazar_relist_list = Gtk.ListBox()
+        self.bazar_relist_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.bazar_relist_list.set_activate_on_single_click(True)
+        self.bazar_relist_list.connect(
+            "row-selected", self._bazar_relist_item_selected
         )
+        list_scroll = Gtk.ScrolledWindow()
+        list_scroll.set_child(self.bazar_relist_list)
+        list_scroll.set_policy(
+            Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
+        )
+        list_scroll.set_vexpand(True)
+        left.append(list_scroll)
+        body.set_start_child(left)
+        body.set_resize_start_child(True)
+        right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        right.set_vexpand(True)
+        right.append(self._build_bazar_relist_editor())
+        body.set_end_child(right)
+        body.set_resize_end_child(False)
+        content.append(body)
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        relist_start = Gtk.Button(label="Relist Start")
+        relist_start.add_css_class("destructive-action")
+        relist_start.set_tooltip_text(
+            "Relist one gold below the cheapest other seller, never below min price."
+        )
+        relist_start.connect("clicked", lambda *_: self._bazar_start_relist())
+        buttons.append(relist_start)
+        relist_stop = Gtk.Button(label="Relist Stop")
+        relist_stop.connect("clicked", lambda *_: self._bazar_stop())
+        buttons.append(relist_stop)
+        content.append(buttons)
+
+        relist_frame = self._frame(
+                "Relisting",
+                content,
+                help_text=(
+                    "Select an item, set the exact Item vnum, the inventory "
+                    "Tab and the Amount, then set a positive Min price (the "
+                    "per-unit floor). Tick Allow live re-listing and fill "
+                    "Character with your own name so the host never "
+                    "undercuts you. Relist Start searches every enabled item "
+                    "and sends one c_reg per eligible item per pass at "
+                    "cheapest minus one gold, but never below the floor. "
+                    "The server sends no acknowledgement, so the status says "
+                    "register sent (no ack); verify the listing in the "
+                    "bazaar. Items without a vnum, tab or positive floor are "
+                    "monitor-only and are skipped."
+                ),
+        )
+        relist_frame.set_vexpand(True)
+        page.append(relist_frame)
+        return page
+
+    def _build_bazar_relist_editor(self) -> Gtk.Widget:
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_top(2)
+        box.set_margin_start(2)
+        box.set_margin_end(2)
+        self.bazar_relist_editor_label = Gtk.Label(
+            label="No item selected"
+        )
+        self.bazar_relist_editor_label.set_xalign(0)
+        self.bazar_relist_editor_label.set_wrap(True)
+        box.append(self.bazar_relist_editor_label)
+
+        form = self.bazar_relist_form
+        vnum = Gtk.Entry()
+        vnum.set_placeholder_text("item vnum")
+        vnum.set_input_purpose(Gtk.InputPurpose.DIGITS)
+        vnum.set_max_length(10)
+        vnum.set_width_chars(8)
+        form["vnum"] = vnum
+        tab = Gtk.DropDown.new_from_strings(
+            ["Tab none", "Equip (0)", "Main (1)", "Etc (2)"]
+        )
+        tab.set_selected(0)
+        form["tab"] = tab
+        box.append(
+            self._field_row(
+                Gtk.Label(label="Item vnum"), vnum, tab
+            )
+        )
+        amount = Gtk.SpinButton.new_with_range(1, 1000, 1)
+        amount.set_value(1)
+        amount.set_digits(0)
+        form["amount"] = amount
+        minimum = Gtk.SpinButton.new_with_range(0, 2_000_000_000, 1000)
+        minimum.set_value(0)
+        minimum.set_digits(0)
+        minimum.set_width_chars(12)
+        form["min"] = minimum
+        box.append(
+            self._field_row(
+                Gtk.Label(label="Amount"),
+                amount,
+                Gtk.Label(label="Min price"),
+                minimum,
+            )
+        )
+        self.bazar_relist_hint = Gtk.Label(label="")
+        self.bazar_relist_hint.set_xalign(0)
+        self.bazar_relist_hint.set_wrap(True)
+        self.bazar_relist_hint.add_css_class("dim-label")
+        box.append(self.bazar_relist_hint)
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.bazar_relist_save_button = Gtk.Button(
+            label="Save relist settings"
+        )
+        self.bazar_relist_save_button.add_css_class("suggested-action")
+        self.bazar_relist_save_button.connect(
+            "clicked", lambda *_: self._bazar_relist_save()
+        )
+        buttons.append(self.bazar_relist_save_button)
+        self.bazar_relist_open_button = Gtk.Button(
+            label="Open full editor"
+        )
+        self.bazar_relist_open_button.set_tooltip_text(
+            "Edit the name, search packet and cost in Items."
+        )
+        self.bazar_relist_open_button.connect(
+            "clicked", lambda *_: self._bazar_open_full_editor()
+        )
+        buttons.append(self.bazar_relist_open_button)
+        box.append(buttons)
+        self._bazar_set_relist_form_sensitive(False)
+        return box
+
+    def _build_bazar_monitor_section(self) -> Gtk.Widget:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        page.set_margin_top(6)
+        page.set_margin_bottom(6)
+        page.set_margin_start(6)
+        page.set_margin_end(6)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        tools = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        monitor_start = Gtk.Button(label="Monitor Start")
+        monitor_start.add_css_class("suggested-action")
+        monitor_start.set_tooltip_text(
+            "Search every item; sends search packets only."
+        )
+        monitor_start.connect("clicked", lambda *_: self._bazar_start_monitor())
+        tools.append(monitor_start)
+        monitor_stop = Gtk.Button(label="Monitor Stop")
+        monitor_stop.connect("clicked", lambda *_: self._bazar_stop())
+        tools.append(monitor_stop)
         self.bazar_results_info = Gtk.Label(label="No items")
         self.bazar_results_info.set_xalign(0)
         self.bazar_results_info.set_hexpand(True)
         self.bazar_results_info.add_css_class("dim-label")
-        result_tools.append(self.bazar_results_info)
+        tools.append(self.bazar_results_info)
         self.bazar_only_priced = Gtk.CheckButton(label="Only priced")
         self.bazar_only_priced.set_active(True)
         self.bazar_only_priced.set_tooltip_text(
@@ -2958,8 +3562,8 @@ class Application(Gtk.Application):
         self.bazar_only_priced.connect(
             "toggled", lambda *_: self._bazar_render_results()
         )
-        result_tools.append(self.bazar_only_priced)
-        left.append(result_tools)
+        tools.append(self.bazar_only_priced)
+        content.append(tools)
         self.bazar_results_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=2
         )
@@ -2969,126 +3573,35 @@ class Application(Gtk.Application):
         )
         results_scroll.set_child(self.bazar_results_box)
         results_scroll.set_vexpand(True)
-        left.append(results_scroll)
-        body.set_start_child(left)
-        body.set_resize_start_child(True)
-
-        right_scroll = Gtk.ScrolledWindow()
-        right_scroll.set_policy(
-            Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
-        )
-        right_scroll.set_size_request(410, -1)
-        right_scroll.set_vexpand(True)
-        right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        right.set_margin_top(2)
-        right.set_margin_bottom(2)
-        right.set_margin_start(2)
-        right.set_margin_end(2)
-
-        monitor_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.bazar_live_relist = Gtk.CheckButton(
-            label="Allow live re-listing (changes your listings)"
-        )
-        self.bazar_live_relist.set_active(False)
-        self.bazar_live_relist.set_tooltip_text(
-            "Required for Relist Start; changes your prices and spends the fee."
-        )
-        monitor_box.append(self.bazar_live_relist)
-        self.bazar_character_entry = Gtk.Entry()
-        self.bazar_character_entry.set_placeholder_text("your character")
-        self.bazar_character_entry.set_max_length(40)
-        self.bazar_character_entry.set_width_chars(18)
-        self.bazar_character_entry.set_tooltip_text(
-            "Your character, to recognise your own listing."
-        )
-        self.bazar_npc_entry = Gtk.Entry()
-        self.bazar_npc_entry.set_placeholder_text("Bibi entity id")
-        self.bazar_npc_entry.set_input_purpose(Gtk.InputPurpose.DIGITS)
-        self.bazar_npc_entry.set_max_length(10)
-        self.bazar_npc_entry.set_width_chars(10)
-        self.bazar_npc_entry.set_tooltip_text(
-            "Bibi Basar entity id; learned when you open the bazaar."
-        )
-        monitor_box.append(
-            self._field_row(
-                Gtk.Label(label="Character"),
-                self.bazar_character_entry,
-                Gtk.Label(label="Bibi id"),
-                self.bazar_npc_entry,
-            )
-        )
-        self.bazar_refresh_spin = Gtk.SpinButton.new_with_range(5, 3600, 5)
-        self.bazar_refresh_spin.set_value(30)
-        self.bazar_refresh_spin.set_digits(0)
-        monitor_box.append(
-            self._field_row(
-                Gtk.Label(label="Refresh (s)"), self.bazar_refresh_spin
-            )
-        )
-        right.append(
-            self._frame(
+        content.append(results_scroll)
+        monitor_frame = self._frame(
                 "Monitor",
-                monitor_box,
+                content,
                 help_text=(
-                    "Open the bazaar once by hand (talk to Bibi Basar -> "
-                    "NosBazar) so the Bibi entity id and dialog option are "
-                    "learned. Searches are paced at 2.5 s; a pass where every "
-                    "item times out retries after the refresh interval. "
-                    "Character is used to recognise your own listing so the "
-                    "bot never undercuts itself."
+                    "Search every enabled configured item at the 2.5 s "
+                    "pacing and show the cheapest listing, seller, price and "
+                    "profit (gold per ND or NPC-gold markup). A pass where "
+                    "every item times out retries after the refresh interval. "
+                    "Only priced hides rows without a current answer. Add "
+                    "and edit searches in Items; change listings in Relist."
                 ),
-            )
         )
+        monitor_frame.set_vexpand(True)
+        page.append(monitor_frame)
+        return page
 
-        inventory_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=6
-        )
-        self.bazar_inventory_info = Gtk.Label(label="No inventory data yet")
-        self.bazar_inventory_info.set_xalign(0)
-        self.bazar_inventory_info.set_wrap(True)
-        self.bazar_inventory_info.add_css_class("dim-label")
-        inventory_box.append(self.bazar_inventory_info)
-        inventory_buttons = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, spacing=6
-        )
-        self.bazar_scan_button = Gtk.Button(label="Scan inventory…")
-        self.bazar_scan_button.set_tooltip_text(
-            "List every inventory slot with its item data."
-        )
-        self.bazar_scan_button.connect(
-            "clicked", lambda *_: self._open_inventory_picker()
-        )
-        inventory_buttons.append(self.bazar_scan_button)
-        self.bazar_price_all_button = Gtk.Button(label="Price all")
-        self.bazar_price_all_button.set_tooltip_text(
-            "Add every inventory item and start the monitor."
-        )
-        self.bazar_price_all_button.connect(
-            "clicked", lambda *_: self._bazar_price_inventory()
-        )
-        inventory_buttons.append(self.bazar_price_all_button)
-        inventory_box.append(inventory_buttons)
-        right.append(
-            self._frame(
-                "Inventory",
-                inventory_box,
-                help_text=(
-                    "Inventory slots from inv/ivn, backfilled from the "
-                    "session log after a late attach. Scan lists every slot "
-                    "with the Item.dat name, bag/slot, vnum, quantity, "
-                    "equipment fields, NPC price and known ND cost. Price "
-                    "all adds one bazaar search per distinct item and starts "
-                    "Monitor. Negative vnums are limited/bound items and are "
-                    "searched by their absolute vnum; equipment quantity 0 "
-                    "counts as one. The server sends the inventory only at "
-                    "login: if it is missing or marked partial, relog or "
-                    "change channel with this window open. The last complete "
-                    "inventory is cached per character, so a later attach "
-                    "survives log truncation."
-                ),
-            )
-        )
-
+    def _build_bazar_items_section(self) -> Gtk.Widget:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        page.set_margin_top(6)
+        page.set_margin_bottom(6)
+        page.set_margin_start(6)
+        page.set_margin_end(6)
+        body = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
+        body.set_vexpand(True)
+        body.set_wide_handle(True)
+        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        left.set_size_request(400, -1)
+        left.set_vexpand(True)
         items_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.bazar_items_info = Gtk.Label(label="0 items")
         self.bazar_items_info.set_xalign(0)
@@ -3105,8 +3618,7 @@ class Application(Gtk.Application):
         items_scroll.set_policy(
             Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
         )
-        items_scroll.set_min_content_height(140)
-        items_scroll.set_max_content_height(280)
+        items_scroll.set_vexpand(True)
         items_box.append(items_scroll)
         item_buttons = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL, spacing=6
@@ -3126,29 +3638,82 @@ class Application(Gtk.Application):
         item_buttons.append(new_item)
         item_buttons.append(delete_item)
         items_box.append(item_buttons)
-        right.append(
-            self._frame(
-                "Items",
-                items_box,
-                help_text=(
-                    "The items Monitor searches and Relist offers. Scan "
-                    "inventory adds items you already own with their names "
-                    "and slots; Import NosMall adds a whole catalog group "
-                    "with a ready c_blist packet; New and Delete edit this "
-                    "list. The left side shows the cheapest listing per "
-                    "item, most profitable first."
-                ),
+        items_frame = self._frame(
+            "Items",
+            items_box,
+            help_text=(
+                "The items Monitor searches and Relist offers. Add "
+                "items you already own in Inventory; Import NosMall adds "
+                "a whole catalog group with a ready c_blist packet; New "
+                "and Delete edit this list. Select a row to edit its "
+                "search, relist vnum/tab/amount and cost."
+            ),
+        )
+        items_frame.set_vexpand(True)
+        left.append(items_frame)
+        body.set_start_child(left)
+        body.set_resize_start_child(True)
+        right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        right.set_vexpand(True)
+        editor_frame = self._frame(
+            "Item editor",
+            self._build_bazar_editor(),
+            help_text=(
+                "One bazaar item. Relist needs Item vnum, Tab and a "
+                "positive Min price; the Relist tab offers a compact "
+                "editor for those fields. Raw packet overrides Search "
+                "vnums. Cost is the ND or gold basis used to compute "
+                "profit."
+            ),
+        )
+        editor_frame.set_vexpand(True)
+        right.append(editor_frame)
+        body.set_end_child(right)
+        body.set_resize_end_child(False)
+        page.append(body)
+        return page
+
+    def _build_bazar_config_section(self) -> Gtk.Widget:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        page.set_margin_top(6)
+        page.set_margin_bottom(6)
+        page.set_margin_start(6)
+        page.set_margin_end(6)
+        bazaar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.bazar_npc_entry = Gtk.Entry()
+        self.bazar_npc_entry.set_placeholder_text("Bibi entity id")
+        self.bazar_npc_entry.set_input_purpose(Gtk.InputPurpose.DIGITS)
+        self.bazar_npc_entry.set_max_length(10)
+        self.bazar_npc_entry.set_width_chars(10)
+        self.bazar_npc_entry.set_tooltip_text(
+            "Bibi Basar entity id; learned when you open the bazaar."
+        )
+        self.bazar_npc_entry.connect(
+            "changed", lambda *_: self._bazar_update_relist_info()
+        )
+        bazaar_box.append(
+            self._field_row(
+                Gtk.Label(label="Bibi id"), self.bazar_npc_entry
             )
         )
-
-        right.append(
+        self.bazar_refresh_spin = Gtk.SpinButton.new_with_range(5, 3600, 5)
+        self.bazar_refresh_spin.set_value(30)
+        self.bazar_refresh_spin.set_digits(0)
+        bazaar_box.append(
+            self._field_row(
+                Gtk.Label(label="Refresh (s)"), self.bazar_refresh_spin
+            )
+        )
+        page.append(
             self._frame(
-                "Item editor",
-                self._build_bazar_editor(),
+                "Bazaar",
+                bazaar_box,
                 help_text=(
-                    "One bazaar item. Relist needs Item vnum, Tab and a "
-                    "positive Min price. Raw packet overrides Search vnums. "
-                    "Cost is the ND or gold basis used to compute profit."
+                    "Open the bazaar once by hand (talk to Bibi Basar -> "
+                    "NosBazar) so the Bibi entity id and dialog option are "
+                    "learned; the id also appears here from the client log. "
+                    "Refresh is the wait between passes. The character name "
+                    "used to recognise your own listing is set in Relist."
                 ),
             )
         )
@@ -3161,7 +3726,7 @@ class Application(Gtk.Application):
         )
         self.bazar_config_label.set_xalign(0)
         self.bazar_config_label.set_wrap(True)
-        self.bazar_config_label.set_max_width_chars(40)
+        self.bazar_config_label.set_max_width_chars(60)
         self.bazar_config_label.add_css_class("dim-label")
         config_box.append(self.bazar_config_label)
         config_row = Gtk.Box(
@@ -3177,7 +3742,7 @@ class Application(Gtk.Application):
         config_row.append(save_button)
         config_row.append(reload_button)
         config_box.append(config_row)
-        right.append(
+        page.append(
             self._frame(
                 "Configuration",
                 config_box,
@@ -3189,23 +3754,6 @@ class Application(Gtk.Application):
                 ),
             )
         )
-
-        right_scroll.set_child(right)
-        body.set_end_child(right_scroll)
-        body.set_resize_end_child(False)
-        page.append(body)
-
-        self.bazar_status = Gtk.Label(label="NosBazar idle")
-        self.bazar_status.set_xalign(0)
-        self.bazar_status.set_wrap(True)
-        self.bazar_status.add_css_class("dim-label")
-        page.append(self.bazar_status)
-
-        self.bazar_page = page
-        self._bazar_render_items()
-        self._bazar_render_results()
-        self._update_bazar_inventory_info()
-        self._bazar_update_info()
         return page
 
     def _build_bazar_editor(self) -> Gtk.Widget:
@@ -8642,7 +9190,7 @@ class Application(Gtk.Application):
             if self._inventory_cache_source is not None:
                 GLib.source_remove(self._inventory_cache_source)
                 self._inventory_cache_source = None
-            if self.inventory_window is not None:
+            if self._inventory_list is not None:
                 self._inventory_schedule_render()
         if previous is None or changed:
             # Only on the first POS (or a character change): this path runs
