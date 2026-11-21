@@ -68,9 +68,10 @@ SPELL_TARGETS = ("monster", "self")
 MAX_MONSTER_VNUMS = 5000
 MAX_SPELL_RULES = 100
 MAX_WAYPOINTS = 500
-#: Speed + is not clamped at the client's 59 any more (the DLL lifts it);
-#: this only keeps a hand-edited file from carrying a nonsense int.
-MAX_SPEED_BOOST = 1000000
+#: Speed + is not clamped at the client's 59 any more (the DLL lifts it and
+#: emulates values past the byte); this only keeps a hand-edited file inside
+#: the signed 32-bit protocol value.
+MAX_SPEED_BOOST = 2000000000
 
 
 class ConfigError(ValueError):

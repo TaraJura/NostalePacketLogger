@@ -135,9 +135,9 @@ BOT_LOG_MAX_BYTES = 4 * 1024 * 1024
 DRAIN_INTERVAL_MS = 50
 BOT_INTERVAL_MS = 50
 #: Speed + has no small host cap. The DLL lifts the client's own 59 limit and
-#: emulates values past the speed byte; a million is the practical bound kept
-#: in the config and the spin, not a gameplay limit.
-SPEED_BOOST_MAX = 1000000
+#: emulates values past the speed byte; two billion keeps the protocol value
+#: inside a signed 32-bit int while leaving effectively no scroll limit.
+SPEED_BOOST_MAX = 2000000000
 #: A name lookup that found neither the local DB nor Item.dat is retried on
 #: the next trigger after this cooldown, so ``ntpl db build`` takes effect
 #: without a restart while a missing data source is not re-parsed on every
@@ -466,6 +466,8 @@ class Application(Gtk.Application):
         # Flat client-side movement-speed bonus (0 = off), added by the DLL to
         # the local player's `cond` speed; see the Speed + control.
         self.speed_boost_spin = None
+        self.speed_boost_scale = None
+        self._speed_boost_source = None
         # True while the DLL reports the server's accepted limit and the spin
         # is updated from it: that must not send a new SPEED command.
         self._speed_tuning = False
@@ -5415,9 +5417,10 @@ class Application(Gtk.Application):
                 "Client-side tweaks that need no bot. Speed + raises the "
                 "local player's walking speed by that many flat points "
                 "(12 + 3 = 15) and applies immediately, in manual play too. "
-                "Scroll or type any value: the DLL raises the client's own "
-                "59 cap, extends its speed table and scales the top entry "
-                "past the speed byte, so there is no small cap. The DLL keeps "
+                "Scroll the spin, drag the bar below it or type any value: "
+                "the DLL raises the client's own 59 cap, extends its speed "
+                "table and scales the top entry past the speed byte, so "
+                "there is no small cap (up to 2,000,000,000). The DLL keeps "
                 "outgoing walk packets at the server's normal speed, keeps "
                 "the client faster, and turns the value down or off if the "
                 "server corrects the player. Saved as speed_boost. "
@@ -5440,21 +5443,46 @@ class Application(Gtk.Application):
         # `cond` speed, the way a NosTale speed buff works (+1, +2, +3...).
         speed_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         speed_row.append(Gtk.Label(label="Speed +"))
-        # No small host-side cap: the wheel scrolls the value up as far as the
-        # DLL can emulate it. The client's own 59 limit is raised by the DLL.
-        self.speed_boost_spin = Gtk.SpinButton.new_with_range(
-            0, SPEED_BOOST_MAX, 1
+        # No small host-side cap: the wheel and the scroll bar below move the
+        # value up as far as the DLL can emulate it. The client's own 59 limit
+        # is raised by the DLL.
+        speed_adjustment = Gtk.Adjustment(
+            value=0,
+            lower=0,
+            upper=SPEED_BOOST_MAX,
+            step_increment=1,
+            page_increment=1000000,
+            # 1% of the trough, so the scroll bar's thumb stays draggable.
+            page_size=SPEED_BOOST_MAX // 100,
+        )
+        self.speed_boost_spin = Gtk.SpinButton(
+            adjustment=speed_adjustment, climb_rate=1.0, digits=0
         )
         self.speed_boost_spin.set_value(0)
-        self.speed_boost_spin.set_width_chars(7)
+        self.speed_boost_spin.set_width_chars(10)
         self.speed_boost_spin.set_tooltip_text(
-            "Flat walking-speed bonus; 0 = normal. Scroll to raise it."
+            "Flat walking-speed bonus; 0 = normal. Scroll or type any value."
         )
         self.speed_boost_spin.connect(
             "value-changed", lambda *_: self._on_speed_boost_changed()
         )
         speed_row.append(self.speed_boost_spin)
         page.append(speed_row)
+
+        # A full-range scroll bar for the same adjustment: dragging it crosses
+        # the old million cap (and the byte limit) quickly, while the spin
+        # stays the precise input.
+        self.speed_boost_scale = Gtk.Scale(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            adjustment=speed_adjustment,
+        )
+        self.speed_boost_scale.set_draw_value(False)
+        self.speed_boost_scale.set_hexpand(True)
+        self.speed_boost_scale.set_tooltip_text(
+            "Drag to scroll Speed + far above the old cap; the spin takes an "
+            "exact value."
+        )
+        page.append(self.speed_boost_scale)
 
         # Cast speed: a plain switch. On = every client-side cooldown is
         # zeroed and the bot casts the moment the server is ready; off =
@@ -8250,7 +8278,17 @@ class Application(Gtk.Application):
     def _on_speed_boost_changed(self) -> None:
         if self._speed_tuning:
             return
+        # The scroll bar can emit a value change for every pixel while it is
+        # dragged; coalesce them into one SPEED| command.
+        if self._speed_boost_source is None:
+            self._speed_boost_source = GLib.timeout_add(
+                120, self._flush_speed_boost
+            )
+
+    def _flush_speed_boost(self) -> bool:
+        self._speed_boost_source = None
         self._sync_speed_boost()
+        return False
 
     def _cast_boost_on(self) -> bool:
         """The Cast speed switch state (off = normal)."""
@@ -11438,6 +11476,9 @@ class Application(Gtk.Application):
         self._closing = True
         self._client_generation += 1
         self._stop_bot()
+        if self._speed_boost_source is not None:
+            GLib.source_remove(self._speed_boost_source)
+            self._speed_boost_source = None
         # Restore the client's normal speed before the link goes away. The
         # DLL also reverts when the host disconnects, but an explicit 0 makes
         # the shutdown deterministic.

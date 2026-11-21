@@ -301,7 +301,7 @@ void handle_command(const std::string& command) {
     if (command.compare(0, 6, "SPEED|") == 0) {
         int add = 0;
         if (std::sscanf(command.c_str() + 6, "%d", &add) != 1) {
-            tcpserver::send_line("STATUS|usage: SPEED|add(0-1000000)");
+            tcpserver::send_line("STATUS|usage: SPEED|add(0-2000000000)");
             return;
         }
         packetlogger::set_speed_boost(add);

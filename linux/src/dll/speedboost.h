@@ -100,7 +100,7 @@ inline bool parse_uint(const char* text, const Token& token,
             return false;
         }
         parsed = parsed * 10 + static_cast<unsigned long>(c - '0');
-        if (parsed > 1000000UL) {
+        if (parsed > 2000000000UL) {
             return false;
         }
     }
@@ -112,7 +112,7 @@ inline bool parse_uint(const char* text, const Token& token,
 // byte is capped at 255; values above that are carried by scaling the player's
 // table entry (the DLL extends the client's speed table, see clientmove.cpp),
 // so the host spin has no small cap of its own.
-constexpr int kMaxSpeed = 1000000;
+constexpr int kMaxSpeed = 2000000000;
 
 // Speed for `base` with a flat `add` bonus, the way a NosTale speed buff
 // works (+1, +2, +3, ...). Returns base when the bonus is off. The original

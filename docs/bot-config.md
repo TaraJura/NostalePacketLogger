@@ -275,9 +275,12 @@ setting is saved as `block_portals`; the live state is in the DLL's status line
 
 **Speed +** (**Malicious** tab, default 0) adds a flat bonus to the
 character's walking speed, the same way a NosTale speed buff works (+1, +2,
-+3...). The spin has no small cap: the mouse wheel (or typing) raises it
-toward the DLL's emulated maximum of 1,000,000. It is a client-side change,
-not a server buff and not a modified packet: the DLL reads the server's
++3...). There is no small cap: the mouse wheel or typing raises the spin, and
+the full-range scroll bar under it drags the same value across large jumps
+up to the DLL's emulated maximum of 2,000,000,000. The raised cap needs DLL
+0.2.9 (restart the game client and reinject; an older DLL still clamps at
+1,000,000). It is a client-side change, not a server buff and not a modified
+packet: the DLL reads the server's
 `cond 1 <charId> … <speed>` packet to learn
 the player's base speed, then calls the client's own entity speed setter on
 the local player actor (`[player+0x20]+0xAA`, the exact field the walk packet
@@ -305,8 +308,8 @@ Limits and safety:
   DLL unloads. A build whose code or table does not match is left alone and
   reports `STATUS|SPEED EXTEND FAILED`, so the old 59 limit still applies.
 - Above the speed byte's 255 the entity stays at byte 255 and its timing
-  entry is scaled to the emulated speed, so the wheel keeps raising the value
-  past the byte limit as well. The clamped outgoing `walk` field is
+  entry is scaled to the emulated speed, so the wheel and the scroll bar keep
+  raising the value past the byte limit as well. The clamped outgoing `walk` field is
   zero-padded when the server base has fewer digits (`255 -> 012`), keeping
   the client's string length valid; the server's integer parser reads `12`.
 - The value applies **immediately** (no probe). The walk clamp normally

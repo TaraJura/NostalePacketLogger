@@ -230,12 +230,13 @@ client's own entity speed setter on the local player actor (the field its
 walk builder reads), and clamps the outgoing `walk` speed back to the
 server's `cond` value — the server sees a normal walk while the client moves
 faster. Live 2026-11-20: base 11, +3 applied (actor 14), every walk packet
-stayed 11, no server correction. Scroll the spin as far as you like: on the
-first value above the client's own 59 limit the DLL raises that check and
-extends the client's speed table, and values past the byte's 255 are emulated
-through its top entry. It applies immediately without the bot. If the server
-corrects the player, it settles at +1 instead of dropping to 0, or turns off
-if even +1 is rejected. **Cast speed** (same tab, a plain on/off switch) works with or without
+stayed 11, no server correction. Scroll the spin or drag the scroll bar
+under it as far as you like (the DLL's emulated bound is 2,000,000,000;
+needs DLL 0.2.9): on the first value above the client's own 59 limit the DLL
+raises that check and extends the client's speed table, and values past the
+byte's 255 are emulated through its top entry. It applies immediately
+without the bot. If the server corrects the player, it settles at +1 instead
+of dropping to 0, or turns off if even +1 is rejected. **Cast speed** (same tab, a plain on/off switch) works with or without
 the bot. Press a skill once and it is repeated every time the server
 says its cooldown ended, so the character keeps casting at the
 server's fastest rate; press another skill to switch, or turn the
