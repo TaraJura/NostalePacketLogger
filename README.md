@@ -1,5 +1,5 @@
 
-<img width="1914" height="1080" alt="artwork (2)" src="[https://github.com/user-attachments/assets/00d546c1-047a-4378-afc7-8c024cc9a556](https://techtools.cz/paste-api/pastes/Xrq0ML2RwjnD/raw?i=0)" />
+<video width="1914" height="1080" alt="artwork (2)" src="[https://github.com/user-attachments/assets/00d546c1-047a-4378-afc7-8c024cc9a556](https://techtools.cz/paste-api/pastes/Xrq0ML2RwjnD/raw?i=0)" />
 
 
 <img width="1914" height="1080" alt="artwork (2)" src="https://github.com/user-attachments/assets/00d546c1-047a-4378-afc7-8c024cc9a556" />
