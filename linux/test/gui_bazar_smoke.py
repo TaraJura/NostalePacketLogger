@@ -21,6 +21,7 @@ from gi.repository import GLib, Gtk
 
 from ntpl.bazar import BazarItem, build_search_packet, load_config
 from ntpl.gui import Application
+from ntpl.nosmall import ItemInfo
 
 
 def _rc_blist(price: int, seller: str = "Seller") -> bytes:
@@ -138,6 +139,10 @@ def main() -> int:
             return True
         state["started"] = True
         try:
+            # The configured name is a shortcut; the Monitor must show the
+            # real Item.dat name for the vnum instead.
+            app.item_info = {2174: ItemInfo(2174, "Speech Bubble", 3000, 0)}
+            app.item_info_loaded = True
             item = BazarItem(
                 "bubbl",
                 build_search_packet([2174]),
@@ -196,6 +201,37 @@ def main() -> int:
                 line.startswith("SEND|c_reg ") for line in lines
             )
             separators = separator_count()
+
+            def first_item_cell():
+                grid = app.bazar_results_box.get_first_child()
+                cell = (
+                    grid.get_child_at(0, 2)
+                    if isinstance(grid, Gtk.Grid)
+                    else None
+                )
+                return cell if isinstance(cell, Gtk.Label) else None
+
+            cell = first_item_cell()
+            item_text = None if cell is None else cell.get_text()
+            tooltip = (
+                cell.get_tooltip_text() if cell is not None else ""
+            ) or ""
+            name_ok = item_text == "Speech Bubble" and "bubbl" in tooltip
+
+            # The real path: the Monitor may render before the DB/Item.dat
+            # lookup finishes. A late load must switch the row from the
+            # configured shortcut to the real name without a restart.
+            app.item_info = {}
+            app.item_info_loaded = False
+            app._bazar_render_results()
+            late_cell = first_item_cell()
+            late_before = None if late_cell is None else late_cell.get_text()
+            app._finish_item_info_load(
+                {2174: ItemInfo(2174, "Speech Bubble", 3000, 0)}
+            )
+            late_cell = first_item_cell()
+            late_after = None if late_cell is None else late_cell.get_text()
+            late_ok = late_before == "bubbl" and late_after == "Speech Bubble"
             config_path = os.environ.get("NTPL_BAZAR_CONFIG")
             saved = False
             if config_path:
@@ -215,12 +251,16 @@ def main() -> int:
                 and no_register
                 and saved
                 and separators == 1
+                and name_ok
+                and late_ok
                 and app.bazar.mode == "monitor"
             )
             result["detail"] = (
                 f"opened={bool(opened)} init={bool(empty_init)} "
                 f"search={bool(searches)} price={price} seller={seller} "
                 f"profit={profit!r} no_register={no_register} "
+                f"item_name={item_text!r} tooltip={tooltip!r} "
+                f"late={late_before!r}->{late_after!r} "
                 f"saved={saved} separators={separators} "
                 f"mode={app.bazar.mode} phase={app.bazar.phase} "
                 f"status={app.bazar_status.get_text()!r}"

@@ -34,8 +34,9 @@ full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
    attached later). The id appears under **Configuration → Bibi id**.
 3. Open the **Inventory** section. It lists every slot you own automatically
    from the live `inv`/`ivn` stream (backfilled from the DLL log after a late
-   attach): Item.dat name, bag/slot, vnum, quantity, equipment fields, NPC
-   price and known ND cost. Search by name or vnum, then:
+   attach): the real item name (local DB first, then Item.dat), bag/slot,
+   vnum, quantity, equipment fields, NPC price and known ND cost. Search by
+   name or vnum, then:
    - tick **one** row and click **Set up relist…** — it adds the item with the
      exact vnum, tab and stack amount and opens the **Relist** section with
      that item selected;
@@ -51,13 +52,17 @@ full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
    your listing. The list marks each item **ready**, **needs floor** or
    **monitor only**.
 5. Open the **Monitor** section, click **Monitor Start** and watch the
-   cheapest listing and profit. Searches use 2.5 s pacing; timed-out items
-   get one retry and the next pass starts after **Configuration → Refresh
-   (s)** (default 30).
+   cheapest listing and profit. The **Item** column shows the real item name
+   for the row's vnum (see [Item names](#item-names)), not the configured
+   shortcut; hover the Item cell for the shortcut and search vnums (every
+   result cell carries the raw `rc_blist` fields). Searches use 2.5 s
+   pacing; timed-out items get one retry and the next pass starts after
+   **Configuration → Refresh (s)** (default 30).
 6. Use the **Items** section when you need more than the relist fields: the
-   full editor has **Name**, **Search vnums**, **Raw packet**, **Item vnum**,
-   **Tab**, **Amount**, **Min price**, **Cost** and the advanced `c_reg`
-   fields. **Import NosMall…** adds whole catalog groups with a ready
+   full editor has **Name** (the shortcut label), **Search vnums**,
+   **Raw packet**, **Item vnum**, **Tab**, **Amount**, **Min price**,
+   **Cost** and the advanced `c_reg` fields. The list shows the real item
+   name too. **Import NosMall…** adds whole catalog groups with a ready
    `c_blist` packet; **New** and **Delete** edit the list.
 7. To relist, tick **Allow live re-listing (changes your listings)** in the
    **Relist** section and click **Relist Start**. **Relist Stop** stops it.
@@ -143,6 +148,29 @@ ivn 0 30.885.0.0.0.0.0                     # one equipment slot
 - **Price all** adds every distinct inventory item and starts **Monitor**
   (search only). It does not change listings even when live re-listing is
   armed; use **Relist Start** for that.
+
+## Item names
+
+`BazarItem.name` is the owner's shortcut and the config key saved in
+`bazar-<pid>.json`; it is not necessarily an item name. Every read-only
+surface — the **Monitor** results table, the **Relist** readiness list and
+the **Items** list — shows the real name instead:
+
+- the exact **Item vnum** when it resolves in the local DB (then `Item.dat`),
+  otherwise the first vnum of the search group that resolves;
+- hover the item name for **Configured as** (the shortcut) and the search
+  vnums; in a Monitor row every cell's tooltip also carries the raw
+  `rc_blist` fields;
+- the controller's relist log lines use the same real name;
+- the configured label remains the fallback when no vnum resolves, so a row
+  is never blank. A row still showing a shortcut (rather than `item N`) means
+  the lookup had not finished, or neither the database nor `Item.dat` had any
+  of its vnums: names load as soon as the NosBazar page is shown and the
+  lists re-render when they arrive; if it persists, rebuild the database with
+  `PYTHONPATH=linux/host python3 -m ntpl db build`.
+- the editor's **Name** field is the shortcut label; renaming it does not
+  change what the Monitor shows. **Copy** next to it copies the label;
+  right-clicking a result's Item cell or an item row copies the real name.
 
 ## Relisting
 
@@ -304,7 +332,8 @@ make -C linux bot-test     # includes gui_bazar_smoke.py
 `test_bazar.py` covers the real 15-field `rc_blist` shape (including a
 truncated tail and double spaces), the open sequence, pacing, retry/waiting
 behaviour, response cross-talk, the relist floor/own/slot/vnum checks and the
-equipment amount-0 rule. `test_bazar_inventory.py` covers the inventory
+equipment amount-0 rule, and that relist log lines use the display label
+passed by the GUI. `test_bazar_inventory.py` covers the inventory
 planner: duplicate collapse, negative/absolute vnums, bag preference,
 tracked-skip, unique names, cost precedence and the amount clamp.
 `test_inventory_cache.py` covers the per-character snapshot round-trip,
@@ -312,7 +341,10 @@ character matching and malformed/bad-slot tolerance;
 `test_spawnlog.py` covers the full-`inv`-vs-`ivn` bag distinction and the
 truncation notice.
 `gui_bazar_smoke.py` spawns a fake Bibi NPC, answers the open and one search,
-and asserts the profit column and that no `c_reg` was sent.
+and asserts the profit column, that the Item cell shows the real Item.dat name
+for a configured shortcut (`bubbl` → **Speech Bubble**, with the shortcut in
+the tooltip), that a late name load re-renders the row from the shortcut to
+the real name, and that no `c_reg` was sent.
 `gui_bazar_relist_smoke.py` checks that the live-relist gate blocks the first
 attempt and then asserts the exact `c_reg` packet and the `register-sent`
 status. `gui_inventory_scan_smoke.py` feeds the live inventory shapes

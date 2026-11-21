@@ -7,7 +7,7 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 316 unittest cases, 5 GTK4 smokes, 41 fake-server bot
+- **Linux host**: 317 unittest cases, 5 GTK4 smokes, 41 fake-server bot
   smokes, and the native `speed-test` pass. Build: `make -C linux all
   test-host`, tests above.
 - **Speed +** (**Malicious** tab, default 0): the DLL reads the server's
@@ -45,7 +45,10 @@ the data layer in [database.md](database.md).
   rows and bound negative vnums), shows Item.dat names, NPC prices and known
   ND costs, and **Set up relist…** opens **Relist** with the exact
   vnum/tab/amount for the floor and start; **Price all** adds one search per
-  distinct owned item.
+  distinct owned item. The **Monitor** table and the **Relist**/**Items**
+  lists show the real item name resolved from each entry's vnum (local DB
+  first, `Item.dat` fallback), never the configured shortcut; hover the item
+  name for the shortcut and search vnums.
 - **Game/packet database**: `~/.config/ntpl/nostale.db` (`NTPL_DB`) built by
   `PYTHONPATH=linux/host python3 -m ntpl db build`. 7,805 items, 2,723
   monsters, 1,964 skills, 779 maps, 3,639 NosMall records / 1,184 groups,

@@ -608,6 +608,27 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(controller.start_relist(engine.world))
         self.assertIn("character name", controller.last_error)
 
+    def test_relist_logs_use_the_display_label(self) -> None:
+        # The GUI passes the real Item.dat name; the configured shortcut stays
+        # the config/result key but must not leak into user-facing log lines.
+        logs: list[str] = []
+        clock = Clock()
+        item = BazarItem("bubbl", build_search_packet([2174]))
+        controller = BazarController(
+            lambda packet: True,
+            log=logs.append,
+            clock=clock,
+            item_label=lambda candidate: "Speech Bubble",
+        )
+        controller.set_items([item], character="root1", refresh=30)
+        controller._maybe_relist(
+            Engine().world, item, BazarQuote(item=item), clock.now
+        )
+        self.assertEqual(
+            logs,
+            ["Speech Bubble: not relisted (no item vnum configured)"],
+        )
+
     def test_open_only_stops_after_confirmation(self) -> None:
         item = BazarItem("a", build_search_packet([1]))
         controller, engine, clock, sent = self._controller([item])

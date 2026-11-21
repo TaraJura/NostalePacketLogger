@@ -604,7 +604,11 @@ class Application(Gtk.Application):
         # NosBazar tab: a pure controller lives here, the tab is only a view.
         # The controller drives the packet flow from a dedicated 100 ms timer
         # and reads bazaar/inventory state from the engine's world.
-        self.bazar = BazarController(self._bazar_send, self._bazar_log)
+        self.bazar = BazarController(
+            self._bazar_send,
+            self._bazar_log,
+            item_label=self._bazar_item_label,
+        )
         self.bazar_timer = None
         self.bazar_page = None
         self.bazar_config_path = default_bazar_config_path()
@@ -1596,6 +1600,14 @@ class Application(Gtk.Application):
         self._item_info_callbacks = []
         if self._inventory_list is not None:
             self._inventory_render()
+        # The Monitor table and both item lists show the real item names;
+        # replace the shortcuts as soon as the lookup finishes.
+        if self.bazar_results_box is not None:
+            self._bazar_render_results()
+        if self.bazar_items_list is not None:
+            self._bazar_render_items()
+        if self.bazar_relist_list is not None:
+            self._bazar_render_relist_items()
         self._update_bazar_inventory_info()
         for callback in callbacks:
             try:
@@ -1609,6 +1621,43 @@ class Application(Gtk.Application):
         if info is not None and info.name:
             return info.name
         return f"item {abs(vnum)}"
+
+    def _bazar_item_label(self, item: BazarItem) -> str:
+        """The real item name for a configured bazaar item.
+
+        ``BazarItem.name`` is the owner's shortcut ("bubbl", "Wings of f");
+        the Monitor table and every read-only list show the Item.dat name of
+        the item's vnum instead.  The exact item vnum wins over the search
+        group; a group falls back through its vnums until one resolves.  The
+        configured label is only the last resort, so no row is ever blank.
+        """
+        candidates: list[int] = []
+        if item.vnum:
+            candidates.append(abs(int(item.vnum)))
+        for vnum in item.vnums:
+            value = abs(int(vnum))
+            if value and value not in candidates:
+                candidates.append(value)
+        placeholder = ""
+        for vnum in candidates:
+            info = getattr(self, "item_info", {}).get(vnum)
+            if info is None or not info.name:
+                continue
+            if info.name != f"item {vnum}":
+                return info.name
+            placeholder = placeholder or info.name
+        return placeholder or item.name
+
+    @staticmethod
+    def _bazar_item_tooltip(item: BazarItem) -> str:
+        """Configured label and search vnums, for a row's hover text."""
+        parts = [f"Configured as: {item.name}"]
+        vnums = item.vnums
+        if vnums:
+            parts.append("Search vnums: " + " ".join(str(v) for v in vnums))
+        elif item.vnum:
+            parts.append(f"Item vnum: {item.vnum}")
+        return "\n".join(parts)
 
     def _item_npc_price(self, vnum: int) -> int:
         info = self.item_info.get(abs(vnum))
@@ -1935,13 +1984,14 @@ class Application(Gtk.Application):
         self._bazar_update_relist_info()
         if item.min_price <= 0:
             self._bazar_log(
-                f"{item.name}: set a positive Min price, then Relist Start"
+                f"{self._bazar_item_label(item)}: set a positive Min price, "
+                "then Relist Start"
             )
             if self.bazar_relist_form:
                 self.bazar_relist_form["min"].grab_focus()
         else:
             self._bazar_log(
-                f"{item.name}: relist settings ready "
+                f"{self._bazar_item_label(item)}: relist settings ready "
                 f"(floor {item.min_price:,})"
             )
 
@@ -2042,9 +2092,10 @@ class Application(Gtk.Application):
             row = Gtk.ListBoxRow()
             row.item_name = item.name  # type: ignore[attr-defined]
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-            name = Gtk.Label(label=item.name)
+            name = Gtk.Label(label=self._bazar_item_label(item))
             name.set_xalign(0)
             name.set_hexpand(True)
+            name.set_tooltip_text(self._bazar_item_tooltip(item))
             # Full name, wrapped instead of ellipsized: the list is the
             # place to identify an item, so a cut-off label is useless.
             name.set_wrap(True)
@@ -2068,11 +2119,17 @@ class Application(Gtk.Application):
             right.set_button(3)
 
             def on_right(
-                _gesture, _n_press, _x, _y, row=row, name=item.name
+                _gesture,
+                _n_press,
+                _x,
+                _y,
+                row=row,
+                key=item.name,
+                label=self._bazar_item_label(item),
             ) -> None:
-                self.bazar_selected_name = name
+                self.bazar_selected_name = key
                 self.bazar_items_list.select_row(row)
-                self._bazar_copy_menu(row, name)
+                self._bazar_copy_menu(row, label)
 
             right.connect("pressed", on_right)
             row.add_controller(right)
@@ -2135,9 +2192,10 @@ class Application(Gtk.Application):
             box = Gtk.Box(
                 orientation=Gtk.Orientation.VERTICAL, spacing=1
             )
-            name = Gtk.Label(label=item.name)
+            name = Gtk.Label(label=self._bazar_item_label(item))
             name.set_xalign(0)
             name.set_hexpand(True)
+            name.set_tooltip_text(self._bazar_item_tooltip(item))
             name.set_wrap(True)
             name.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
             name.set_max_width_chars(36)
@@ -2246,7 +2304,7 @@ class Application(Gtk.Application):
         searches = " ".join(str(vnum) for vnum in item.vnums) or "no search"
         if self.bazar_relist_editor_label is not None:
             self.bazar_relist_editor_label.set_text(
-                f"{item.name} · search {searches}"
+                f"{self._bazar_item_label(item)} · search {searches}"
             )
         self._bazar_set_relist_form_sensitive(True)
         if self.bazar_relist_hint is not None:
@@ -2336,11 +2394,12 @@ class Application(Gtk.Application):
         self._bazar_update_relist_info()
         if minimum <= 0:
             self._bazar_log(
-                f"{item.name}: set a positive Min price to enable relisting"
+                f"{self._bazar_item_label(item)}: set a positive Min price "
+                "to enable relisting"
             )
         else:
             self._bazar_log(
-                f"{item.name}: relist settings saved "
+                f"{self._bazar_item_label(item)}: relist settings saved "
                 f"(floor {minimum:,} per unit)"
             )
 
@@ -3013,7 +3072,8 @@ class Application(Gtk.Application):
             price = "n/a" if quote.price is None else f"{quote.price:,}"
             seller = quote.seller.replace("�", "").strip()
             cells = (
-                quote.item.name,
+                # The real Item.dat name, not the configured shortcut.
+                self._bazar_item_label(quote.item),
                 quote.item.cost_text(),
                 price,
                 quote.profit_text(),
@@ -3060,10 +3120,17 @@ class Application(Gtk.Application):
                         label.add_css_class("bazar-warn")
                     else:
                         label.add_css_class("dim-label")
+                tooltip = []
+                if column == 0:
+                    # Keep the configured shortcut reachable without showing
+                    # it as the item name.
+                    tooltip.append(self._bazar_item_tooltip(quote.item))
                 if quote.listing is not None:
-                    label.set_tooltip_text(
-                        " | ".join(quote.listing.raw_fields)
-                    )
+                    raw = " | ".join(quote.listing.raw_fields)
+                    if raw:
+                        tooltip.append(raw)
+                if tooltip:
+                    label.set_tooltip_text("\n".join(tooltip))
                 grid.attach(label, column, grid_row, 1, 1)
             if row_index < len(visible) - 1:
                 separator(grid_row + 1)
@@ -3615,10 +3682,14 @@ class Application(Gtk.Application):
                 help_text=(
                     "Search every enabled configured item at the 2.5 s "
                     "pacing and show the cheapest listing, seller, price and "
-                    "profit (gold per ND or NPC-gold markup). A pass where "
-                    "every item times out retries after the refresh interval. "
-                    "Only priced hides rows without a current answer. Add "
-                    "and edit searches in Items; change listings in Relist."
+                    "profit (gold per ND or NPC-gold markup). The Item "
+                    "column is the real item name for the item's vnum from "
+                    "the local database; hover the Item cell for the "
+                    "configured label and search vnums. A pass where every "
+                    "item times "
+                    "out retries after the refresh interval. Only priced "
+                    "hides rows without a current answer. Add and edit "
+                    "searches in Items; change listings in Relist."
                 ),
         )
         monitor_frame.set_vexpand(True)
@@ -3677,11 +3748,13 @@ class Application(Gtk.Application):
             "Items",
             items_box,
             help_text=(
-                "The items Monitor searches and Relist offers. Add "
-                "items you already own in Inventory; Import NosMall adds "
-                "a whole catalog group with a ready c_blist packet; New "
-                "and Delete edit this list. Select a row to edit its "
-                "search, relist vnum/tab/amount and cost."
+                "The items Monitor searches and Relist offers. Rows show "
+                "the real item name for their vnum; hover one for its "
+                "configured shortcut label and search vnums. Add items you "
+                "already own in Inventory; Import NosMall adds a whole "
+                "catalog group with a ready c_blist packet; New and Delete "
+                "edit this list. Select a row to edit its label, search, "
+                "relist vnum/tab/amount and cost."
             ),
         )
         items_frame.set_vexpand(True)
@@ -3804,10 +3877,14 @@ class Application(Gtk.Application):
             form[key] = widget
             return widget
 
-        name_entry = entry("name", "display name", 18)
+        name_entry = entry("name", "shortcut label", 18)
+        name_entry.set_tooltip_text(
+            "Your label for this entry; the Monitor and item lists show "
+            "the real item name for its vnum."
+        )
         copy_name = Gtk.Button(label="Copy")
         copy_name.set_tooltip_text(
-            "Copy the item name."
+            "Copy the configured label."
         )
         copy_name.connect(
             "clicked", lambda *_: self._copy_text(name_entry.get_text())

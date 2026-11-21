@@ -280,7 +280,7 @@ both.
 ## Tests
 
 ```bash
-make host-test          # 316 stdlib unit tests: protocol, engine, map, config, spells, bazar/inventory, database, mirror
+make host-test          # 317 stdlib unit tests: protocol, engine, map, config, spells, bazar/inventory, database, mirror
 make speed-test         # DLL speed-boost parsing/clamp (native C++, no Wine)
 
 make gui-test           # headless GTK4: map, help standard, picker, multi-client, family invite

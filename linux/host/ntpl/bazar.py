@@ -827,8 +827,10 @@ class BazarController:
     """Tick-driven monitor/relist state machine.
 
     ``send`` pushes one game packet and returns whether it was queued; ``log``
-    receives one human-readable line per event.  :meth:`tick` must be called
-    regularly (about ten times a second) with the current ``WorldState``.
+    receives one human-readable line per event; ``item_label`` optionally maps
+    a configured item to the name used in those lines (the GUI passes the real
+    Item.dat name).  :meth:`tick` must be called regularly (about ten times a
+    second) with the current ``WorldState``.
     """
 
     def __init__(
@@ -836,10 +838,15 @@ class BazarController:
         send: Callable[[str], bool],
         log: Callable[[str], None] | None = None,
         clock: Callable[[], float] | None = None,
+        item_label: Callable[[BazarItem], str] | None = None,
     ) -> None:
         self._send = send
         self._log = log or (lambda _text: None)
         self._clock = clock or time.monotonic
+        #: User-facing name for log lines. The GUI resolves the real Item.dat
+        #: name from the item's vnums; ``BazarItem.name`` stays the config
+        #: key, result-dict key and editor label.
+        self._item_label = item_label or (lambda item: item.name)
 
         self.config = BazarConfig()
         self.results: dict[str, BazarQuote] = {}
@@ -1322,18 +1329,24 @@ class BazarController:
     ) -> None:
         if item.vnum is None or item.vnum <= 0:
             quote.status = "no-vnum"
-            self._log(f"{item.name}: not relisted (no item vnum configured)")
+            self._log(
+                f"{self._item_label(item)}: not relisted "
+                "(no item vnum configured)"
+            )
             return
         if item.inv_tab not in (0, 1, 2):
             quote.status = "no-slot"
             quote.detail = "no inventory tab"
-            self._log(f"{item.name}: not relisted (no inventory tab)")
+            self._log(
+                f"{self._item_label(item)}: not relisted (no inventory tab)"
+            )
             return
         if item.min_price <= 0:
             quote.status = "floor"
             quote.detail = "min_price not set"
             self._log(
-                f"{item.name}: not relisted (set a min_price floor first)"
+                f"{self._item_label(item)}: not relisted "
+                "(set a min_price floor first)"
             )
             return
         if quote.price is None:
@@ -1349,7 +1362,7 @@ class BazarController:
                 f"vnum mismatch: listing {quote.listing.vnum}, searched "
                 f"{'/'.join(str(vnum) for vnum in item.vnums)}"
             )
-            self._log(f"{item.name}: not relisted ({quote.detail})")
+            self._log(f"{self._item_label(item)}: not relisted ({quote.detail})")
             return
         own_name = (
             world.self_name or self.config.character or ""
@@ -1361,12 +1374,15 @@ class BazarController:
             or (own_key and own_key == seller_key)
         ):
             quote.status = "own"
-            self._log(f"{item.name}: you are already the cheapest seller")
+            self._log(
+                f"{self._item_label(item)}: you are already the cheapest "
+                "seller"
+            )
             return
         if quote.price <= item.min_price:
             quote.status = "floor"
             self._log(
-                f"{item.name}: cheapest {quote.price:,} is at/below the "
+                f"{self._item_label(item)}: cheapest {quote.price:,} is at/below the "
                 f"{item.min_price:,} floor"
             )
             return
@@ -1375,7 +1391,7 @@ class BazarController:
         if slot is None:
             quote.status = "no-slot"
             quote.detail = f"vnum {item.vnum} not in tab {item.inv_tab}"
-            self._log(f"{item.name}: not relisted ({quote.detail})")
+            self._log(f"{self._item_label(item)}: not relisted ({quote.detail})")
             return
         # Equipment rows report quantity 0 but hold one item; `amount`
         # normalises that, so an equip slot can be relisted with amount 1.
@@ -1385,14 +1401,14 @@ class BazarController:
             quote.detail = (
                 f"inventory has {available}, amount is {item.amount}"
             )
-            self._log(f"{item.name}: not relisted ({quote.detail})")
+            self._log(f"{self._item_label(item)}: not relisted ({quote.detail})")
             return
 
         new_price = quote.price - 1
         if new_price < item.min_price:
             quote.status = "floor"
             self._log(
-                f"{item.name}: {new_price:,} would be below the "
+                f"{self._item_label(item)}: {new_price:,} would be below the "
                 f"{item.min_price:,} floor"
             )
             return
@@ -1401,17 +1417,17 @@ class BazarController:
         except BazarError as exc:
             quote.status = "error"
             quote.detail = str(exc)
-            self._log(f"{item.name}: not relisted ({exc})")
+            self._log(f"{self._item_label(item)}: not relisted ({exc})")
             return
         if not self._send(packet):
             quote.status = "error"
             quote.detail = "register send failed"
-            self._log(f"{item.name}: register send failed")
+            self._log(f"{self._item_label(item)}: register send failed")
             return
         quote.status = "register-sent"
         quote.detail = f"{new_price:,} (was {quote.price:,})"
         self._log(
-            f"{item.name}: c_reg sent for {new_price:,} "
+            f"{self._item_label(item)}: c_reg sent for {new_price:,} "
             f"(cheapest was {quote.price:,} by {quote.seller}; no acknowledgement "
             f"packet is known)"
         )

@@ -68,16 +68,18 @@ with a **second-level navbar**: **Inventory**, **Relist**, **Monitor**,
   configured interval. Results show the cheapest listing, seller, price,
   profit (gold per NosMall ND or NPC-gold markup) and status, sorted **most
   profitable first**; thin rules keep each row aligned, and **Only priced**
-  hides unanswered rows.
-- **Items** — the full editor for one item: **Name**, **Search vnums**,
-  **Raw packet**, **Item vnum**, **Tab**, **Amount**, **Min price**, **Cost**
-  and the advanced `c_reg` fields. **Import NosMall…** adds catalog groups
-  with a known ND cost (pets/fairies/partner supplies excluded), **New** and
-  **Delete** edit the list.
+  hides unanswered rows. The **Item** column is the real item name for the
+  row's vnum (local DB first, then Item.dat), not the configured shortcut;
+  hover the item name for the shortcut and search vnums.
+- **Items** — the full editor for one item: **Name** (the shortcut label),
+  **Search vnums**, **Raw packet**, **Item vnum**, **Tab**, **Amount**,
+  **Min price**, **Cost** and the advanced `c_reg` fields. **Import
+  NosMall…** adds catalog groups with a known ND cost (pets/fairies/partner
+  supplies excluded), **New** and **Delete** edit the list.
 - **Configuration** — **Bibi id**, **Refresh (s)**, the per-client JSON path,
   **Save config** and **Reload**.
-- **Copy names** — right-click an item row or result row, or use **Copy** next
-  to **Name**.
+- **Copy names** — right-click a result's item name or an item row to copy
+  the real name; **Copy** next to **Name** copies the configured label.
 - **Per client** — each game window keeps its own configuration at
   `~/.config/ntpl/bazar-<winpid>.json`; selections are saved when the item
   list changes and on shutdown.
@@ -91,7 +93,7 @@ the catalog/database side is in [docs/database.md](docs/database.md).
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 316 Python unit tests
+make -C linux host-test                      # 317 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux gui-test                       # headless GTK4 smokes (xvfb)
 make -C linux bot-test                       # 41 fake-server bot smokes
@@ -160,7 +162,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 316 unit tests pass, the five GTK4 window smokes
+The Linux port builds, its 317 unit tests pass, the five GTK4 window smokes
 and 41 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 
