@@ -152,8 +152,9 @@ def main() -> int:
                 min_price=43000,
                 nos_cost=0.5,
             )
-            app.bazar.set_items([item], character="root1", refresh=30)
             app.bazar_character_entry.set_text("root1")
+            # The real UI path: this renders the Monitor and both item lists.
+            app._bazar_set_items([item])
             app._bazar_start_monitor()
             GLib.timeout_add(4500, check)
         except Exception as exc:  # noqa: BLE001
@@ -218,20 +219,57 @@ def main() -> int:
             ) or ""
             name_ok = item_text == "Speech Bubble" and "bubbl" in tooltip
 
+            def row_name(row):
+                label = getattr(row, "name_label", None)
+                return None if label is None else label.get_text()
+
             # The real path: the Monitor may render before the DB/Item.dat
-            # lookup finishes. A late load must switch the row from the
-            # configured shortcut to the real name without a restart.
+            # lookup finishes. A late load must switch the Monitor and both
+            # item lists from the configured shortcut to the real name
+            # without a restart, and must not overwrite unsaved editor values.
             app.item_info = {}
             app.item_info_loaded = False
             app._bazar_render_results()
+            app._bazar_refresh_item_labels()
+            app._bazar_select_item("bubbl")
+            app.bazar_form["min"].set_value(12345)
+            app._bazar_select_relist_item("bubbl")
+            app.bazar_relist_form["min"].set_value(9876)
             late_cell = first_item_cell()
             late_before = None if late_cell is None else late_cell.get_text()
+            items_before = row_name(app.bazar_items_list.get_first_child())
+            relist_before = row_name(
+                app.bazar_relist_list.get_first_child()
+            )
             app._finish_item_info_load(
                 {2174: ItemInfo(2174, "Speech Bubble", 3000, 0)}
             )
             late_cell = first_item_cell()
             late_after = None if late_cell is None else late_cell.get_text()
-            late_ok = late_before == "bubbl" and late_after == "Speech Bubble"
+            items_after = row_name(app.bazar_items_list.get_first_child())
+            relist_after = row_name(
+                app.bazar_relist_list.get_first_child()
+            )
+            editor_label = (
+                "" if app.bazar_relist_editor_label is None
+                else app.bazar_relist_editor_label.get_text()
+            )
+            late_ok = (
+                late_before == "bubbl"
+                and late_after == "Speech Bubble"
+                and items_before == "bubbl"
+                and relist_before == "bubbl"
+                and items_after == "Speech Bubble"
+                and relist_after == "Speech Bubble"
+                and "Speech Bubble" in editor_label
+            )
+            forms_ok = (
+                app.bazar_form["min"].get_value() == 12345
+                and app.bazar_relist_form["min"].get_value() == 9876
+            )
+            copy_label_ok = (
+                app._bazar_copy_label_for("bubbl") == "Speech Bubble"
+            )
             config_path = os.environ.get("NTPL_BAZAR_CONFIG")
             saved = False
             if config_path:
@@ -253,6 +291,8 @@ def main() -> int:
                 and separators == 1
                 and name_ok
                 and late_ok
+                and forms_ok
+                and copy_label_ok
                 and app.bazar.mode == "monitor"
             )
             result["detail"] = (
@@ -261,9 +301,23 @@ def main() -> int:
                 f"profit={profit!r} no_register={no_register} "
                 f"item_name={item_text!r} tooltip={tooltip!r} "
                 f"late={late_before!r}->{late_after!r} "
+                f"lists={items_before!r}/{relist_before!r}->"
+                f"{items_after!r}/{relist_after!r} "
+                f"forms_kept={forms_ok} copy={copy_label_ok} "
                 f"saved={saved} separators={separators} "
                 f"mode={app.bazar.mode} phase={app.bazar.phase} "
                 f"status={app.bazar_status.get_text()!r}"
+            )
+            # The Delete confirmation must not resurface the shortcut.
+            # Stop first so the stop log cannot hide the delete line.
+            app._bazar_stop("smoke done")
+            app.bazar_selected_name = "bubbl"
+            app._bazar_delete_item()
+            delete_status = app.bazar_status.get_text() or ""
+            delete_ok = "deleted Speech Bubble" in delete_status
+            result["ok"] = bool(result["ok"] and delete_ok)
+            result["detail"] += (
+                f" deleted={delete_ok} delete_status={delete_status!r}"
             )
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"check exception: {exc!r}"

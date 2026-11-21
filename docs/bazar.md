@@ -165,9 +165,13 @@ the **Items** list — shows the real name instead:
 - the configured label remains the fallback when no vnum resolves, so a row
   is never blank. A row still showing a shortcut (rather than `item N`) means
   the lookup had not finished, or neither the database nor `Item.dat` had any
-  of its vnums: names load as soon as the NosBazar page is shown and the
-  lists re-render when they arrive; if it persists, rebuild the database with
-  `PYTHONPATH=linux/host python3 -m ntpl db build`.
+  of its vnums: names load as soon as the NosBazar page is shown; the Items
+  and Relist lists update in place when they arrive (unsaved editor values
+  and scroll positions are kept) and the Monitor table re-renders. An empty
+  lookup retries on a later page show or when the **Inventory** section is
+  opened, at most every 5 s, so after rebuilding the database
+  (`PYTHONPATH=linux/host python3 -m ntpl db build`) leaving and reopening
+  NosBazar is enough — no GUI restart.
 - the editor's **Name** field is the shortcut label; renaming it does not
   change what the Monitor shows. **Copy** next to it copies the label;
   right-clicking a result's Item cell or an item row copies the real name.
@@ -343,16 +347,18 @@ truncation notice.
 `gui_bazar_smoke.py` spawns a fake Bibi NPC, answers the open and one search,
 and asserts the profit column, that the Item cell shows the real Item.dat name
 for a configured shortcut (`bubbl` → **Speech Bubble**, with the shortcut in
-the tooltip), that a late name load re-renders the row from the shortcut to
-the real name, and that no `c_reg` was sent.
+the tooltip), that a late name load updates the Monitor, the Items list and
+the Relist list from the shortcut to the real name without overwriting
+unsaved editor values, that the row copy label and the Delete message use the
+real name, and that no `c_reg` was sent.
 `gui_bazar_relist_smoke.py` checks that the live-relist gate blocks the first
 attempt and then asserts the exact `c_reg` packet and the `register-sent`
 status. `gui_inventory_scan_smoke.py` feeds the live inventory shapes
 (3/5/7-field tokens, quantity 0, negative vnums), asserts the Inventory
 section rows/names/fields, adds one item and then prices the whole inventory
 without duplicates, checks **Set up relist…** switches to the Relist section
-with the exact vnum/tab/amount, saves a floor and starts Relist mode, checks
-that opening the NosBazar page loads item names automatically (DB first) and
-that a complete snapshot is saved/restored while a partial list is marked and
-never cached. `gui_smoke.py` enforces the help popover on every
-frame, including the new section frames.
+with the exact vnum/tab/amount, saves a floor and starts Relist mode, waits
+for and requires the automatic name load started by opening the NosBazar page
+(DB first), and checks that a complete snapshot is saved/restored while a
+partial list is marked and never cached. `gui_smoke.py` enforces the help
+popover on every frame, including the new section frames.

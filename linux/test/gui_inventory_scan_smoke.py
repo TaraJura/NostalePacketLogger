@@ -114,7 +114,7 @@ def main() -> int:
     server = InventoryServer()
     app = Application("127.0.0.1", server.port, unique=False)
     result: dict[str, object] = {"ok": False, "detail": "not checked"}
-    state = {"started": False, "budget": 60}
+    state = {"started": False, "budget": 60, "name_ticks": 0}
 
     def wait_attach() -> bool:
         state["budget"] -= 1
@@ -137,11 +137,30 @@ def main() -> int:
                 app.notebook.set_current_page(
                     app.notebook.page_num(app.bazar_page)
                 )
-            GLib.timeout_add(1500, begin_scan)
+            GLib.timeout_add(100, wait_for_names)
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"setup exception: {exc!r}"
             app.quit()
         return False
+
+    def wait_for_names() -> bool:
+        # Wait for the automatic lookup itself: item_info can be large and the
+        # Item.dat fallback takes ~1 s. Synchronizing here also guarantees no
+        # worker is still in flight when begin_scan injects its test names
+        # (a late finish would otherwise overwrite them).
+        if app.item_info_loaded and app.item_info:
+            begin_scan()
+            return False
+        state["name_ticks"] += 1
+        if state["name_ticks"] > 300:  # 30 s
+            result["detail"] = (
+                "item names did not load automatically "
+                f"(loaded={app.item_info_loaded}, "
+                f"count={len(app.item_info)})"
+            )
+            app.quit()
+            return False
+        return True
 
     def begin_scan() -> bool:
         try:
@@ -372,10 +391,9 @@ def main() -> int:
                 and result["relist_saved_amount"] == 5
                 and result["relist_mode"] == "relist"
                 and result["sections"] == 5
-                and (
-                    not result["auto_count"]
-                    or result["auto_name"] == "Group Time-Space Piece"
-                )
+                # The page map must have started the real lookup by itself.
+                and result["auto_count"]
+                and result["auto_name"] == "Group Time-Space Piece"
             )
             result["ok"] = bool(ok)
             result["detail"] = (

@@ -138,6 +138,11 @@ BOT_INTERVAL_MS = 50
 #: emulates values past the speed byte; a million is the practical bound kept
 #: in the config and the spin, not a gameplay limit.
 SPEED_BOOST_MAX = 1000000
+#: A name lookup that found neither the local DB nor Item.dat is retried on
+#: the next trigger after this cooldown, so ``ntpl db build`` takes effect
+#: without a restart while a missing data source is not re-parsed on every
+#: click.
+ITEM_INFO_RETRY_S = 5.0
 #: Family auto-invite: one invite at a time, wait for the server's
 #: confirmation, and never retry a name (the list is persisted per client).
 FAMILY_AUTO_INTERVAL_S = 2.5
@@ -689,6 +694,7 @@ class Application(Gtk.Application):
         self.item_info: dict[int, ItemInfo] = {}
         self.item_info_loaded = False
         self._item_info_loading = False
+        self._item_info_retry_at = 0.0
         self._item_info_callbacks: list = []
         # Family tab: the invite form, auto-invite and the invited list.
         self.family_name_entry = None
@@ -747,8 +753,8 @@ class Application(Gtk.Application):
             return
         self._copy_text(name)
 
-    def _copy_text(self, text: str) -> None:
-        """Put an item name on the system clipboard and confirm it."""
+    def _copy_text(self, text: str, what: str = "item name") -> None:
+        """Put text on the system clipboard and confirm what it was."""
         text = (text or "").strip()
         if not text:
             return
@@ -764,7 +770,7 @@ class Application(Gtk.Application):
         except (AttributeError, TypeError, GLib.Error):
             self._set_status("cannot access the clipboard")
             return
-        self._set_status(f"copied item name: {text}")
+        self._set_status(f"copied {what}: {text}")
 
     def _bazar_copy_menu(self, anchor: Gtk.Widget, name: str) -> None:
         """A right-click menu with the one action that matters here."""
@@ -1549,16 +1555,32 @@ class Application(Gtk.Application):
         return False
 
     def _ensure_item_info_loaded(self, after=None) -> None:
-        """Parse Item.dat once, off the GTK loop, then run ``after``."""
-        if self.item_info_loaded:
+        """Resolve item names once, off the GTK loop, then run ``after``.
+
+        A completed lookup with no data is retried on a later trigger (page
+        show, section switch, inventory add) after ``ITEM_INFO_RETRY_S``, so
+        a database built while the window stays open takes effect without a
+        restart. A non-empty lookup is final.
+        """
+        if self.item_info_loaded and self.item_info:
             if after is not None:
                 after()
             return
+        if self._item_info_loading:
+            if after is not None:
+                self._item_info_callbacks.append(after)
+            return
+        if self.item_info_loaded:
+            now = time.monotonic()
+            if now < self._item_info_retry_at:
+                if after is not None:
+                    after()
+                return
+            self.item_info_loaded = False
         if after is not None:
             self._item_info_callbacks.append(after)
-        if self._item_info_loading:
-            return
         self._item_info_loading = True
+        self._item_info_retry_at = time.monotonic() + ITEM_INFO_RETRY_S
 
         def work() -> None:
             info: dict[int, ItemInfo] = {}
@@ -1601,13 +1623,12 @@ class Application(Gtk.Application):
         if self._inventory_list is not None:
             self._inventory_render()
         # The Monitor table and both item lists show the real item names;
-        # replace the shortcuts as soon as the lookup finishes.
+        # replace the shortcuts as soon as the lookup finishes. The lists are
+        # refreshed in place: rebuilding them would re-select the current row
+        # and overwrite unsaved editor values (and reset scroll positions).
         if self.bazar_results_box is not None:
             self._bazar_render_results()
-        if self.bazar_items_list is not None:
-            self._bazar_render_items()
-        if self.bazar_relist_list is not None:
-            self._bazar_render_relist_items()
+        self._bazar_refresh_item_labels()
         self._update_bazar_inventory_info()
         for callback in callbacks:
             try:
@@ -2002,6 +2023,19 @@ class Application(Gtk.Application):
                 return item
         return None
 
+    def _bazar_item_by_name(self, name: str | None) -> BazarItem | None:
+        if not name:
+            return None
+        for item in self.bazar.config.items:
+            if item.name == name:
+                return item
+        return None
+
+    def _bazar_copy_label_for(self, name: str | None) -> str:
+        """The name the item row's right-click menu copies."""
+        item = self._bazar_item_by_name(name)
+        return (name or "") if item is None else self._bazar_item_label(item)
+
     def _bazar_price_inventory(self) -> None:
         """Add every inventory item and start the monitor."""
         slots = self._inventory_slots()
@@ -2075,6 +2109,34 @@ class Application(Gtk.Application):
                 self._bazar_npc_autofill_value = value
         self._bazar_update_relist_info()
 
+    def _bazar_refresh_item_labels(self) -> None:
+        """Update the item lists' names in place after the name lookup.
+
+        Rebuilding the lists (``_bazar_render_items`` /
+        ``_bazar_render_relist_items``) would re-select the remembered row,
+        emit ``row-selected`` and overwrite unsaved editor values, and it
+        would reset the lists' scroll positions. Updating only the labels
+        and tooltips keeps the editors and scroll state intact.
+        """
+        items = {item.name: item for item in self.bazar.config.items}
+        for listbox in (self.bazar_items_list, self.bazar_relist_list):
+            if listbox is None:
+                continue
+            child = listbox.get_first_child()
+            while child is not None:
+                item = items.get(getattr(child, "item_name", None))
+                label = getattr(child, "name_label", None)
+                if item is not None and label is not None:
+                    label.set_text(self._bazar_item_label(item))
+                    label.set_tooltip_text(self._bazar_item_tooltip(item))
+                child = child.get_next_sibling()
+        item = items.get(self.bazar_relist_selected)
+        if item is not None and self.bazar_relist_editor_label is not None:
+            searches = " ".join(str(v) for v in item.vnums) or "no search"
+            self.bazar_relist_editor_label.set_text(
+                f"{self._bazar_item_label(item)} · search {searches}"
+            )
+
     def _bazar_render_items(self) -> None:
         if self.bazar_items_list is None:
             return
@@ -2092,10 +2154,12 @@ class Application(Gtk.Application):
             row = Gtk.ListBoxRow()
             row.item_name = item.name  # type: ignore[attr-defined]
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-            name = Gtk.Label(label=self._bazar_item_label(item))
+            label_text = self._bazar_item_label(item)
+            name = Gtk.Label(label=label_text)
             name.set_xalign(0)
             name.set_hexpand(True)
             name.set_tooltip_text(self._bazar_item_tooltip(item))
+            row.name_label = name  # type: ignore[attr-defined]
             # Full name, wrapped instead of ellipsized: the list is the
             # place to identify an item, so a cut-off label is useless.
             name.set_wrap(True)
@@ -2119,17 +2183,14 @@ class Application(Gtk.Application):
             right.set_button(3)
 
             def on_right(
-                _gesture,
-                _n_press,
-                _x,
-                _y,
-                row=row,
-                key=item.name,
-                label=self._bazar_item_label(item),
+                _gesture, _n_press, _x, _y, row=row, key=item.name
             ) -> None:
+                # Resolve at click time: a late name load updates the label
+                # in place, so a captured string would still copy the
+                # configured shortcut.
                 self.bazar_selected_name = key
                 self.bazar_items_list.select_row(row)
-                self._bazar_copy_menu(row, label)
+                self._bazar_copy_menu(row, self._bazar_copy_label_for(key))
 
             right.connect("pressed", on_right)
             row.add_controller(right)
@@ -2196,6 +2257,7 @@ class Application(Gtk.Application):
             name.set_xalign(0)
             name.set_hexpand(True)
             name.set_tooltip_text(self._bazar_item_tooltip(item))
+            row.name_label = name  # type: ignore[attr-defined]
             name.set_wrap(True)
             name.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
             name.set_max_width_chars(36)
@@ -2523,15 +2585,16 @@ class Application(Gtk.Application):
         form["name"].grab_focus()
 
     def _bazar_delete_item(self) -> None:
-        if not self.bazar_selected_name:
+        name = self.bazar_selected_name
+        if not name:
             self._bazar_log("select an item to delete")
             return
+        item = self._bazar_item_by_name(name)
+        label = self._bazar_item_label(item) if item is not None else name
         items = [
-            item
-            for item in self.bazar.config.items
-            if item.name != self.bazar_selected_name
+            entry for entry in self.bazar.config.items if entry.name != name
         ]
-        self._bazar_log(f"deleted {self.bazar_selected_name}")
+        self._bazar_log(f"deleted {label}")
         self.bazar_selected_name = None
         self._bazar_set_items(items)
         self._bazar_new_item()
@@ -3887,7 +3950,10 @@ class Application(Gtk.Application):
             "Copy the configured label."
         )
         copy_name.connect(
-            "clicked", lambda *_: self._copy_text(name_entry.get_text())
+            "clicked",
+            lambda *_: self._copy_text(
+                name_entry.get_text(), "configured label"
+            ),
         )
         box.append(
             self._field_row(

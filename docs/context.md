@@ -47,8 +47,9 @@ the data layer in [database.md](database.md).
   vnum/tab/amount for the floor and start; **Price all** adds one search per
   distinct owned item. The **Monitor** table and the **Relist**/**Items**
   lists show the real item name resolved from each entry's vnum (local DB
-  first, `Item.dat` fallback), never the configured shortcut; hover the item
-  name for the shortcut and search vnums.
+  first, `Item.dat` fallback), with the configured shortcut only as the
+  fallback when no vnum resolves; hover the item name for the shortcut and
+  search vnums.
 - **Game/packet database**: `~/.config/ntpl/nostale.db` (`NTPL_DB`) built by
   `PYTHONPATH=linux/host python3 -m ntpl db build`. 7,805 items, 2,723
   monsters, 1,964 skills, 779 maps, 3,639 NosMall records / 1,184 groups,

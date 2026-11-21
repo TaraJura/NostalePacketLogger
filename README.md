@@ -69,8 +69,8 @@ with a **second-level navbar**: **Inventory**, **Relist**, **Monitor**,
   profit (gold per NosMall ND or NPC-gold markup) and status, sorted **most
   profitable first**; thin rules keep each row aligned, and **Only priced**
   hides unanswered rows. The **Item** column is the real item name for the
-  row's vnum (local DB first, then Item.dat), not the configured shortcut;
-  hover the item name for the shortcut and search vnums.
+  row's vnum (local DB first, then Item.dat) whenever it resolves, not the
+  configured shortcut; hover the item name for the shortcut and search vnums.
 - **Items** — the full editor for one item: **Name** (the shortcut label),
   **Search vnums**, **Raw packet**, **Item vnum**, **Tab**, **Amount**,
   **Min price**, **Cost** and the advanced `c_reg` fields. **Import
