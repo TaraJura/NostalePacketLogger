@@ -11,13 +11,30 @@ Full inventory contents for a bag type, one token per occupied slot:
 inv 1 0.5119.4 1.1324.1 2.1007.1
 inv 2 0.2115.5 1.2282.11
 inv 0 27.-4962.5.7.1.0.0 30.885.0.0.0.0.0
+inv 6 0.905.0.5.0 1.906.0.5.0
+inv 7 0.4256.0.0.0 1.4248.0.0.0
 inv 3
 ```
 
-`bag` is `0` Equip, `1` Main, `2` Etc. A token is
-`slot.vnum.quantity[.<…>]`; Equip entries carry extra fields. A bag line with no
-tokens clears that bag. The engine stores `slot index → (vnum, quantity)` for
-the NosBazar relist.
+`bag` is `0` Equip, `1` Main, `2` Etc. The live server also sends
+equipment-style bags `6` and `7` (SP cards/costumes in the 2026-11-20
+captures) and empty bags `9`/`10`; the tab names only 0/1/2 and shows the
+rest as **Bag N**. A token is `slot.vnum.quantity[.<…>]`:
+
+- Bags 1/2 use three fields in `inv` (the `ivn` update appends one unknown
+  field, see below). Quantity 0 is empty.
+- Bag 0 uses seven fields; bags 6/7 use five. The extra fields are not
+  decoded. Quantity 0 is **normal** for an occupied equipment row (it is not
+  a stack). The server removes such a row with vnum 0, e.g.
+  `ivn 0 30.0.0.0.0.0.0`.
+- A negative vnum is a limited/bound item (`63.-4962...`); the absolute
+  value is the Item.dat template. The engine keeps these for display and the
+  NosBazar inventory scan searches `abs(vnum)`, but relisting ignores them.
+
+A bag line with no tokens clears that bag. The engine stores each slot as an
+`InventorySlot(bag, index, vnum, quantity, fields)`; `fields` keeps the extra
+dot fields verbatim. `parse_inventory_token` is the shared parser used by the
+live handlers and the log backfill.
 
 ---
 
@@ -26,9 +43,16 @@ the NosBazar relist.
 Single inventory slot update or removal:
 
 ```
-ivn 2 1.2282.10.0     # slot 1, vnum 2282, quantity 10
-ivn 2 1.2282.0.0      # quantity 0 removes the slot
+ivn 2 1.2282.10.0            # slot 1, vnum 2282, quantity 10
+ivn 2 1.2282.0.0             # standard bag: quantity 0 removes the slot
+ivn 0 30.885.0.0.0.0.0       # equipment: quantity 0 is an occupied row
+ivn 0 30.0.0.0.0.0.0         # equipment removal: vnum 0
 ```
+
+The fourth dot field on a standard-bag update is unknown and ignored. Because
+equipment updates also have four or more fields, the parser classifies
+equipment by bag (`0`, `6`, `7`) or by five-plus fields, not by field count
+alone; a four-field standard update therefore still removes on quantity 0.
 
 ---
 

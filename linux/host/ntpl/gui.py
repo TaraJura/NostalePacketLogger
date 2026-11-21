@@ -32,9 +32,11 @@ from .bazar import (
     BazarItem,
     build_search_packet,
     default_config_path as default_bazar_config_path,
+    inventory_search_items,
     load_config as load_bazar_config,
     normalize_search_packet,
     save_config as save_bazar_config,
+    tracked_vnums,
 )
 from .botconfig import (
     COMPARATORS,
@@ -81,6 +83,7 @@ from .mirror import (
     MirrorReader,
     MirrorWriter,
 )
+from .nosmall import ItemInfo, load_item_info
 from .spawnlog import (
     client_log_path,
     load_bazaar_open,
@@ -102,6 +105,10 @@ from .protocol import Kind, Packet, ProtocolError
 #: `gp` destination in the 2xxx range. Missing assets fall back to the ring.
 ASSET_DIR = Path(__file__).with_name("assets")
 TIMESPACE_ICON = ASSET_DIR / "ts-1.png"
+
+#: Inventory bags the NosBazar picker names. The live server also sends
+#: equipment-style bags 6/7 (SP cards/costumes); they show as "Bag N".
+BAG_LABELS = {0: "Equip", 1: "Main", 2: "Etc"}
 
 MAX_ROWS = 20000
 TRIM_ROWS = 2000
@@ -625,6 +632,26 @@ class Application(Gtk.Application):
         self._bazar_npc_autofilled = False
         self._bazar_npc_autofill_value = ""
         self._bazar_config_loaded = False
+        # Inventory integration: every slot the client reports, with the
+        # Item.dat name/NPC price for the picker. Item info loads once in a
+        # worker thread because the archive parse is too slow for the loop.
+        self.bazar_inventory_info = None
+        self.bazar_scan_button = None
+        self.bazar_price_all_button = None
+        self.inventory_window = None
+        self._inventory_list = None
+        self._inventory_scroll = None
+        self._inventory_status = None
+        self._inventory_search = None
+        self._inventory_add_button = None
+        self._inventory_add_all_button = None
+        self._inventory_checks: set[tuple[int, int]] = set()
+        self._inventory_matches: list[InventorySlot] = []
+        self._inventory_render_pending = False
+        self.item_info: dict[int, ItemInfo] = {}
+        self.item_info_loaded = False
+        self._item_info_loading = False
+        self._item_info_callbacks: list = []
         # Family tab: the invite form, auto-invite and the invited list.
         self.family_name_entry = None
         self.family_invite_button = None
@@ -1185,6 +1212,9 @@ class Application(Gtk.Application):
                 self.bazar_config_label.set_text(str(target))
             self._bazar_render_items()
             self._bazar_render_results()
+            self._update_bazar_inventory_info()
+            if self.inventory_window is not None:
+                self._inventory_schedule_render()
             self._bazar_update_info()
             self._bazar_log(
                 f"loaded {len(config.items)} NosBazar item(s) from "
@@ -1339,6 +1369,468 @@ class Application(Gtk.Application):
             f"refresh {self.bazar.config.refresh:g}s"
         )
 
+    # -- NosBazar inventory --------------------------------------------
+
+    def _world_inventory_slots(self) -> list[InventorySlot]:
+        """Every known slot, ordered by bag and slot index.
+
+        The engine keeps all bags it received, including the equipment bags
+        (``0`` Equip and the ``6``/``7`` extras); the inventory picker and the
+        summary need them, not only the Main/Etc bags relisting uses.
+        """
+        world = self.engine.world
+        return [
+            slot
+            for bag in sorted(world.inventory)
+            for _index, slot in sorted(world.inventory[bag].items())
+        ]
+
+    def _inventory_slots(self) -> list[InventorySlot]:
+        """Live slots, backfilled from the client log when none arrived."""
+        slots = self._world_inventory_slots()
+        if not slots:
+            self._bazar_seed_from_log()
+            slots = self._world_inventory_slots()
+        return slots
+
+    @staticmethod
+    def _inventory_distinct(slots: list[InventorySlot]) -> set[int]:
+        return {abs(slot.vnum) for slot in slots if slot.vnum != 0}
+
+    def _update_bazar_inventory_info(self) -> None:
+        label = self.bazar_inventory_info
+        if label is None:
+            return
+        slots = self._world_inventory_slots()
+        distinct = self._inventory_distinct(slots)
+        tracked = tracked_vnums(self.bazar.config.items)
+        tracked_count = sum(1 for vnum in distinct if vnum in tracked)
+        if slots:
+            label.set_text(
+                f"{len(slots)} slot(s) · {len(distinct)} item(s) · "
+                f"{tracked_count} tracked"
+            )
+        else:
+            label.set_text("No inventory data yet")
+        if self.bazar_price_all_button is not None:
+            self.bazar_price_all_button.set_sensitive(bool(slots))
+
+    def _ensure_item_info_loaded(self, after=None) -> None:
+        """Parse Item.dat once, off the GTK loop, then run ``after``."""
+        if self.item_info_loaded:
+            if after is not None:
+                after()
+            return
+        if after is not None:
+            self._item_info_callbacks.append(after)
+        if self._item_info_loading:
+            return
+        self._item_info_loading = True
+
+        def work() -> None:
+            try:
+                info = load_item_info()
+            except Exception:  # noqa: BLE001 - names are optional
+                info = {}
+            GLib.idle_add(self._finish_item_info_load, info)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _finish_item_info_load(self, info: dict[int, ItemInfo]) -> bool:
+        if self._closing:
+            return False
+        self.item_info = info or {}
+        self.item_info_loaded = True
+        self._item_info_loading = False
+        if not self.item_info:
+            self._bazar_log(
+                "inventory: item names unavailable (NSgtdData.NOS not found)"
+            )
+        callbacks = self._item_info_callbacks
+        self._item_info_callbacks = []
+        if self.inventory_window is not None:
+            self._inventory_render()
+        self._update_bazar_inventory_info()
+        for callback in callbacks:
+            try:
+                callback()
+            except Exception:  # noqa: BLE001 - never break the load
+                pass
+        return False
+
+    def _item_name_for(self, vnum: int) -> str:
+        info = self.item_info.get(abs(vnum))
+        if info is not None and info.name:
+            return info.name
+        return f"item {abs(vnum)}"
+
+    def _item_npc_price(self, vnum: int) -> int:
+        info = self.item_info.get(abs(vnum))
+        return 0 if info is None else max(0, info.npc_price)
+
+    def _open_inventory_picker(self) -> None:
+        if self.inventory_window is not None:
+            self.inventory_window.present()
+            return
+        self._ensure_item_info_loaded()
+        window = Gtk.Window(title="Inventory")
+        window.set_application(self)
+        window.set_transient_for(self.window)
+        window.set_modal(True)
+        window.set_default_size(860, 640)
+        window.connect("close-request", self._close_inventory_picker)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_top(8)
+        box.set_margin_bottom(8)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._inventory_search = Gtk.SearchEntry()
+        self._inventory_search.set_placeholder_text(
+            "search inventory by item name or vnum"
+        )
+        self._inventory_search.set_hexpand(True)
+        self._inventory_search.connect(
+            "search-changed", lambda *_: self._inventory_render()
+        )
+        top.append(self._inventory_search)
+        rescan = Gtk.Button(label="Rescan")
+        rescan.set_tooltip_text(
+            "Read the live inventory and the client log again."
+        )
+        rescan.connect("clicked", lambda *_: self._inventory_reload())
+        top.append(rescan)
+        top.append(
+            self._help_button(
+                "Inventory",
+                "Every slot the client sent in inv/ivn, including the "
+                "equipment bags (Equip, Bag 6, Bag 7). Each row shows the "
+                "Item.dat name, bag and slot, vnum, quantity, equipment "
+                "fields, NPC price and known ND cost. Equipment rows report "
+                "quantity 0 and count as one item. Negative vnums are "
+                "limited/bound ids; their template (absolute vnum) is "
+                "searched. Add selected adds one bazaar item per distinct "
+                "item; Add all & monitor adds every inventory item and "
+                "starts the monitor. Names load from Item.dat.",
+            )
+        )
+        box.append(top)
+
+        self._inventory_status = Gtk.Label(label="")
+        self._inventory_status.set_xalign(0)
+        self._inventory_status.set_wrap(True)
+        self._inventory_status.add_css_class("dim-label")
+        box.append(self._inventory_status)
+
+        self._inventory_list = Gtk.ListBox()
+        self._inventory_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_child(self._inventory_list)
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_vexpand(True)
+        self._inventory_scroll = scrolled
+        box.append(scrolled)
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        select_all = Gtk.Button(label="Select shown")
+        select_all.connect(
+            "clicked", lambda *_: self._inventory_select_shown()
+        )
+        buttons.append(select_all)
+        clear = Gtk.Button(label="Clear")
+        clear.connect(
+            "clicked", lambda *_: self._inventory_clear_selection()
+        )
+        buttons.append(clear)
+        self._inventory_add_button = Gtk.Button(label="Add selected (0)")
+        self._inventory_add_button.add_css_class("suggested-action")
+        self._inventory_add_button.set_sensitive(False)
+        self._inventory_add_button.connect(
+            "clicked",
+            lambda *_: self._inventory_add(self._inventory_checked_slots()),
+        )
+        buttons.append(self._inventory_add_button)
+        self._inventory_add_all_button = Gtk.Button(
+            label="Add all & monitor"
+        )
+        self._inventory_add_all_button.set_tooltip_text(
+            "Add every inventory item and start the bazaar monitor."
+        )
+        self._inventory_add_all_button.connect(
+            "clicked",
+            lambda *_: self._inventory_add(
+                self._inventory_slots(), start=True
+            ),
+        )
+        buttons.append(self._inventory_add_all_button)
+        close = Gtk.Button(label="Close")
+        close.connect("clicked", lambda *_: window.close())
+        buttons.append(close)
+        box.append(buttons)
+
+        window.set_child(box)
+        self.inventory_window = window
+        self._inventory_render()
+        window.present()
+
+    def _inventory_reload(self) -> None:
+        """Read the log again, refreshing slots missed before the attach."""
+        self._bazar_seed_from_log()
+        self._update_bazar_inventory_info()
+        self._inventory_render()
+
+    def _inventory_render(self) -> None:
+        if self._inventory_list is None:
+            return
+        adjustment = None
+        scroll_position = 0.0
+        if self._inventory_scroll is not None:
+            adjustment = self._inventory_scroll.get_vadjustment()
+            scroll_position = adjustment.get_value()
+        child = self._inventory_list.get_first_child()
+        while child is not None:
+            self._inventory_list.remove(child)
+            child = self._inventory_list.get_first_child()
+
+        slots = self._inventory_slots()
+        keys = {(slot.bag, slot.index) for slot in slots}
+        self._inventory_checks &= keys
+        needle = ""
+        if self._inventory_search is not None:
+            needle = self._inventory_search.get_text().strip().casefold()
+        matches: list[InventorySlot] = []
+        for slot in slots:
+            name = self._item_name_for(slot.vnum)
+            haystack = (
+                f"{name.casefold()} {slot.vnum} {abs(slot.vnum)} "
+                f"{slot.bag} {slot.index}"
+            )
+            if needle and needle not in haystack:
+                continue
+            matches.append(slot)
+        self._inventory_matches = matches
+
+        distinct = self._inventory_distinct(slots)
+        tracked = tracked_vnums(self.bazar.config.items)
+        tracked_count = sum(1 for vnum in distinct if vnum in tracked)
+        costs = self._nosmall_costs()
+        if self._inventory_status is not None:
+            if not slots:
+                text = (
+                    "Inventory is empty — relog or open the inventory once."
+                )
+            else:
+                text = (
+                    f"{len(slots)} slot(s) · {len(distinct)} item(s) · "
+                    f"{tracked_count} tracked · {len(matches)} shown"
+                )
+            if self._item_info_loading:
+                text += " · loading item names…"
+            self._inventory_status.set_text(text)
+
+        for slot in matches:
+            name = self._item_name_for(slot.vnum)
+            detail = (
+                f"{BAG_LABELS.get(slot.bag, f'Bag {slot.bag}')} "
+                f"{slot.index} · vnum {slot.vnum} · qty {slot.quantity}"
+            )
+            if slot.fields:
+                detail += " · fields " + ".".join(slot.fields)
+            npc_price = self._item_npc_price(slot.vnum)
+            if npc_price > 0:
+                detail += f" · NPC {npc_price:,} g"
+            cost = costs.get(abs(slot.vnum))
+            if cost:
+                detail += f" · {cost:g} ND"
+
+            content = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=8
+            )
+            labels = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=1
+            )
+            name_label = Gtk.Label(label=name)
+            name_label.set_xalign(0)
+            name_label.set_hexpand(True)
+            name_label.set_wrap(True)
+            name_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            name_label.set_max_width_chars(52)
+            right = Gtk.GestureClick()
+            right.set_button(3)
+
+            def on_right(
+                _gesture, _n_press, _x, _y, label=name_label, text=name
+            ) -> None:
+                self._bazar_copy_menu(label, text)
+
+            right.connect("pressed", on_right)
+            name_label.add_controller(right)
+            detail_label = Gtk.Label(label=detail)
+            detail_label.set_xalign(0)
+            detail_label.add_css_class("dim-label")
+            detail_label.set_ellipsize(Pango.EllipsizeMode.END)
+            detail_label.set_max_width_chars(64)
+            labels.append(name_label)
+            labels.append(detail_label)
+            content.append(labels)
+            if abs(slot.vnum) in tracked:
+                badge = Gtk.Label(label="tracked")
+                badge.add_css_class("bazar-ok")
+                content.append(badge)
+
+            check = Gtk.CheckButton()
+            check.set_hexpand(True)
+            check.set_child(content)
+            check.set_active((slot.bag, slot.index) in self._inventory_checks)
+            check.connect(
+                "toggled", self._inventory_toggled, slot.bag, slot.index
+            )
+            row = Gtk.ListBoxRow()
+            row.set_activatable(False)
+            row.set_child(check)
+            self._inventory_list.append(row)
+
+        self._inventory_update_add_button()
+        if self._inventory_add_all_button is not None:
+            self._inventory_add_all_button.set_sensitive(bool(slots))
+        if adjustment is not None:
+            GLib.idle_add(
+                self._inventory_restore_scroll, adjustment, scroll_position
+            )
+
+    @staticmethod
+    def _inventory_restore_scroll(
+        adjustment: Gtk.Adjustment, value: float
+    ) -> bool:
+        top = adjustment.get_upper() - adjustment.get_page_size()
+        adjustment.set_value(min(max(value, 0.0), max(0.0, top)))
+        return False
+
+    def _inventory_toggled(
+        self, check: Gtk.CheckButton, bag: int, index: int
+    ) -> None:
+        key = (bag, index)
+        if check.get_active():
+            self._inventory_checks.add(key)
+        else:
+            self._inventory_checks.discard(key)
+        self._inventory_update_add_button()
+
+    def _inventory_update_add_button(self) -> None:
+        if self._inventory_add_button is None:
+            return
+        count = len(self._inventory_checked_slots())
+        self._inventory_add_button.set_label(f"Add selected ({count})")
+        self._inventory_add_button.set_sensitive(count > 0)
+
+    def _inventory_checked_slots(self) -> list[InventorySlot]:
+        if not self._inventory_checks:
+            return []
+        return [
+            slot
+            for slot in self._inventory_slots()
+            if (slot.bag, slot.index) in self._inventory_checks
+        ]
+
+    def _inventory_select_shown(self) -> None:
+        for slot in self._inventory_matches:
+            self._inventory_checks.add((slot.bag, slot.index))
+        self._inventory_render()
+
+    def _inventory_clear_selection(self) -> None:
+        self._inventory_checks.clear()
+        self._inventory_render()
+
+    def _inventory_schedule_render(self) -> None:
+        if self._inventory_render_pending:
+            return
+        self._inventory_render_pending = True
+        GLib.idle_add(self._inventory_idle_render)
+
+    def _inventory_idle_render(self) -> bool:
+        self._inventory_render_pending = False
+        if not self._closing and self.inventory_window is not None:
+            self._inventory_render()
+        return False
+
+    def _inventory_add(
+        self, slots: list[InventorySlot], start: bool = False
+    ) -> None:
+        """Add the distinct items in ``slots`` to the bazaar item list."""
+        if not slots:
+            self._bazar_log("inventory: no slots to add")
+            return
+        if not self.item_info_loaded:
+            if self._inventory_status is not None:
+                self._inventory_status.set_text("Loading item names…")
+            self._ensure_item_info_loaded(
+                lambda: self._inventory_add(slots, start)
+            )
+            return
+        existing = list(self.bazar.config.items)
+        names = {
+            vnum: info.name
+            for vnum, info in self.item_info.items()
+            if info.name
+        }
+        npc_prices = {
+            vnum: info.npc_price
+            for vnum, info in self.item_info.items()
+            if info.npc_price > 0
+        }
+        plan = inventory_search_items(
+            slots,
+            names,
+            existing,
+            self._nosmall_costs(),
+            npc_prices,
+        )
+        if plan.items:
+            self._bazar_set_items(existing + plan.items)
+            self._bazar_save_config(quiet=True)
+        self._bazar_log(
+            f"inventory: {len(plan.items)} item(s) added · "
+            f"{plan.tracked} already tracked"
+        )
+        self._update_bazar_inventory_info()
+        if self.inventory_window is not None:
+            self._inventory_render()
+        if self._inventory_status is not None:
+            # After the re-render: the render writes the live summary and
+            # would otherwise hide the add result.
+            self._inventory_status.set_text(
+                f"Added {len(plan.items)} · {plan.tracked} already tracked · "
+                f"{len(self.bazar.config.items)} configured"
+            )
+        if start:
+            self._bazar_start_monitor()
+
+    def _bazar_price_inventory(self) -> None:
+        """Add every inventory item and start the monitor."""
+        slots = self._inventory_slots()
+        if not slots:
+            self._bazar_log(
+                "inventory is empty; relog or open the inventory once"
+            )
+            self._update_bazar_inventory_info()
+            return
+        self._inventory_add(slots, start=True)
+
+    def _close_inventory_picker(self, _window=None) -> bool:
+        self.inventory_window = None
+        self._inventory_list = None
+        self._inventory_scroll = None
+        self._inventory_status = None
+        self._inventory_search = None
+        self._inventory_add_button = None
+        self._inventory_add_all_button = None
+        self._inventory_matches = []
+        self._inventory_render_pending = False
+        self._inventory_checks.clear()
+        return False
+
     def _bazar_on_packet(self, packet: Packet) -> None:
         if packet.opcode in ("c_map", "mapout"):
             # Entity ids belong to a map instance. Drop an auto-filled id so
@@ -1351,9 +1843,13 @@ class Application(Gtk.Application):
                 self._bazar_npc_autofilled = False
                 self._bazar_npc_autofill_value = ""
             return
+        if packet.opcode in ("inv", "ivn"):
+            self._update_bazar_inventory_info()
+            if self.inventory_window is not None:
+                self._inventory_schedule_render()
         if packet.opcode in (
             "rc_blist", "c_blist", "c_slist", "npc_req", "n_run", "in",
-            "wopen",
+            "wopen", "inv", "ivn",
         ):
             self._bazar_sync_from_world()
 
@@ -1636,6 +2132,9 @@ class Application(Gtk.Application):
         )
         self._bazar_render_items()
         self._bazar_render_results()
+        self._update_bazar_inventory_info()
+        if self.inventory_window is not None:
+            self._inventory_schedule_render()
 
     def _load_nosmall_groups(self) -> list:
         """Read groups from the SQLite DB, or parse the client data."""
@@ -2158,20 +2657,29 @@ class Application(Gtk.Application):
             )
         bags, gold = load_log_inventory(path)
         if bags:
+            count = 0
+            filled = 0
             for bag, slots in bags.items():
-                world.inventory[bag] = {
-                    index: InventorySlot(bag, index, vnum, quantity)
-                    for index, (vnum, quantity) in slots.items()
-                }
-            count = sum(len(slots) for slots in bags.values())
+                # Live state for a bag is at least as new as the log replay;
+                # only fill bags the attach missed entirely. (A truncated
+                # log can hold just one ivn update for a bag, which would
+                # otherwise replace the complete live bag with one slot.)
+                if bag in world.inventory and world.inventory[bag]:
+                    continue
+                world.inventory[bag] = dict(slots)
+                count += len(slots)
+                filled += 1
             if count:
                 self._bazar_log(
-                    f"inventory: {count} slot(s) in {len(bags)} bag(s) "
+                    f"inventory: {count} slot(s) in {filled} bag(s) "
                     f"seeded from the log"
                 )
         if gold is not None:
             world.gold = gold
         self._bazar_sync_from_world()
+        self._update_bazar_inventory_info()
+        if self.inventory_window is not None:
+            self._inventory_schedule_render()
 
     def _bazar_reset_for_attach(self, winpid: int) -> None:
         """Reset the tab together with the engine when another client attaches."""
@@ -2189,6 +2697,10 @@ class Application(Gtk.Application):
         if self.bazar_npc_entry is not None:
             self.bazar_npc_entry.set_text("")
         self._bazar_load_config(fallback=True)
+        self._update_bazar_inventory_info()
+        if self.inventory_window is not None:
+            self._inventory_checks.clear()
+            self._inventory_schedule_render()
 
     def _build_bazar_page(self):
         """NosBazar market monitor and relisting controls.
@@ -2241,11 +2753,12 @@ class Application(Gtk.Application):
             self._help_button(
                 "NosBazar",
                 "Search configured bazaar items, see the cheapest listing and "
-                "its profit, and optionally relist your inventory. Monitor "
-                "only searches. Relist changes your prices and needs live "
-                "re-listing, your character name and a positive min price. "
-                "Open bazaar replays the Bibi Basar dialog through the "
-                "client's own send path.",
+                "its profit, and optionally relist your inventory. Inventory "
+                "lists every slot you own and can price it all in one "
+                "action. Monitor only searches. Relist changes your prices "
+                "and needs live re-listing, your character name and a "
+                "positive min price. Open bazaar replays the Bibi Basar "
+                "dialog through the client's own send path.",
             )
         )
         page.append(toolbar)
@@ -2353,6 +2866,51 @@ class Application(Gtk.Application):
             )
         )
 
+        inventory_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=6
+        )
+        self.bazar_inventory_info = Gtk.Label(label="No inventory data yet")
+        self.bazar_inventory_info.set_xalign(0)
+        self.bazar_inventory_info.set_wrap(True)
+        self.bazar_inventory_info.add_css_class("dim-label")
+        inventory_box.append(self.bazar_inventory_info)
+        inventory_buttons = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6
+        )
+        self.bazar_scan_button = Gtk.Button(label="Scan inventory…")
+        self.bazar_scan_button.set_tooltip_text(
+            "List every inventory slot with its item data."
+        )
+        self.bazar_scan_button.connect(
+            "clicked", lambda *_: self._open_inventory_picker()
+        )
+        inventory_buttons.append(self.bazar_scan_button)
+        self.bazar_price_all_button = Gtk.Button(label="Price all")
+        self.bazar_price_all_button.set_tooltip_text(
+            "Add every inventory item and start the monitor."
+        )
+        self.bazar_price_all_button.connect(
+            "clicked", lambda *_: self._bazar_price_inventory()
+        )
+        inventory_buttons.append(self.bazar_price_all_button)
+        inventory_box.append(inventory_buttons)
+        right.append(
+            self._frame(
+                "Inventory",
+                inventory_box,
+                help_text=(
+                    "Inventory slots from inv/ivn, backfilled from the "
+                    "session log after a late attach. Scan lists every slot "
+                    "with the Item.dat name, bag/slot, vnum, quantity, "
+                    "equipment fields, NPC price and known ND cost. Price "
+                    "all adds one bazaar search per distinct item and starts "
+                    "Monitor. Negative vnums are limited/bound items and are "
+                    "searched by their absolute vnum; equipment quantity 0 "
+                    "counts as one."
+                ),
+            )
+        )
+
         items_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.bazar_items_info = Gtk.Label(label="0 items")
         self.bazar_items_info.set_xalign(0)
@@ -2395,11 +2953,12 @@ class Application(Gtk.Application):
                 "Items",
                 items_box,
                 help_text=(
-                    "The items Monitor searches and Relist offers. Import "
-                    "NosMall adds a whole catalog group with a ready c_blist "
-                    "packet; New and Delete edit this list. The left side "
-                    "shows the cheapest listing per item, most profitable "
-                    "first."
+                    "The items Monitor searches and Relist offers. Scan "
+                    "inventory adds items you already own with their names "
+                    "and slots; Import NosMall adds a whole catalog group "
+                    "with a ready c_blist packet; New and Delete edit this "
+                    "list. The left side shows the cheapest listing per "
+                    "item, most profitable first."
                 ),
             )
         )
@@ -2467,6 +3026,7 @@ class Application(Gtk.Application):
         self.bazar_page = page
         self._bazar_render_items()
         self._bazar_render_results()
+        self._update_bazar_inventory_info()
         self._bazar_update_info()
         return page
 

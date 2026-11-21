@@ -208,6 +208,11 @@ class EngineInventoryTests(unittest.TestCase):
         self.assertEqual((slot.index, slot.quantity), (1, 11))
         engine.feed_text("RECV", "ivn 2 1.2282.10.0")
         self.assertEqual(engine.world.find_inventory(2, 2282).quantity, 10)
+        # The fourth standard-bag field is an unknown always-zero value; the
+        # picker must not show it as an equipment field.
+        self.assertEqual(
+            engine.world.find_inventory(2, 2282).fields, ()
+        )
         engine.feed_text("RECV", "ivn 2 1.2282.0.0")
         self.assertIsNone(engine.world.find_inventory(2, 2282))
         engine.feed_text("RECV", "inv 2")
@@ -215,12 +220,44 @@ class EngineInventoryTests(unittest.TestCase):
         engine.feed_text("RECV", "gold 34661 0")
         self.assertEqual(engine.world.gold, 34661)
 
-    def test_equip_bag_negative_ids_are_ignored(self) -> None:
+    def test_equipment_slot_keeps_fields_and_negative_vnum(self) -> None:
         engine = Engine()
+        # Live capture: bag 0 (Equip) has seven fields per token, and a
+        # negative vnum is a limited/bound item.
         engine.feed_text(
-            "RECV", "inv 0 27.-4962.5.7.1.0.0 30.885.0.0.0.0.0"
+            "RECV", "inv 0 42.884.0.0.0.0.0 63.-4962.5.7.1.0.0"
         )
+        slot = engine.world.inventory[0][63]
+        self.assertEqual((slot.vnum, slot.quantity), (-4962, 5))
+        self.assertEqual(slot.amount, 5)
+        self.assertEqual(slot.fields, ("7", "1", "0", "0"))
+        # Stored for display, but never a relist candidate.
         self.assertIsNone(engine.world.find_inventory(0, -4962))
+
+    def test_equipment_quantity_zero_is_an_occupied_slot(self) -> None:
+        engine = Engine()
+        engine.feed_text("RECV", "inv 0 30.885.0.0.0.0.0")
+        slot = engine.world.find_inventory(0, 885)
+        self.assertIsNotNone(slot)
+        assert slot is not None
+        self.assertEqual((slot.quantity, slot.amount), (0, 1))
+        # An equipment removal is vnum 0, not quantity 0.
+        engine.feed_text("RECV", "ivn 0 30.0.0.0.0.0.0")
+        self.assertIsNone(engine.world.find_inventory(0, 885))
+        engine.feed_text("RECV", "ivn 0 30.885.2.1.2.3.4")
+        slot = engine.world.find_inventory(0, 885)
+        self.assertIsNotNone(slot)
+        assert slot is not None
+        self.assertEqual((slot.quantity, slot.amount), (2, 2))
+        self.assertEqual(slot.fields, ("1", "2", "3", "4"))
+
+    def test_standard_bag_negative_vnum_is_kept_but_not_relistable(self) -> None:
+        engine = Engine()
+        engine.feed_text("RECV", "inv 1 0.-1247.23")
+        slot = engine.world.inventory[1][0]
+        self.assertEqual((slot.vnum, slot.quantity), (-1247, 23))
+        self.assertEqual(slot.amount, 23)
+        self.assertIsNone(engine.world.find_inventory(1, -1247))
 
     def test_self_name(self) -> None:
         engine = Engine()
@@ -462,6 +499,35 @@ class ControllerTests(unittest.TestCase):
         controller.tick(engine.world)
         self.assertFalse([p for p in sent if p.startswith("c_reg ")])
         self.assertEqual(controller.results["bubbl"].status, "quantity")
+
+    def test_relist_equipment_quantity_zero_counts_as_one(self) -> None:
+        # Equip-bag rows carry quantity 0; the slot still holds one item and
+        # c_reg takes its tab/slot, so amount 1 must be accepted.
+        item = BazarItem(
+            "hat",
+            build_search_packet([885]),
+            vnum=885,
+            inv_tab=0,
+            amount=1,
+            min_price=1,
+        )
+        controller, engine, clock, sent = self._controller(
+            [item], character="root1"
+        )
+        engine.feed_text("RECV", "inv 0 30.885.0.0.0.0.0")
+        self._open(controller, engine, clock, relist=True)
+        controller.tick(engine.world)
+        engine.feed(
+            Packet(Kind.RECV, _response(44000, "Other"), clock.now)
+        )
+        controller.tick(engine.world)
+        register = [p for p in sent if p.startswith("c_reg ")]
+        self.assertEqual(
+            register, ["c_reg 0 0 30 9 4 1 0 1 43999 21 2"]
+        )
+        self.assertEqual(
+            controller.results["hat"].status, "register-sent"
+        )
 
     def test_relist_rejects_a_cheapest_foreign_vnum(self) -> None:
         item = BazarItem(

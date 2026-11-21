@@ -4,7 +4,7 @@
 #   ./linux/scripts/readme-shots.sh [output-dir] [mode]
 #
 # With no mode, all screenshots are regenerated. A single mode
-# (map|packets|picker|spells|bazar) regenerates just that image.
+# (map|packets|picker|spells|bazar|inventory) regenerates just that image.
 # Needs Xvfb, xdotool and ffmpeg. The window runs against a fake packet
 # source with real map/monster data, so no game client or account is shown.
 set -euo pipefail
@@ -58,5 +58,10 @@ if should bazar; then
     # The monitor needs a moment to open Bibi Basar and finish the first
     # priced pass before the capture.
     capture bazar "$OUT/gui-bazar.png" "NosTale Packet Logger" 14
+fi
+if should inventory; then
+    # Item.dat names load once, then the inventory picker is presented over
+    # the NosBazar tab.
+    capture inventory "$OUT/gui-inventory.png" "Inventory" 14
 fi
 echo "screenshots written to $OUT"

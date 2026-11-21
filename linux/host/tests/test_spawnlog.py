@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from ntpl.engine import InventorySlot
 from ntpl.spawnlog import (
     _log_head_lines,
     _open_log_tail,
@@ -233,15 +234,39 @@ class SpawnLogTests(unittest.TestCase):
     def test_inventory_replays_updates_and_gold(self):
         log = self._write(
             "02:02:16.473 [RECV] inv 2 0.2115.5 1.2282.11 2.0.0\r\n"
+            "02:02:17.473 [RECV] inv 0 42.884.0.0.0.0.0 "
+            "63.-4962.5.7.1.0.0\r\n"
+            "02:02:18.473 [RECV] inv 1 4.1323.1 5.2282.7\r\n"
+            "02:02:19.473 [RECV] inv 6 0.905.0.5.0\r\n"
             "02:02:16.473 [RECV] gold 34661 0\r\n"
             "06:48:48.421 [RECV] ivn 2 1.2282.10.0\r\n"
-            "06:48:49.421 [RECV] ivn 2 0.0.0.0\r\n"
-            "06:48:50.421 [RECV] inv 2\r\n"
-            "06:48:51.421 [RECV] inv 1 4.1323.1\r\n"
+            # Standard bag: quantity 0 removes the slot.
+            "06:48:49.421 [RECV] ivn 1 5.2282.0.0\r\n"
+            # Equipment: quantity 0 is an occupied row, vnum 0 removes it.
+            "06:48:50.421 [RECV] ivn 0 30.885.0.0.0.0.0\r\n"
+            "06:48:51.421 [RECV] ivn 0 30.0.0.0.0.0.0\r\n"
+            "06:48:52.421 [RECV] inv 2\r\n"
         )
         bags, gold = load_inventory(log)
-        self.assertEqual(bags, {2: {}, 1: {4: (1323, 1)}})
         self.assertEqual(gold, 34661)
+        # `inv 2` with no tokens clears the bag.
+        self.assertEqual(bags[2], {})
+        # The standard quantity-0 update removed slot 5.
+        self.assertEqual(bags[1], {4: InventorySlot(1, 4, 1323, 1)})
+        # Equipment tokens keep their extra fields and quantity 0 (bag 6).
+        self.assertEqual(
+            bags[6], {0: InventorySlot(6, 0, 905, 0, ("5", "0"))}
+        )
+        # Bag 0 keeps both the quantity-0 row and the negative vnum; the
+        # vnum-0 update removed slot 30.
+        self.assertNotIn(30, bags[0])
+        self.assertEqual(bags[0][42].fields, ("0", "0", "0", "0"))
+        self.assertEqual(bags[0][42].amount, 1)
+        self.assertEqual(
+            bags[0][63],
+            InventorySlot(0, 63, -4962, 5, ("7", "1", "0", "0")),
+        )
+        self.assertEqual(bags[0][63].amount, 5)
 
 
 class ClientLogPathTests(unittest.TestCase):

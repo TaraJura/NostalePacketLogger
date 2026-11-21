@@ -10,6 +10,10 @@ client:
 2. **Relist** — for an item in the inventory, undercut the cheapest other
    seller by one gold and send `c_reg`, never below the configured
    `min_price` floor.
+3. **Inventory scan** — list every slot the client reports, with the Item.dat
+   name, bag/slot, vnum, quantity, equipment fields, NPC price and known ND
+   cost; add items you already own to the monitor, or price the whole
+   inventory in one action.
 
 The packet formats and live captures are in
 [protocol/bazaar.md](protocol/bazaar.md).
@@ -21,7 +25,16 @@ The packet formats and live captures are in
    client learns the map-specific NPC entity id and the dialog option from
    your own `npc_req`/`n_run` packets (or from this client's DLL log if the
    GUI attached later). The id appears in **Bibi id** on the tab.
-3. Add items in the right-hand **Item editor**:
+3. To add items you already own, use the **Inventory** frame:
+   - **Scan inventory…** lists every slot from the live `inv`/`ivn` stream
+     (backfilled from the DLL log after a late attach) with the Item.dat
+     name, bag/slot, vnum, quantity, equipment fields, NPC price and known
+     ND cost. Search by name or vnum, select rows and **Add selected**, or
+     **Add all & monitor**.
+   - **Price all** adds one search per distinct inventory item and starts
+     Monitor. It never relists (that is a separate mode), and each search
+     keeps the 2.5 s pacing, so a large inventory takes a while per pass.
+4. Add items in the right-hand **Item editor**:
    - **Name** — display label only; the server searches by vnum. Item names
      are rendered in full (wrapped, never ellipsized) in both the Items list
      and the results table. The **Copy** button next to Name puts the full
@@ -44,7 +57,7 @@ The packet formats and live captures are in
      timeout, or no answer yet; untick it to see those rows at the bottom.
    - **Advanced c_reg fields** — the reference's `unk1=9`, `unk2=4`,
      `durability=1`, `medal=2`; change only if a captured packet differs.
-4. To find more items, click **Import NosMall…**: it lists only catalog
+5. To find more items, click **Import NosMall…**: it lists only catalog
    groups with a **known ND cost** and excludes pets, fairies and partner
    supplies (currently 18 of 1,184 groups). A group without a cost cannot
    show a profit, so it is not offered at all. Search by name or vnum, then
@@ -57,10 +70,10 @@ The packet formats and live captures are in
    pet/fairy/partner row, is deleted (priced ordinary items are kept). The
    unfiltered full catalog can still be exported with
    `PYTHONPATH=linux/host python3 -m ntpl db nosmall --export ~/bazar-nosmall-all.json --all`.
-5. Click **Monitor Start**. The tab opens the bazaar if needed, searches one
+6. Click **Monitor Start**. The tab opens the bazaar if needed, searches one
    item at a time (2.5 s pacing), retries timed-out items once, then refreshes
    after **Refresh (s)** (default 30).
-6. To relist, tick **Allow live re-listing**, fill **Character** (your own
+7. To relist, tick **Allow live re-listing**, fill **Character** (your own
    name, so your listing is never undercut), then **Relist Start**.
 
 ## What the controller does
@@ -92,6 +105,49 @@ The packet formats and live captures are in
 The bazaar/entity state lives in `WorldState.bazar`; inventory slots are
 `WorldState.inventory` (`bag → slot → InventorySlot`), gold is
 `WorldState.gold`. `WorldState.find_inventory(tab, vnum)` is what relist uses.
+
+## Inventory scan
+
+![NosBazar inventory picker: every owned slot with Item.dat name, bag/slot, vnum, quantity, equipment fields, NPC price and known ND cost](assets/gui-inventory.png)
+
+The engine keeps **every** bag the server sends, not only the Main/Etc bags
+relisting uses. Live captures (2026-11-20) show:
+
+```
+inv 1 0.2174.5 1.1362.10 2.-2072.4        # Main: slot.vnum.quantity
+inv 0 27.-4962.5.7.1.0.0 30.885.0.0.0.0.0  # Equip: 7 fields
+inv 6 0.905.0.5.0 1.906.0.5.0              # bags 6/7: 5 fields
+ivn 0 30.885.0.0.0.0.0                     # one equipment slot
+```
+
+- Bags `0` Equip, `1` Main, `2` Etc are named; the live server also sends
+  equipment-style bags `6` and `7`, shown as **Bag 6**/**Bag 7**.
+- Equipment tokens carry extra dot fields after quantity. The engine does not
+  decode them; it keeps them verbatim in `InventorySlot.fields` and the
+  picker shows them as **fields 7.1.0.0**.
+- An equipment row with **quantity 0** is occupied and counts as one item;
+  the server removes it with `ivn <bag> <slot>.0…`, not quantity 0. Standard
+  bags keep the documented rule: quantity 0 removes the slot.
+- **Negative vnums** are limited/bound ids. They are stored for display and
+  scanned by their absolute template vnum, but `find_inventory` never returns
+  them, so `c_reg` relisting skips them.
+- Names, NPC prices and categories come from `Item.dat`
+  (`nosmall.load_item_info`), parsed once in a worker thread. The picker shows
+  the full name, `Bag slot · vnum · qty`, the raw equipment fields, the NPC
+  gold price and any known ND cost from the curated NosMall price map or an
+  item already configured with a cost.
+- **Add selected** and **Add all & monitor** group slots by `abs(vnum)`: one
+  bazaar item per distinct template, never a duplicate of an item already in
+  the list. The representative slot is Main, then Etc, then Equip; its
+  quantity becomes the listing `amount` (clamped to 1,000), and its bag
+  becomes `inv_tab` when it is 0/1/2 with a positive vnum. A negative-only
+  group is monitor-only (no tab, amount 1).
+- A new item gets a known ND cost when the curated map or the configured list
+  has one; otherwise a positive Item.dat NPC price becomes **NPC gold** cost,
+  so the profit column still works. Both can be cleared in the editor.
+- **Price all** adds every distinct inventory item and starts **Monitor**
+  (search only). It does not change listings even when live re-listing is
+  armed; use **Relist Start** for that.
 
 ## Configuration
 
@@ -148,9 +204,20 @@ Example:
   a slot in the chosen inventory bag with at least the configured amount, and
   a cheapest listing whose vnum is inside the searched group. It never
   undercuts your own listing.
-- **Monitor never sends `c_reg`.** The smoke asserts this.
+- **Monitor never sends `c_reg`.** The smoke asserts this; **Price all** also
+  starts Monitor, so pricing an inventory cannot change a listing.
 - **Pacing**: do not lower the 2.5 s search interval; the game silently drops
-  faster `c_blist` packets.
+  faster `c_blist` packets. A 100-item inventory therefore takes about four
+  minutes per pass, plus the refresh wait.
+- **Inventory scan duplicates**: items already covered by a configured search
+  packet or `item.vnum` (compared by absolute vnum) are skipped, so pressing
+  **Price all** twice never duplicates rows.
+- **Late attach**: inventory comes from the live `inv`/`ivn` stream and, for
+  packets missed before the GUI attached, from the client's own DLL log tail.
+  If both are empty the tab says “No inventory data yet”; relog or open the
+  inventory once. Rescan re-reads the log.
+- **Bound items**: negative vnums are display/search only; they cannot be
+  relisted because `find_inventory` matches positive template vnums.
 - **Truncated answers**: the DLL copies at most 2048 bytes per packet, so a
   long `rc_blist` is cut mid-entry. The parser keeps every intact entry, uses
   the minimum visible price and marks the answer `truncated`.
@@ -181,9 +248,14 @@ make -C linux bot-test     # includes gui_bazar_smoke.py
 
 `test_bazar.py` covers the real 15-field `rc_blist` shape (including a
 truncated tail and double spaces), the open sequence, pacing, retry/waiting
-behaviour, response cross-talk and the relist floor/own/slot/vnum checks.
+behaviour, response cross-talk, the relist floor/own/slot/vnum checks and the
+equipment amount-0 rule. `test_bazar_inventory.py` covers the inventory
+planner: duplicate collapse, negative/absolute vnums, bag preference,
+tracked-skip, unique names, cost precedence and the amount clamp.
 `gui_bazar_smoke.py` spawns a fake Bibi NPC, answers the open and one search,
 and asserts the profit column and that no `c_reg` was sent.
 `gui_bazar_relist_smoke.py` checks that the live-relist gate blocks the first
 attempt and then asserts the exact `c_reg` packet and the `register-sent`
-status.
+status. `gui_inventory_scan_smoke.py` feeds the live inventory shapes
+(3/5/7-field tokens, quantity 0, negative vnums), asserts the picker names and
+fields, adds one item and then prices the whole inventory without duplicates.

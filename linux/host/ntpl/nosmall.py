@@ -109,6 +109,16 @@ class NosMallGroup:
         }
 
 
+@dataclass(frozen=True)
+class ItemInfo:
+    """One ``Item.dat`` row: localized name, NPC price and category."""
+
+    vnum: int
+    name: str
+    npc_price: int = 0
+    category: int = 0
+
+
 #: NosMall record categories that only hold companions and their supplies.
 PET_KINDS = frozenset({2, 4})
 #: Name words for pet/fairy/partner items whose record category is the
@@ -201,6 +211,64 @@ def load_item_names(
     }
 
 
+def load_item_info(
+    gtd_path: str | Path | None = None,
+    lang_dir: str | Path | None = None,
+) -> dict[int, ItemInfo]:
+    """Return ``{item_vnum: ItemInfo}`` from ``Item.dat``.
+
+    ``Item.dat`` rows carry a leading tab before the keyword::
+
+        \tVNUM\t2174\t3000
+        \tNAME\tzts...
+        \tTYPE\t0\t1
+
+    ``VNUM[0]`` is the item vnum and ``VNUM[1]`` its NPC shop price;
+    ``TYPE[0]`` is the item category.  Names are resolved once through
+    :func:`load_item_names`; an item without a localized name gets the
+    ``item <vnum>`` fallback.  Missing or unreadable client data returns an
+    empty table, like :func:`load_item_names`.
+    """
+    source = (
+        Path(gtd_path)
+        if gtd_path is not None
+        else default_monster_data_path()
+    )
+    try:
+        entries = read_archive_entries(
+            source.read_bytes(), wanted={"item.dat"}
+        )
+    except (OSError, MonsterNameError):
+        return {}
+    item_text = next(
+        (
+            content
+            for name, content in entries.items()
+            if name.lower() == "item.dat"
+        ),
+        None,
+    )
+    if not item_text:
+        return {}
+
+    names = load_item_names(source, lang_dir)
+    info: dict[int, ItemInfo] = {}
+    for record in _parse_records(item_text.decode("cp1252", "replace")):
+        values = _ints(record.get("VNUM", []), 2)
+        if not values or values[0] <= 0:
+            continue
+        vnum = values[0]
+        npc_price = values[1] if len(values) > 1 and values[1] > 0 else 0
+        types = _ints(record.get("TYPE", []), 1)
+        info[vnum] = ItemInfo(
+            vnum=vnum,
+            name=names.get(vnum) or f"item {vnum}",
+            npc_price=npc_price,
+            category=types[0] if types else 0,
+        )
+    return info
+
+
 def _nosmall_text(
     gtd_path: str | Path | None = None,
     lang_dir: str | Path | None = None,
@@ -236,7 +304,13 @@ def _parse_records(text: str) -> list[dict[str, list[str]]]:
         if "\t" not in line:
             continue
         fields = line.split("\t")
-        current[fields[0]] = fields[1:]
+        # Item.dat records put a leading tab before the keyword; NosMall
+        # records do not. Normalise both.
+        while fields and not fields[0].strip():
+            fields = fields[1:]
+        if not fields:
+            continue
+        current[fields[0].strip()] = fields[1:]
     if current:
         records.append(current)
     return records

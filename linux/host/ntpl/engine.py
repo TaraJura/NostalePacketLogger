@@ -85,15 +85,70 @@ class CharacterStats:
 class InventorySlot:
     """One occupied inventory slot.
 
-    Bags: ``0`` Equip, ``1`` Main, ``2`` Etc.  The server sends the whole bag
-    as ``inv <bag> <slot>.<vnum>.<quantity>...`` at login and updates a single
-    slot with ``ivn <bag> <slot>.<vnum>.<quantity>.<unknown>``.
+    Bags: ``0`` Equip, ``1`` Main, ``2`` Etc; the live server also sends
+    equipment-style bags ``6`` and ``7``.  The server sends the whole bag as
+    ``inv <bag> <slot>.<vnum>.<quantity>...`` at login and updates a single
+    slot with ``ivn <bag> <slot>.<vnum>.<quantity>...``.  Equipment bags
+    append extra dot fields that the engine does not decode; they are kept
+    in :attr:`fields` so the row can still be displayed.  Negative vnums
+    are limited/bound items, and quantity 0 is normal for an occupied
+    equipment slot.
     """
 
     bag: int
     index: int
     vnum: int
     quantity: int
+    #: Extra dot fields after quantity, e.g. ``('7', '1', '0', '0')``.
+    fields: tuple[str, ...] = ()
+
+    @property
+    def amount(self) -> int:
+        """Stack size; an equipment row with quantity 0 still holds one."""
+        return self.quantity if self.quantity > 0 else (1 if self.fields else 0)
+
+
+def parse_inventory_token(
+    bag: int, token: str
+) -> tuple[int, InventorySlot | None] | None:
+    """Parse one ``slot.vnum.quantity[.<extra>...]`` inventory token.
+
+    Returns ``(slot_index, slot)`` for an occupied slot, ``(slot_index,
+    None)`` for an empty/removal token, and ``None`` for a malformed token.
+
+    Equipment bags (0 Equip and the 6/7 costume bags) carry extra fields
+    and may report quantity 0 for an occupied slot.  Standard bags use
+    three fields in ``inv`` and add one unknown field in ``ivn``, where
+    quantity 0 means the slot was emptied.  Negative vnums are
+    limited/bound items: they are kept for display, while
+    :meth:`WorldState.find_inventory` never returns them.
+    """
+    fields = token.split(".")
+    if len(fields) < 3:
+        return None
+    try:
+        index = int(fields[0])
+        vnum = int(fields[1])
+        quantity = int(fields[2])
+    except ValueError:
+        return None
+    if index < 0:
+        return None
+    # A standard `ivn` token has a fourth (unknown) field, so the field
+    # count alone cannot tell equipment from a normal bag: a 4-field token
+    # is a standard update, while equipment bags use 5+ fields and keep
+    # quantity 0.
+    equipment_style = bag in (0, 6, 7) or len(fields) >= 5
+    if vnum == 0:
+        return index, None
+    if not equipment_style and quantity <= 0:
+        return index, None
+    if equipment_style and quantity < 0:
+        return index, None
+    # Standard `ivn` tokens append one always-zero unknown field; only the
+    # equipment bags carry fields worth keeping and showing.
+    extra = tuple(fields[3:]) if equipment_style else ()
+    return index, InventorySlot(bag, index, vnum, quantity, extra)
 
 
 @dataclass
@@ -200,11 +255,16 @@ class WorldState:
         return self.player_names.get(self.self_id)
 
     def find_inventory(self, bag: int, vnum: int) -> InventorySlot | None:
-        """First occupied slot of ``vnum`` in ``bag``, lowest slot index first."""
+        """First relistable slot of ``vnum`` in ``bag``, lowest index first.
+
+        Negative vnums (limited/bound equipment) are stored for display but
+        never returned here, and neither is an empty row: only a real,
+        positive stack can be relisted.
+        """
         slots = self.inventory.get(bag, {})
         for index in sorted(slots):
             slot = slots[index]
-            if slot.vnum == vnum and slot.quantity > 0:
+            if slot.vnum == vnum and slot.vnum > 0 and slot.amount > 0:
                 return slot
         return None
 
@@ -241,8 +301,9 @@ Handler = Callable[[WorldState, Packet], None]
 
 def _on_inventory(world: WorldState, packet: Packet) -> None:
     # inv <bag> <slot>.<vnum>.<quantity>[.<...>] ...
-    # inv 0 (Equip) has seven fields per slot, inv 1/2 three; only the first
-    # three are the slot index, template vnum and quantity.
+    # inv 0 (Equip) has seven fields per slot, inv 1/2 three, bags 6/7 five.
+    # The parser keeps the extra equipment fields and negative vnums; empty
+    # tokens just leave their index out of the rebuilt bag.
     args = packet.args
     if not args:
         return
@@ -252,25 +313,20 @@ def _on_inventory(world: WorldState, packet: Packet) -> None:
         return
     slots: dict[int, InventorySlot] = {}
     for token in args[1:]:
-        fields = token.split(".")
-        if len(fields) < 3:
-            continue
-        try:
-            index, vnum, quantity = (
-                int(fields[0]),
-                int(fields[1]),
-                int(fields[2]),
-            )
-        except ValueError:
-            continue
-        if index < 0 or vnum <= 0 or quantity <= 0:
-            continue
-        slots[index] = InventorySlot(bag, index, vnum, quantity)
+        parsed = parse_inventory_token(bag, token)
+        if parsed is None:
+            continue  # malformed token
+        index, slot = parsed
+        if slot is None:
+            continue  # removal/empty token
+        slots[index] = slot
     world.inventory[bag] = slots
 
 
 def _on_inventory_update(world: WorldState, packet: Packet) -> None:
-    # ivn <bag> <slot>.<vnum>.<quantity>.<unknown>[...]
+    # ivn <bag> <slot>.<vnum>.<quantity>[.<...>] -- one slot or a removal.
+    # Equipment quantity 0 is a normal occupied row, so the parser (not this
+    # handler) decides which tokens empty the slot.
     args = packet.args
     if len(args) < 2:
         return
@@ -278,24 +334,15 @@ def _on_inventory_update(world: WorldState, packet: Packet) -> None:
         bag = int(args[0])
     except ValueError:
         return
-    fields = args[1].split(".")
-    if len(fields) < 3:
+    parsed = parse_inventory_token(bag, args[1])
+    if parsed is None:
         return
-    try:
-        index, vnum, quantity = (
-            int(fields[0]),
-            int(fields[1]),
-            int(fields[2]),
-        )
-    except ValueError:
-        return
+    index, slot = parsed
     slots = world.inventory.setdefault(bag, {})
-    if index < 0:
-        return
-    if vnum <= 0 or quantity <= 0:
+    if slot is None:
         slots.pop(index, None)
     else:
-        slots[index] = InventorySlot(bag, index, vnum, quantity)
+        slots[index] = slot
 
 
 def _on_gold(world: WorldState, packet: Packet) -> None:

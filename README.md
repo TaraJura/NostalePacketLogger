@@ -57,6 +57,14 @@ workflow of [`TaraJura/Nostale-NB`](https://github.com/TaraJura/Nostale-NB):
   character name, a positive floor and an inventory slot must be known. The
   status reports `register sent (no ack)` because the server sends no
   confirmation for `c_reg`.
+- **Inventory scan** — the **Inventory** frame lists every slot the client
+  reports (Main/Etc, Equip, and the extra equipment bags 6/7), with the
+  Item.dat name, bag/slot, vnum, quantity, equipment fields, NPC price and
+  known ND cost. **Scan inventory…** opens a searchable picker for adding
+  just what you own (one bazaar search per distinct item, no duplicates);
+  **Price all** adds every inventory item and starts Monitor. Equipment rows
+  with quantity 0 count as one, and bound negative vnums are searched by
+  their absolute template. The scan never relists.
 - **Copy names** — right-click an item row in the **Items** list or a result
   row, or use the **Copy** button next to **Name**, to put the full item name
   on the clipboard.
@@ -79,10 +87,10 @@ the catalog/database side is in [docs/database.md](docs/database.md).
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 293 Python unit tests
+make -C linux host-test                      # 308 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux gui-test                       # headless GTK4 smokes (xvfb)
-make -C linux bot-test                       # 40 fake-server bot smokes
+make -C linux bot-test                       # 41 fake-server bot smokes
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path
 linux/scripts/dev-test-wine.sh 25
@@ -118,10 +126,11 @@ Start with [docs/architecture.md](docs/architecture.md), then:
   conditional spell rules and JSON export/import
 - [docs/family.md](docs/family.md) — the **Family** tab: `%Familyinvite`
   packet, server confirmation and live test accounts
-- [docs/bazar.md](docs/bazar.md) — the **NosBazar** tab: cheapest-listing
-  monitor with gold/ND and NPC markup, plus floor-protected relisting
-  (ported from `TaraJura/Nostale-NB`); packet formats in
-  [docs/protocol/bazaar.md](docs/protocol/bazaar.md)
+- [docs/bazar.md](docs/bazar.md) — the **NosBazar** tab: inventory scan,
+  cheapest-listing monitor with gold/ND and NPC markup, plus floor-protected
+  relisting (ported from `TaraJura/Nostale-NB`); packet formats in
+  [docs/protocol/bazaar.md](docs/protocol/bazaar.md) and
+  [docs/protocol/inventory.md](docs/protocol/inventory.md)
 - [docs/database.md](docs/database.md) — local SQLite **game + packet
   database** built from the client archives and public NosTale projects;
   includes the full NosMall catalog and an import picker in the tab
@@ -147,8 +156,8 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 293 unit tests pass, the five GTK4 window smokes
-and 40 bot smoke tests pass, and the real injector has been run against
+The Linux port builds, its 308 unit tests pass, the five GTK4 window smokes
+and 41 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 
 - both hooks `ACTIVE` (`recv=0x004DBB4D send=0x004EB5C4 tnt=0x0055AA84`),
@@ -175,10 +184,10 @@ is controlled by the `rest` packet. Some targets are still ignored (blocked
 tile/entity); the bot stops after three rejected steps.
 
 The **NosBazar** tab (fourth page) is described in
-[NosBazar](#nosbazar) above: cheapest-listing monitor, profit-sorted results,
-floor-protected relisting and the priced, non-pet NosMall importer. Each
-client keeps its own `~/.config/ntpl/bazar-<pid>.json`; see
-[docs/bazar.md](docs/bazar.md).
+[NosBazar](#nosbazar) above: inventory scan and price-all, cheapest-listing
+monitor, profit-sorted results, floor-protected relisting and the priced,
+non-pet NosMall importer. Each client keeps its own
+`~/.config/ntpl/bazar-<pid>.json`; see [docs/bazar.md](docs/bazar.md).
 
 The **Family** tab (fifth page) invites members with the client's own
 `%Familyinvite <name>` command, mirrors the same command when it is typed in

@@ -23,6 +23,8 @@ import os
 import re
 from pathlib import Path
 
+from .engine import InventorySlot, parse_inventory_token
+
 _IN_MARKER = "[RECV] in "
 _GIDX_MARKER = "[RECV] gidx "
 _PAIRY_MARKER = "[RECV] pairy "
@@ -729,16 +731,18 @@ def load_bazaar_open(
 
 def load_inventory(
     path: str | Path | None = None,
-) -> tuple[dict[int, dict[int, tuple[int, int]]], int | None]:
+) -> tuple[dict[int, dict[int, InventorySlot]], int | None]:
     """Replay the log's ``inv``/``ivn``/``gold`` lines.
 
     A host that attaches after login misses the login inventory dump.  The
     DLL's log still has it, so a relist can find item slots without another
-    relog.  Returns ``({bag: {slot: (vnum, quantity)}}, gold)``; a bag that
-    was never sent is absent rather than empty.
+    relog.  Returns ``({bag: {slot: InventorySlot}}, gold)``; a bag that was
+    never sent is absent rather than empty.  Tokens go through the engine's
+    own parser, so equipment bags keep their extra fields, quantity 0 and
+    negative (limited/bound) vnums exactly as the live handlers do.
     """
     source = Path(path) if path is not None else default_log_path()
-    bags: dict[int, dict[int, tuple[int, int]]] = {}
+    bags: dict[int, dict[int, InventorySlot]] = {}
     gold: int | None = None
     if source is None:
         return bags, gold
@@ -758,21 +762,14 @@ def load_inventory(
                     bag = int(tokens[0])
                 except ValueError:
                     continue
-                slots: dict[int, tuple[int, int]] = {}
+                slots: dict[int, InventorySlot] = {}
                 for token in tokens[1:]:
-                    fields = token.split(".")
-                    if len(fields) < 3:
+                    parsed = parse_inventory_token(bag, token)
+                    if parsed is None:
                         continue
-                    try:
-                        index, vnum, quantity = (
-                            int(fields[0]),
-                            int(fields[1]),
-                            int(fields[2]),
-                        )
-                    except ValueError:
-                        continue
-                    if index >= 0 and vnum > 0 and quantity > 0:
-                        slots[index] = (vnum, quantity)
+                    index, slot = parsed
+                    if slot is not None:
+                        slots[index] = slot
                 bags[bag] = slots
                 continue
             if _IVN_MARKER in line:
@@ -784,24 +781,15 @@ def load_inventory(
                     bag = int(tokens[0])
                 except ValueError:
                     continue
-                fields = tokens[1].split(".")
-                if len(fields) < 3:
+                parsed = parse_inventory_token(bag, tokens[1])
+                if parsed is None:
                     continue
-                try:
-                    index, vnum, quantity = (
-                        int(fields[0]),
-                        int(fields[1]),
-                        int(fields[2]),
-                    )
-                except ValueError:
-                    continue
+                index, slot = parsed
                 slots = bags.setdefault(bag, {})
-                if index < 0:
-                    continue
-                if vnum > 0 and quantity > 0:
-                    slots[index] = (vnum, quantity)
-                else:
+                if slot is None:
                     slots.pop(index, None)
+                else:
+                    slots[index] = slot
                 continue
             values = _ints_after(line, _GOLD_MARKER, 1)
             if values and values[0] >= 0:

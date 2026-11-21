@@ -168,11 +168,17 @@ sent”, not “listed”. Confirm on a cheap item before relying on it.
 ```
 
 - `inv <bag> <slot>.<vnum>.<quantity>[.<…>] …` sends the whole bag; `ivn`
-  updates or removes one slot (vnum or quantity 0 removes it).
-- Bags: `0` Equip, `1` Main, `2` Etc. The first three dot fields are the slot
-  index, template vnum and quantity. Equip entries have additional fields and
-  negative ids for some limited items; the port ignores non-positive vnums.
+  updates or removes one slot. In a standard bag (1/2) quantity 0 removes the
+  slot; in an equipment bag (0/6/7) quantity 0 is a normal occupied row and
+  vnum 0 removes it (see [inventory.md](inventory.md)).
+- Bags: `0` Equip, `1` Main, `2` Etc, plus equipment-style `6`/`7`. The first
+  three dot fields are the slot index, template vnum and quantity. Equip
+  entries have additional fields and negative ids for some limited/bound
+  items. The port **keeps** both: the NosBazar inventory scan shows the raw
+  fields, searches `abs(vnum)` for a bound item, and relisting skips negative
+  vnums because `find_inventory` matches positive templates only.
 - The server sends the full inventory at login and after some item changes. A
   host that attaches later replays the log (`spawnlog.load_inventory`); if no
   dump is in the log, relist reports "not in inventory" until the character
-  relogs or the bag is sent again.
+  relogs or the bag is sent again. The same backfill feeds the inventory scan
+  (**Rescan** re-reads it).

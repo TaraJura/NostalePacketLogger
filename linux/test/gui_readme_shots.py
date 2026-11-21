@@ -5,7 +5,7 @@ opens the real GTK4 window against a real map from NStcData, draws a route,
 spawns a few monsters with their real names, and leaves the window on screen
 for ``linux/scripts/readme-shots.sh`` to capture with ffmpeg/Xvfb.
 
-    NTPL_SHOT_MODE=map|packets|picker|spells|bazar \
+    NTPL_SHOT_MODE=map|packets|picker|spells|bazar|inventory \
         PYTHONPATH=linux/host python3 linux/test/gui_readme_shots.py
 """
 
@@ -124,7 +124,7 @@ def start_fake_client(scene) -> int:
     port = listener.getsockname()[1]
     first, middle, last = path[len(path) // 4], path[len(path) // 2], path[-1]
     player = path[len(path) // 3]
-    bazar_mode = MODE == "bazar"
+    bazar_mode = MODE in ("bazar", "inventory")
     lines = [
         "STATUS|ready",
         "RECV|walk 1 2 3 4",
@@ -150,10 +150,23 @@ def start_fake_client(scene) -> int:
                 f"RECV|in 1 BotMule - {CHAR_ID} {start[0]} {start[1]} 2 0 0 0",
                 f"RECV|in 2 793 9584 {start[0] + 1} {start[1]} 3 100 100 "
                 "460 0 0 -1 1 0 -1 - 0",
-                "RECV|inv 2 7.2174.5",
                 "RECV|gold 100000 0",
             ]
         )
+        if MODE == "inventory":
+            # A real mix: normal stacks, equipment rows (quantity 0 and a
+            # bound negative vnum) and the extra bags 6/7.
+            lines.extend(
+                [
+                    "RECV|inv 1 0.1362.10 1.1007.52 2.1012.40 "
+                    "3.2174.5 4.2282.11 5.1004.17",
+                    "RECV|inv 2 0.2115.5 1.2307.27",
+                    "RECV|inv 0 42.884.0.0.0.0.0 63.-4962.5.7.1.0.0",
+                    "RECV|inv 6 0.905.0.5.0",
+                ]
+            )
+        else:
+            lines.append("RECV|inv 2 7.2174.5")
     payload = ("\n".join(lines) + "\n").encode("latin-1")
     by_vnum = {
         vnum: (price, seller)
@@ -242,7 +255,7 @@ def picker_discovery(port: int) -> Discovery:
 
 
 def main() -> int:
-    if MODE == "bazar":
+    if MODE in ("bazar", "inventory"):
         # Never touch the developer's real bazar config or mirror bus.
         if not os.environ.get("NTPL_BAZAR_CONFIG"):
             handle = tempfile.NamedTemporaryFile(
@@ -265,7 +278,7 @@ def main() -> int:
     port = start_fake_client(scene)
     app = Application("127.0.0.1", port, unique=False, select_client=False)
     waypoints = [path[-1]]
-    scheduled = {"late": False, "bazar": False}
+    scheduled = {"late": False, "bazar": False, "inventory": False}
 
     def start_bazar() -> bool:
         if app.window is None:
@@ -296,6 +309,25 @@ def main() -> int:
         app._set_status(
             f"NosBazar monitor · {len(items)} priced items · "
             "cheapest listing per item"
+        )
+        return False
+
+    def start_inventory() -> bool:
+        if app.window is None or not app.engine.world.inventory:
+            return True
+        from ntpl.nosmall import load_item_info
+
+        try:
+            app.item_info = load_item_info()
+        except Exception:  # noqa: BLE001 - shot works without names
+            app.item_info = {}
+        app.item_info_loaded = True
+        app._open_inventory_picker()
+        if app.inventory_window is not None:
+            app.inventory_window.set_default_size(900, 660)
+        app._set_status(
+            "inventory · every owned slot with Item.dat name, "
+            "NPC price and known ND cost"
         )
         return False
 
@@ -383,6 +415,15 @@ def main() -> int:
             if not scheduled["bazar"]:
                 scheduled["bazar"] = True
                 GLib.timeout_add(1500, start_bazar)
+            return False
+        if MODE == "inventory":
+            if app.window is None:
+                return True
+            app.window.set_default_size(1440, 900)
+            app.notebook.set_current_page(3)
+            if not scheduled["inventory"]:
+                scheduled["inventory"] = True
+                GLib.timeout_add(1500, start_inventory)
             return False
         if app.map_grid is None or app.window is None:
             return True

@@ -15,6 +15,7 @@ from ntpl.nosmall import (
     known_reference_costs,
     load_catalog,
     load_entries,
+    load_item_info,
     load_item_names,
 )
 from ntpl.monsternames import default_monster_data_path
@@ -77,6 +78,28 @@ class NosMallCatalogTests(unittest.TestCase):
         ]
         groups = group_entries(entries)
         self.assertEqual(groups[0].kinds, (0, 2))
+
+
+class ItemInfoTests(unittest.TestCase):
+    def setUp(self) -> None:
+        if not default_monster_data_path().is_file():
+            self.skipTest("NosTale client data is not installed")
+
+    def test_item_info_reads_name_price_and_category(self) -> None:
+        info = load_item_info()
+        self.assertGreater(len(info), 7000)
+        self.assertEqual(info[2174].name, "Speech Bubble")
+        self.assertEqual(info[2174].npc_price, 3000)
+        self.assertEqual(info[1362].npc_price, 100)
+        self.assertIsInstance(info[2174].category, int)
+        for vnum, item in info.items():
+            self.assertGreater(vnum, 0)
+            self.assertTrue(item.name)
+
+    def test_item_names_still_resolve_after_record_fix(self) -> None:
+        names = load_item_names()
+        self.assertEqual(names.get(2174), "Speech Bubble")
+        self.assertEqual(names.get(1362), "Soulstone Blessing")
 
 
 class PetFilterTests(unittest.TestCase):

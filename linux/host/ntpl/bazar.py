@@ -44,7 +44,14 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, TYPE_CHECKING
+from typing import (
+    Any,
+    Callable,
+    Iterable,
+    Mapping,
+    Sequence,
+    TYPE_CHECKING,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - only for type hints
     from .engine import WorldState
@@ -423,6 +430,158 @@ class BazarItem:
             medal=_as_int(data.get("medal"), 2, 0, 1000),
             enabled=_as_bool(data.get("enabled"), True),
         )
+
+
+# -- inventory planning ---------------------------------------------
+
+
+def tracked_vnums(items: Iterable[BazarItem]) -> set[int]:
+    """Every template vnum already covered by the configuration.
+
+    ``c_blist`` searches positive template vnums, while an equip-bag slot
+    carries a negative vnum (``inv 0 27.-4962...``), so both sources are
+    compared by magnitude.
+    """
+    tracked: set[int] = set()
+    for item in items:
+        for vnum in item.vnums:
+            tracked.add(abs(int(vnum)))
+        if item.vnum is not None and item.vnum != 0:
+            tracked.add(abs(int(item.vnum)))
+    return tracked
+
+
+@dataclass
+class InventoryPlan:
+    """The result of :func:`inventory_search_items`.
+
+    ``tracked`` counts inventory vnums already configured (their slots are
+    skipped); ``slots`` counts every slot looked at, including empty or
+    invalid ones.
+    """
+
+    items: list[BazarItem] = field(default_factory=list)
+    tracked: int = 0
+    slots: int = 0
+
+
+def _slot_int(slot: object, name: str, default: int = 0) -> int:
+    try:
+        return int(getattr(slot, name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _representative_slot(group: Sequence[Any]) -> Any:
+    """The slot a later ``c_reg`` relist should reuse.
+
+    A positive vnum in Main (bag 1) wins over Etc (2) and Equip (0), because
+    ``c_reg`` accepts only those three tabs and needs a positive vnum.
+    """
+    for bag in (1, 2, 0):
+        for slot in group:
+            if (
+                _slot_int(slot, "vnum") > 0
+                and _slot_int(slot, "bag", -1) == bag
+            ):
+                return slot
+    for slot in group:
+        if _slot_int(slot, "vnum") > 0:
+            return slot
+    return group[0]
+
+
+def _known_cost(
+    mapping: Mapping[int, float] | None, vnum: int
+) -> float | None:
+    """A positive known cost from ``mapping``; anything else is unknown."""
+    if not mapping:
+        return None
+    try:
+        value = float(mapping.get(vnum))  # type: ignore[arg-type]
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _unique_name(name: str, vnum: int, taken: set[str]) -> str:
+    """Fit ``name`` in 80 chars and avoid every name in ``taken``."""
+    candidate = name[:80]
+    if candidate not in taken:
+        return candidate
+    base = name[:72]
+    candidate = f"{base} [{vnum}]"[:80]
+    counter = 2
+    while candidate in taken:
+        candidate = f"{base[:64]} [{vnum}/{counter}]"[:80]
+        counter += 1
+    return candidate
+
+
+def inventory_search_items(
+    slots: Iterable[Any],
+    names: Mapping[int, str],
+    existing: Sequence[BazarItem],
+    costs: Mapping[int, float] | None = None,
+    npc_prices: Mapping[int, int] | None = None,
+) -> InventoryPlan:
+    """Plan one NosBazar search item per occupied inventory template.
+
+    Every slot is grouped by ``abs(vnum)``, so the same item in several
+    bags/slots becomes one search.  A grouped vnum already covered by
+    ``existing`` (via a search packet or ``item.vnum``) is skipped and
+    counted in :attr:`InventoryPlan.tracked`.
+
+    The representative slot, which a later ``c_reg`` relist can use, is a
+    positive-vnum slot in Main, then Etc, then Equip.  Its ``amount`` is the
+    stack quantity clamped to 1..1000; a group with only a negative vnum
+    (equip bag) gets amount 1 and no ``inv_tab``.  ``costs`` are known ND
+    prices and ``npc_prices`` the Item.dat gold prices, used only when no ND
+    cost is known.
+    """
+    plan = InventoryPlan()
+    groups: dict[int, list[Any]] = {}
+    for slot in slots:
+        plan.slots += 1
+        vnum = _slot_int(slot, "vnum")
+        if vnum == 0 or abs(vnum) > 10**9:
+            continue
+        groups.setdefault(abs(vnum), []).append(slot)
+
+    tracked = tracked_vnums(existing)
+    taken = {item.name for item in existing}
+    for vnum in sorted(groups):
+        if vnum in tracked:
+            plan.tracked += 1
+            continue
+        representative = _representative_slot(groups[vnum])
+        slot_vnum = _slot_int(representative, "vnum")
+        tab = _slot_int(representative, "bag", -1)
+        inv_tab = tab if slot_vnum > 0 and tab in (0, 1, 2) else None
+        if slot_vnum > 0:
+            quantity = _slot_int(representative, "quantity")
+            amount = min(1000, max(1, quantity) if quantity > 0 else 1)
+        else:
+            amount = 1
+        name = (names.get(vnum) if names else None) or f"item {vnum}"
+        nos_cost = _known_cost(costs, vnum)
+        npc_cost = None if nos_cost is not None else _known_cost(
+            npc_prices, vnum
+        )
+        item = BazarItem(
+            name=_unique_name(str(name), vnum, taken),
+            search_packet=build_search_packet([vnum]),
+            vnum=vnum,
+            inv_tab=inv_tab,
+            amount=amount,
+            min_price=0,
+            nos_cost=nos_cost,
+            npc_cost=npc_cost,
+            enabled=True,
+        )
+        taken.add(item.name)
+        plan.items.append(item)
+    return plan
 
 
 @dataclass
@@ -1218,10 +1377,13 @@ class BazarController:
             quote.detail = f"vnum {item.vnum} not in tab {item.inv_tab}"
             self._log(f"{item.name}: not relisted ({quote.detail})")
             return
-        if slot.quantity < item.amount:
+        # Equipment rows report quantity 0 but hold one item; `amount`
+        # normalises that, so an equip slot can be relisted with amount 1.
+        available = max(1, slot.amount)
+        if available < item.amount:
             quote.status = "quantity"
             quote.detail = (
-                f"inventory has {slot.quantity}, amount is {item.amount}"
+                f"inventory has {available}, amount is {item.amount}"
             )
             self._log(f"{item.name}: not relisted ({quote.detail})")
             return
