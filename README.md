@@ -50,8 +50,8 @@ with a **second-level navbar**: **Inventory**, **Relist**, **Monitor**,
   the extra equipment bags 6/7) with the Item.dat name, bag/slot, vnum,
   quantity, equipment fields, NPC price and known ND cost. Search by name or
   vnum; **Set up relist…** adds one checked item with its exact vnum/tab/amount
-  and opens Relist; **Add selected** adds checked items; **Add all &
-  monitor**/**Price all** add every distinct item and start Monitor.
+  and opens Relist; **Add selected** adds checked items; **Add all** adds
+  every distinct item; **Price all** also starts Monitor.
   Equipment quantity 0 counts as one; bound negative vnums are searched by
   their absolute template but cannot be relisted. If the server's login dump
   was missed, the list is empty or marked **partial** — relog once with the

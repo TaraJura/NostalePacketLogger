@@ -3299,17 +3299,13 @@ class Application(Gtk.Application):
             lambda *_: self._inventory_add(self._inventory_checked_slots()),
         )
         buttons.append(self._inventory_add_button)
-        self._inventory_add_all_button = Gtk.Button(
-            label="Add all & monitor"
-        )
+        self._inventory_add_all_button = Gtk.Button(label="Add all")
         self._inventory_add_all_button.set_tooltip_text(
-            "Add every inventory item and start the bazaar monitor."
+            "Add every inventory item without starting the monitor."
         )
         self._inventory_add_all_button.connect(
             "clicked",
-            lambda *_: self._inventory_add(
-                self._inventory_slots(), start=True
-            ),
+            lambda *_: self._inventory_add(self._inventory_slots()),
         )
         buttons.append(self._inventory_add_all_button)
         self._inventory_setup_button = Gtk.Button(
@@ -3337,9 +3333,10 @@ class Application(Gtk.Application):
                 "are limited/bound ids and cannot be relisted; their "
                 "template is still searched. Add selected adds one "
                 "bazaar item per distinct item; Set up relist adds the "
-                "checked item and opens its relist settings; Add all & "
-                "monitor adds every inventory item and starts Monitor. "
-                "The server sends the inventory only at login: if it is "
+                "checked item and opens its relist settings; Add all adds "
+                "every inventory item; Price all adds every item and "
+                "starts Monitor. The server sends the inventory only at "
+                "login: if it is "
                 "missing or marked partial, relog or change channel with "
                 "this window open. The last complete inventory is cached "
                 "per character, so a later attach survives log "

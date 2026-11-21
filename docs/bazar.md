@@ -40,8 +40,8 @@ full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
      exact vnum, tab and stack amount and opens the **Relist** section with
      that item selected;
    - **Add selected** — adds the checked items to the monitor list;
-   - **Add all & monitor** / **Price all** — add every distinct item and
-     start Monitor (search only, never relisting).
+   - **Add all** adds every distinct item; **Price all** adds every item and
+     starts Monitor (search only, never relisting).
    If the list is empty or marked **partial**, the login dump was missed:
    relog once with the window open and it fills automatically (then it is
    cached for later attaches).
@@ -122,7 +122,7 @@ ivn 0 30.885.0.0.0.0.0                     # one equipment slot
   the full name, `Bag slot · vnum · qty`, the raw equipment fields, the NPC
   gold price and any known ND cost from the curated NosMall price map or an
   item already configured with a cost.
-- **Add selected** and **Add all & monitor** group slots by `abs(vnum)`: one
+- **Add selected** and **Add all** group slots by `abs(vnum)`: one
   bazaar item per distinct template, never a duplicate of an item already in
   the list. The representative slot is Main, then Etc, then Equip; its
   quantity becomes the listing `amount` (clamped to 1,000), and its bag
