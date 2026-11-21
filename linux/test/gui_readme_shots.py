@@ -166,7 +166,15 @@ def start_fake_client(scene) -> int:
                 ]
             )
         else:
-            lines.append("RECV|inv 2 7.2174.5")
+            # A complete core inventory (bags 0/1/2) keeps the Inventory
+            # frame from being marked partial in the demo shot.
+            lines.extend(
+                [
+                    "RECV|inv 0 30.885.0.0.0.0.0",
+                    "RECV|inv 1 7.2174.5",
+                    "RECV|inv 2 0.2115.5",
+                ]
+            )
     payload = ("\n".join(lines) + "\n").encode("latin-1")
     by_vnum = {
         vnum: (price, seller)
@@ -265,6 +273,10 @@ def main() -> int:
             os.environ["NTPL_BAZAR_CONFIG"] = handle.name
         os.environ.setdefault(
             "NTPL_MIRROR_DIR", tempfile.mkdtemp(prefix="ntpl-shot-mirror-")
+        )
+        os.environ.setdefault(
+            "NTPL_INVENTORY_DIR",
+            tempfile.mkdtemp(prefix="ntpl-shot-inventory-"),
         )
         # A full demo table should be on screen when the capture runs, not a
         # half-finished 2.5 s-paced pass.

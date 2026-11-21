@@ -86,10 +86,13 @@ from .mirror import (
 from .nosmall import ItemInfo, load_item_info
 from .spawnlog import (
     client_log_path,
+    inventory_cache_path,
     load_bazaar_open,
     load_gates,
     load_inventory as load_log_inventory,
+    load_inventory_cache,
     load_last_position,
+    log_inventory_bags,
     load_player_metadata,
     load_player_spawns,
     load_portals as load_log_portals,
@@ -97,6 +100,8 @@ from .spawnlog import (
     load_skill_slots,
     load_spawns,
     load_timespaces,
+    log_was_truncated,
+    save_inventory_cache,
 )
 from .spells import SpellInfo, load_spells
 from .protocol import Kind, Packet, ProtocolError
@@ -648,6 +653,24 @@ class Application(Gtk.Application):
         self._inventory_checks: set[tuple[int, int]] = set()
         self._inventory_matches: list[InventorySlot] = []
         self._inventory_render_pending = False
+        # The last complete inventory is cached per character id, so a GUI
+        # attach after the DLL's 16 MB log truncation still has the data.
+        self._inventory_cache_loaded = False
+        self._inventory_cache_note = ""
+        self._inventory_cache_source: int | None = None
+        # Set only by live inv/ivn packets or a log backfill, so loading a
+        # snapshot does not rewrite its "saved_at" as if it were fresh.
+        self._inventory_cache_dirty = False
+        # Set by the attach-time log seed; the cache is only a fallback for
+        # sessions where neither the live stream nor the log had the dump.
+        self._inventory_seeded = False
+        self._inventory_log_truncated = False
+        # Bags that arrived as a full `inv` dump (live or log replay); the
+        # cached note clears once the core login burst (0/1/2) is seen.
+        self._inventory_full_bags: set[int] = set()
+        # Only a complete login inventory (bags 0, 1 and 2) is cached; a
+        # later SP/costume bag burst must not replace it with a partial list.
+        self._inventory_core_seen = False
         self.item_info: dict[int, ItemInfo] = {}
         self.item_info_loaded = False
         self._item_info_loading = False
@@ -1406,14 +1429,103 @@ class Application(Gtk.Application):
         tracked = tracked_vnums(self.bazar.config.items)
         tracked_count = sum(1 for vnum in distinct if vnum in tracked)
         if slots:
-            label.set_text(
+            text = (
                 f"{len(slots)} slot(s) · {len(distinct)} item(s) · "
                 f"{tracked_count} tracked"
             )
+            if self._inventory_cache_note and self._inventory_core_seen:
+                text += " · cached"
+            if not self._inventory_core_seen:
+                text += " · partial (relog for all)"
+            label.set_text(text)
         else:
-            label.set_text("No inventory data yet")
+            label.set_text(
+                "DLL log truncated before the inventory · relog with this "
+                "window open"
+                if self._inventory_log_truncated
+                else "Inventory not received · relog with this window open"
+            )
         if self.bazar_price_all_button is not None:
             self.bazar_price_all_button.set_sensitive(bool(slots))
+
+    def _maybe_load_inventory_cache(self) -> bool:
+        """Use this character's last complete inventory when nothing is live."""
+        if (
+            not self._inventory_seeded
+            or self._inventory_cache_loaded
+            or self._inventory_core_seen
+        ):
+            return False
+        char_id = self.engine.world.self_id
+        if not char_id:
+            return False
+        self._inventory_cache_loaded = True
+        try:
+            cached = load_inventory_cache(
+                inventory_cache_path(char_id), char_id
+            )
+        except Exception:  # noqa: BLE001 - the cache is optional
+            cached = None
+        if cached is None or not cached[0]:
+            return False
+        bags, saved_at = cached
+        # A full bag dump from this session is newer than the snapshot; keep
+        # it whole. A bag known only from ivn updates is merged slot by slot,
+        # so the snapshot fills the slots the host never saw.
+        merged = {bag: dict(slots) for bag, slots in bags.items()}
+        for bag, live_slots in self.engine.world.inventory.items():
+            if bag in self._inventory_full_bags:
+                merged[bag] = dict(live_slots)
+            else:
+                merged.setdefault(bag, {}).update(live_slots)
+        self.engine.world.inventory = merged
+        self._inventory_cache_dirty = False
+        self._inventory_full_bags.clear()
+        self._inventory_core_seen = True
+        self._inventory_cache_note = (
+            time.strftime("%Y-%m-%d %H:%M", time.localtime(saved_at))
+            if saved_at > 0
+            else "unknown time"
+        )
+        self._bazar_log(
+            f"inventory: cached snapshot from "
+            f"{self._inventory_cache_note}"
+        )
+        self._update_bazar_inventory_info()
+        if self.inventory_window is not None:
+            self._inventory_schedule_render()
+        return True
+
+    def _save_inventory_cache(self, force: bool = False) -> None:
+        if not self._inventory_core_seen:
+            return
+        if not force and not self._inventory_cache_dirty:
+            return
+        char_id = self.engine.world.self_id
+        if not char_id or not self._world_inventory_slots():
+            return
+        try:
+            save_inventory_cache(
+                self.engine.world.inventory,
+                char_id,
+                inventory_cache_path(char_id),
+            )
+        except Exception as exc:  # noqa: BLE001 - never break the GUI
+            self._bazar_log(f"inventory cache: {exc}")
+            return
+        self._inventory_cache_dirty = False
+
+    def _schedule_inventory_cache_save(self) -> None:
+        if self._inventory_cache_source is not None or self._closing:
+            return
+        self._inventory_cache_source = GLib.timeout_add(
+            2000, self._inventory_cache_flush
+        )
+
+    def _inventory_cache_flush(self) -> bool:
+        self._inventory_cache_source = None
+        self._save_inventory_cache()
+        return False
 
     def _ensure_item_info_loaded(self, after=None) -> None:
         """Parse Item.dat once, off the GTK loop, then run ``after``."""
@@ -1513,7 +1625,13 @@ class Application(Gtk.Application):
                 "limited/bound ids; their template (absolute vnum) is "
                 "searched. Add selected adds one bazaar item per distinct "
                 "item; Add all & monitor adds every inventory item and "
-                "starts the monitor. Names load from Item.dat.",
+                "starts the monitor. Names load from Item.dat. The server "
+                "sends the full inventory only at login; if this list is "
+                "empty or marked partial, relog or change channel with this "
+                "window open and it fills automatically. The last complete "
+                "inventory is "
+                "cached per character, so a later attach survives the DLL "
+                "log truncation.",
             )
         )
         box.append(top)
@@ -1619,13 +1737,30 @@ class Application(Gtk.Application):
         if self._inventory_status is not None:
             if not slots:
                 text = (
-                    "Inventory is empty — relog or open the inventory once."
+                    "The DLL log was truncated before the login inventory; "
+                    "the server sends it only at login. Relog or change "
+                    "channel with this window open; the scan fills "
+                    "automatically."
+                    if self._inventory_log_truncated
+                    else "The server sends the full inventory only at "
+                    "login. Relog or change channel with this window open; "
+                    "the scan fills automatically."
                 )
             else:
                 text = (
                     f"{len(slots)} slot(s) · {len(distinct)} item(s) · "
                     f"{tracked_count} tracked · {len(matches)} shown"
                 )
+                if (
+                    self._inventory_cache_note
+                    and self._inventory_core_seen
+                ):
+                    text += f" · cached {self._inventory_cache_note}"
+                if not self._inventory_core_seen:
+                    text += (
+                        " · partial inventory: the login dump is missing; "
+                        "relog with this window open for the full list"
+                    )
             if self._item_info_loading:
                 text += " · loading item names…"
             self._inventory_status.set_text(text)
@@ -1844,6 +1979,21 @@ class Application(Gtk.Application):
                 self._bazar_npc_autofill_value = ""
             return
         if packet.opcode in ("inv", "ivn"):
+            if packet.opcode == "inv":
+                try:
+                    bag = int(packet.args[0])
+                except (IndexError, ValueError):
+                    bag = None
+                if bag is not None:
+                    self._inventory_full_bags.add(bag)
+                # Only the login burst (bags 0, 1 and 2) makes the whole
+                # inventory live; one updated bag must not hide that the
+                # rest came from the cached snapshot.
+                if {0, 1, 2} <= self._inventory_full_bags:
+                    self._inventory_core_seen = True
+                    self._inventory_cache_note = ""
+            self._inventory_cache_dirty = True
+            self._schedule_inventory_cache_save()
             self._update_bazar_inventory_info()
             if self.inventory_window is not None:
                 self._inventory_schedule_render()
@@ -2636,7 +2786,11 @@ class Application(Gtk.Application):
         before the first search/relist.
         """
         path = self.log_file
+        self._inventory_log_truncated = log_was_truncated(path)
         if not path:
+            self._inventory_seeded = True
+            self._maybe_load_inventory_cache()
+            self._save_inventory_cache()
             return
         world = self.engine.world
         npc_id, option, page = load_bazaar_open(path)
@@ -2657,25 +2811,35 @@ class Application(Gtk.Application):
             )
         bags, gold = load_log_inventory(path)
         if bags:
+            full_bags = log_inventory_bags(path)
+            self._inventory_full_bags.update(full_bags)
+            if {0, 1, 2} <= full_bags:
+                # The log contains the complete login inventory (full inv
+                # lines, not just ivn updates), so this is safe to cache
+                # even when the live stream missed it.
+                self._inventory_core_seen = True
             count = 0
             filled = 0
             for bag, slots in bags.items():
-                # Live state for a bag is at least as new as the log replay;
-                # only fill bags the attach missed entirely. (A truncated
-                # log can hold just one ivn update for a bag, which would
-                # otherwise replace the complete live bag with one slot.)
-                if bag in world.inventory and world.inventory[bag]:
-                    continue
-                world.inventory[bag] = dict(slots)
-                count += len(slots)
-                filled += 1
-            if count:
+                # A full `inv <bag>` line is authoritative. A bag seen only
+                # in `ivn` updates is partial: it may fill a bag the attach
+                # missed, but must never replace existing live/cached slots
+                # (a truncated log can hold just one update for a bag).
+                if bag in full_bags or not world.inventory.get(bag):
+                    world.inventory[bag] = dict(slots)
+                    count += len(slots)
+                    filled += 1
+            if filled:
+                self._inventory_cache_dirty = True
                 self._bazar_log(
                     f"inventory: {count} slot(s) in {filled} bag(s) "
                     f"seeded from the log"
                 )
         if gold is not None:
             world.gold = gold
+        self._inventory_seeded = True
+        self._maybe_load_inventory_cache()
+        self._save_inventory_cache()
         self._bazar_sync_from_world()
         self._update_bazar_inventory_info()
         if self.inventory_window is not None:
@@ -2686,6 +2850,16 @@ class Application(Gtk.Application):
         self._bazar_stop("client changed")
         self.bazar_selected_name = None
         self._bazar_config_loaded = False
+        self._inventory_seeded = False
+        self._inventory_cache_loaded = False
+        self._inventory_cache_note = ""
+        self._inventory_cache_dirty = False
+        self._inventory_log_truncated = False
+        self._inventory_full_bags.clear()
+        self._inventory_core_seen = False
+        if self._inventory_cache_source is not None:
+            GLib.source_remove(self._inventory_cache_source)
+            self._inventory_cache_source = None
         self._bazar_character_autofilled = False
         self._bazar_npc_autofilled = False
         self._bazar_npc_autofill_value = ""
@@ -2906,7 +3080,11 @@ class Application(Gtk.Application):
                     "all adds one bazaar search per distinct item and starts "
                     "Monitor. Negative vnums are limited/bound items and are "
                     "searched by their absolute vnum; equipment quantity 0 "
-                    "counts as one."
+                    "counts as one. The server sends the inventory only at "
+                    "login: if it is missing or marked partial, relog or "
+                    "change channel with this window open. The last complete "
+                    "inventory is cached per character, so a later attach "
+                    "survives log truncation."
                 ),
             )
         )
@@ -8448,7 +8626,29 @@ class Application(Gtk.Application):
     def _learn_char_id(self, char_id: int | None) -> None:
         if char_id is None or char_id <= 0:
             return
+        previous = self.char_id
+        changed = previous is not None and previous != char_id
         self.char_id = char_id
+        if changed:
+            # Another character on the same client: drop the old character's
+            # slots so a pending save cannot file them under the new id, then
+            # load the new character's snapshot.
+            self._inventory_cache_loaded = False
+            self._inventory_cache_note = ""
+            self._inventory_cache_dirty = False
+            self._inventory_core_seen = False
+            self._inventory_full_bags.clear()
+            self.engine.world.inventory = {}
+            if self._inventory_cache_source is not None:
+                GLib.source_remove(self._inventory_cache_source)
+                self._inventory_cache_source = None
+            if self.inventory_window is not None:
+                self._inventory_schedule_render()
+        if previous is None or changed:
+            # Only on the first POS (or a character change): this path runs
+            # on every packet, so do not rewrite the cache each time.
+            self._maybe_load_inventory_cache()
+            self._save_inventory_cache()
         self._update_char_info()
 
     def _send(self, text: str) -> bool:
@@ -10483,6 +10683,10 @@ class Application(Gtk.Application):
                 self.client.send_raw("CAST|0")
             except (ConnectionLost, ValueError):
                 pass
+        if self._inventory_cache_source is not None:
+            GLib.source_remove(self._inventory_cache_source)
+            self._inventory_cache_source = None
+        self._save_inventory_cache()
         self._close_mirror_writer(remove=True)
         self.mirror_reader.close()
         if self.bazar.running:

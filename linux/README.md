@@ -64,7 +64,7 @@ uses lowercase includes for that reason.
 
 ```bash
 make -C linux all test-host
-make -C linux host-test          # 308 cases: protocol, client, engine, mapdata, config, names, noscrypto, headless, gameforge auth, client locks, bazar/inventory, database, mirror
+make -C linux host-test          # 315 cases: protocol, client, engine, mapdata, config, names, noscrypto, headless, gameforge auth, client locks, bazar/inventory, database, mirror
 make -C linux speed-test         # DLL speed-boost cond parsing and walk clamp
 make -C linux gui-test           # headless GTK4: map switch, tooltips, toggles,
                                  # banner, help popovers, client picker,
@@ -144,6 +144,7 @@ tail -f "$WINEPREFIX"/drive_c/NosTalePacketLog-*.txt
 | `NTPL_QUIET` | DLL | `1` disables the file log |
 | `NTPL_NSTC` | host | `NStcData.NOS` path |
 | `NTPL_NSLANG` | host | `NSlangData_*.NOS` language archive |
+| `NTPL_INVENTORY_DIR` | GUI | directory for per-character `inventory-<char_id>.json` snapshots; default `~/.config/ntpl` |
 | `NTPL_WINE` | scripts | wine binary |
 | `NTPL_WINEPREFIX` | `inject.sh` | prefix to inject into |
 | `NTPL_TEST_PREFIX` | test script | reuse a prefix instead of a temp one |

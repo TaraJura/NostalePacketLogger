@@ -33,7 +33,7 @@ plus the attached client's DLL version.
 
 ## NosBazar
 
-![NosBazar tab: cheapest listing and profit per item](docs/assets/gui-bazar.png)
+![NosBazar tab: inventory frame, cheapest listing and profit per item](docs/assets/gui-bazar.png)
 
 The fourth tab turns the live packet stream into the player-auction-house
 workflow of [`TaraJura/Nostale-NB`](https://github.com/TaraJura/Nostale-NB):
@@ -64,7 +64,12 @@ workflow of [`TaraJura/Nostale-NB`](https://github.com/TaraJura/Nostale-NB):
   just what you own (one bazaar search per distinct item, no duplicates);
   **Price all** adds every inventory item and starts Monitor. Equipment rows
   with quantity 0 count as one, and bound negative vnums are searched by
-  their absolute template. The scan never relists.
+  their absolute template. The server sends the full inventory only at
+  login; if the host attached later and the DLL log was truncated, the list
+  is empty or marked **partial** — relog once with the window open and the
+  scan fills automatically. The last complete inventory is cached per
+  character, so later attaches survive another log truncation. The scan never
+  relists.
 - **Copy names** — right-click an item row in the **Items** list or a result
   row, or use the **Copy** button next to **Name**, to put the full item name
   on the clipboard.
@@ -87,7 +92,7 @@ the catalog/database side is in [docs/database.md](docs/database.md).
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 308 Python unit tests
+make -C linux host-test                      # 315 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux gui-test                       # headless GTK4 smokes (xvfb)
 make -C linux bot-test                       # 41 fake-server bot smokes
@@ -156,7 +161,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 308 unit tests pass, the five GTK4 window smokes
+The Linux port builds, its 315 unit tests pass, the five GTK4 window smokes
 and 41 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 

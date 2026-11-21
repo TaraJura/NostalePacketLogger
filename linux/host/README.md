@@ -51,7 +51,7 @@ sudo apt install python3-gi gir1.2-gtk-4.0
 | `mapdata.py` | `NStcData.NOS` parser, walkability, 8-direction A*, map ranking, PNG render |
 | `monsternames.py` | `NSlangData_*.NOS` text archive, nibble codec, monster/skill names |
 | `spells.py` | `NSgtdData.NOS` → `Skill.dat` spell catalog (MP, range, cooldown) |
-| `spawnlog.py` | entity → vnum/player-name backfill; bazaar NPC and inventory replay from the DLL log |
+| `spawnlog.py` | entity → vnum/player-name backfill; bazaar NPC and inventory replay from the DLL log; per-character inventory snapshot cache |
 | `botconfig.py` | JSON bot configuration (targets, spell rules, follow/mirror settings) |
 | `bazar.py` | NosBazar config, `c_blist`/`c_reg` builders, 15-field `rc_blist` parser, inventory→search planner, monitor/relist controller |
 | `nosmall.py` | full NosMall catalog parser, Item.dat name/NPC-price/category info, variant grouping, ND-cost price map, pet filter, Bazar export |
@@ -65,7 +65,7 @@ sudo apt install python3-gi gir1.2-gtk-4.0
 From `linux/`:
 
 ```bash
-make host-test      # 308 unittest cases
+make host-test      # 315 unittest cases
 make speed-test     # DLL speed-boost parsing/clamp (native C++, no Wine)
 make gui-test       # 5 headless GTK4 smokes: packet window + help standard, picker, multi-client, family invite, auto-invite
 make bot-test       # 41 smokes: combat, rules/config, recovery, follow, follow mirror, follow nameless/char id, speed boost control, cast speed control, cast assist, cast-ready pacing, NosBazar monitor/relist/copy, NosBazar inventory scan/price-all, NosMall import filters

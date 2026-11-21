@@ -17,6 +17,7 @@ Run through scripts/dev-test-bot.sh (Xvfb).
 from __future__ import annotations
 
 import os
+import shutil
 import socket
 import tempfile
 import threading
@@ -30,6 +31,12 @@ from gi.repository import GLib
 from ntpl.bazar import load_config
 from ntpl.gui import Application
 from ntpl.nosmall import ItemInfo
+from ntpl.spawnlog import (
+    inventory_cache_path,
+    load_inventory_cache,
+)
+
+SELF_ID = 14881134
 
 
 class InventoryServer:
@@ -102,6 +109,8 @@ def main() -> int:
     handle.close()
     config_path = handle.name
     os.environ["NTPL_BAZAR_CONFIG"] = config_path
+    cache_dir = tempfile.mkdtemp(prefix="ntpl-inventory-")
+    os.environ["NTPL_INVENTORY_DIR"] = cache_dir
     server = InventoryServer()
     app = Application("127.0.0.1", server.port, unique=False)
     result: dict[str, object] = {"ok": False, "detail": "not checked"}
@@ -228,6 +237,46 @@ def main() -> int:
             result["unique_packets"] = len(
                 {item.search_packet for item in items}
             )
+            app._save_inventory_cache(force=True)
+            cached = load_inventory_cache(
+                inventory_cache_path(SELF_ID), SELF_ID
+            )
+            result["cache_saved"] = (
+                None
+                if cached is None
+                else sum(len(slots) for slots in cached[0].values())
+            )
+            # Simulate a restart after the DLL log was truncated: no live
+            # inventory and no log dump, so only the cache can restore it.
+            app.engine.world.inventory = {}
+            app._inventory_cache_loaded = False
+            app._inventory_seeded = True
+            app._inventory_core_seen = False
+            app._inventory_full_bags.clear()
+            app._maybe_load_inventory_cache()
+            result["cache_slots"] = len(app._inventory_slots())
+            result["cache_note"] = app._inventory_cache_note
+            # A list rebuilt from later updates alone must be marked partial
+            # and must never replace the complete cache with a partial list.
+            try:
+                inventory_cache_path(SELF_ID).unlink()
+            except OSError:
+                pass
+            app.engine.world.inventory = {}
+            app._inventory_core_seen = False
+            app._inventory_full_bags = {1}
+            app.engine.feed_text("RECV", "inv 1 0.2174.5")
+            app._inventory_render()
+            result["partial_status"] = (
+                app._inventory_status.get_text()
+                if app._inventory_status is not None
+                else ""
+            )
+            app._inventory_cache_dirty = True
+            app._save_inventory_cache(force=True)
+            result["partial_not_cached"] = not inventory_cache_path(
+                SELF_ID
+            ).exists()
             ok = (
                 result["slots"] == 7
                 and result["negative_name"] == "Sealed Hellord Spell Gun"
@@ -260,6 +309,11 @@ def main() -> int:
                 and result["mode"] == "monitor"
                 and result["saved"] == 7
                 and result["unique_packets"] == 7
+                and result["cache_saved"] == 7
+                and result["cache_slots"] == 7
+                and bool(result["cache_note"])
+                and "partial inventory" in result["partial_status"]
+                and result["partial_not_cached"] is True
             )
             result["ok"] = bool(ok)
             result["detail"] = (
@@ -274,6 +328,11 @@ def main() -> int:
                 f"bound=({result['bound_tab']},{result['bound_amount']}) "
                 f"blessing_nos={result['blessing_nos']} "
                 f"feather_npc={result['feather_npc']} "
+                f"cache_saved={result['cache_saved']} "
+                f"cache_slots={result['cache_slots']} "
+                f"cache_note={result['cache_note']!r} "
+                f"partial={result['partial_status']!r} "
+                f"partial_not_cached={result['partial_not_cached']} "
                 f"fields={result['equipment_fields']!r}"
             )
         except Exception as exc:  # noqa: BLE001
@@ -288,6 +347,7 @@ def main() -> int:
         os.unlink(config_path)
     except OSError:
         pass
+    shutil.rmtree(cache_dir, ignore_errors=True)
     print(
         "INVENTORY SCAN SMOKE:",
         "PASS" if result["ok"] else "FAIL",

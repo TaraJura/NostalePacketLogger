@@ -30,7 +30,9 @@ The packet formats and live captures are in
      (backfilled from the DLL log after a late attach) with the Item.dat
      name, bag/slot, vnum, quantity, equipment fields, NPC price and known
      ND cost. Search by name or vnum, select rows and **Add selected**, or
-     **Add all & monitor**.
+     **Add all & monitor**. If it is empty, the login dump was missed:
+     relog once with the window open and the list fills automatically (then
+     it is cached for later attaches).
    - **Price all** adds one search per distinct inventory item and starts
      Monitor. It never relists (that is a separate mode), and each search
      keeps the 2.5 s pacing, so a large inventory takes a while per pass.
@@ -214,8 +216,22 @@ Example:
   **Price all** twice never duplicates rows.
 - **Late attach**: inventory comes from the live `inv`/`ivn` stream and, for
   packets missed before the GUI attached, from the client's own DLL log tail.
-  If both are empty the tab says “No inventory data yet”; relog or open the
-  inventory once. Rescan re-reads the log.
+  Rescan re-reads the log. The server sends the full inventory **only at
+  login** (there is no client request packet), and the DLL rewrites its log
+  in place at 16 MB. If the GUI attached after login and the log was
+  truncated before the dump, the frame says
+  `DLL log truncated before the inventory`; relog or change channel with the
+  window open and the scan (and an open picker) fills automatically. If some
+  later `ivn` updates were captured, the list is shown but marked
+  **partial (relog for all)**; it is never cached as a complete inventory.
+- **Snapshot cache**: every complete inventory is saved per character id at
+  `~/.config/ntpl/inventory-<char_id>.json` (`NTPL_INVENTORY_DIR` overrides
+  the directory). A later attach that finds neither a live nor a logged dump
+  loads that snapshot and marks the view `cached <time>`; a live `inv` dump
+  replaces it. The cache is written only after a complete core inventory
+  (bags 0/1/2) has been seen, then updated after a full dump, debounced after
+  `ivn` updates, and on shutdown. A list built from later `ivn` updates alone
+  is marked **partial** and never cached as complete.
 - **Bound items**: negative vnums are display/search only; they cannot be
   relisted because `find_inventory` matches positive template vnums.
 - **Truncated answers**: the DLL copies at most 2048 bytes per packet, so a
@@ -252,10 +268,16 @@ behaviour, response cross-talk, the relist floor/own/slot/vnum checks and the
 equipment amount-0 rule. `test_bazar_inventory.py` covers the inventory
 planner: duplicate collapse, negative/absolute vnums, bag preference,
 tracked-skip, unique names, cost precedence and the amount clamp.
+`test_inventory_cache.py` covers the per-character snapshot round-trip,
+character matching and malformed/bad-slot tolerance;
+`test_spawnlog.py` covers the full-`inv`-vs-`ivn` bag distinction and the
+truncation notice.
 `gui_bazar_smoke.py` spawns a fake Bibi NPC, answers the open and one search,
 and asserts the profit column and that no `c_reg` was sent.
 `gui_bazar_relist_smoke.py` checks that the live-relist gate blocks the first
 attempt and then asserts the exact `c_reg` packet and the `register-sent`
 status. `gui_inventory_scan_smoke.py` feeds the live inventory shapes
 (3/5/7-field tokens, quantity 0, negative vnums), asserts the picker names and
-fields, adds one item and then prices the whole inventory without duplicates.
+fields, adds one item and then prices the whole inventory without duplicates,
+and checks that a complete snapshot is saved/restored while a partial list is
+marked and never cached.

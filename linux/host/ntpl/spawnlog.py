@@ -19,8 +19,11 @@ handles a reused entity id.
 from __future__ import annotations
 
 import io
+import json
 import os
 import re
+import tempfile
+import time
 from pathlib import Path
 
 from .engine import InventorySlot, parse_inventory_token
@@ -56,6 +59,23 @@ _PLAYER = re.compile(r"^1 (.+?) - (\d+) ")
 #: thread — minutes of "Not Responding". The login `ski` list is read from
 #: the head instead; everything else only needs the current session's tail.
 LOG_TAIL_BYTES = 8 * 1024 * 1024
+
+
+def log_was_truncated(path: str | Path | None) -> bool:
+    """True when the log file starts with the DLL's truncation notice.
+
+    The DLL rewrites the file in place at 16 MB, so the login inventory dump
+    (and everything else before the cut) is gone. The host can then say why
+    the inventory is missing instead of guessing.
+    """
+    if path is None:
+        return False
+    try:
+        with open(path, "rb") as handle:
+            head = handle.readline(200).decode("latin1", "replace")
+    except OSError:
+        return False
+    return "[STATUS] log truncated" in head
 
 
 def _open_log_tail(
@@ -729,6 +749,36 @@ def load_bazaar_open(
     return npc_id, option, page
 
 
+def log_inventory_bags(path: str | Path | None = None) -> set[int]:
+    """Bags that had a full ``inv <bag>`` line in the log tail.
+
+    ``load_inventory`` also replays ``ivn`` updates; a bag that only appears
+    in those updates has no complete contents and must not replace a cached
+    snapshot.
+    """
+    source = Path(path) if path is not None else default_log_path()
+    if source is None:
+        return set()
+    try:
+        log = _open_log_tail(source)
+    except OSError:
+        return set()
+    bags: set[int] = set()
+    with log:
+        for line in log:
+            if _INV_MARKER not in line:
+                continue
+            start = line.find(_INV_MARKER) + len(_INV_MARKER)
+            tokens = line[start:].split()
+            if not tokens:
+                continue
+            try:
+                bags.add(int(tokens[0]))
+            except ValueError:
+                continue
+    return bags
+
+
 def load_inventory(
     path: str | Path | None = None,
 ) -> tuple[dict[int, dict[int, InventorySlot]], int | None]:
@@ -795,3 +845,161 @@ def load_inventory(
             if values and values[0] >= 0:
                 gold = values[0]
     return bags, gold
+
+
+#: The cached inventory is a snapshot of the last complete session, kept so a
+#: later GUI attach survives the DLL's 16 MB log truncation.
+INVENTORY_CACHE_VERSION = 1
+
+
+def default_inventory_cache_dir() -> Path:
+    """Directory for per-character inventory snapshots.
+
+    ``NTPL_INVENTORY_DIR`` overrides it; otherwise XDG's config dir is used,
+    matching the bazar/bot configuration files.
+    """
+    override = os.environ.get("NTPL_INVENTORY_DIR")
+    if override:
+        return Path(override)
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "ntpl"
+
+
+def inventory_cache_path(char_id: int) -> Path:
+    """The snapshot file for one character id."""
+    return default_inventory_cache_dir() / f"inventory-{int(char_id)}.json"
+
+
+def _slot_payload(slot: InventorySlot) -> dict:
+    return {
+        "vnum": int(slot.vnum),
+        "quantity": int(slot.quantity),
+        "fields": list(slot.fields),
+    }
+
+
+def save_inventory_cache(
+    bags: dict[int, dict[int, InventorySlot]],
+    char_id: int,
+    path: str | Path | None = None,
+) -> Path:
+    """Atomically save the inventory snapshot for ``char_id``.
+
+    Written after a full ``inv`` dump and on shutdown; the next attach can
+    then show the inventory even when the client's DLL log was truncated
+    before the host connected.
+    """
+    target = Path(path) if path is not None else inventory_cache_path(char_id)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ValueError(f"cannot create {target.parent}: {exc}") from exc
+    payload = {
+        "version": INVENTORY_CACHE_VERSION,
+        "char_id": int(char_id),
+        "saved_at": time.time(),
+        "bags": {
+            str(bag): {
+                str(index): _slot_payload(slot)
+                for index, slot in sorted(slots.items())
+            }
+            for bag, slots in sorted(bags.items())
+            if slots
+        },
+    }
+    text = json.dumps(payload, separators=(",", ":")) + "\n"
+    try:
+        handle = tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=str(target.parent),
+            prefix=f".{target.name}.",
+            delete=False,
+        )
+    except OSError as exc:
+        raise ValueError(f"cannot write {target}: {exc}") from exc
+    temporary = Path(handle.name)
+    try:
+        with handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.replace(target)
+    except OSError as exc:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise ValueError(f"cannot write {target}: {exc}") from exc
+    return target
+
+
+def load_inventory_cache(
+    path: str | Path | None = None,
+    char_id: int | None = None,
+) -> tuple[dict[int, dict[int, InventorySlot]], float] | None:
+    """Read a snapshot written by :func:`save_inventory_cache`.
+
+    Returns ``({bag: {slot: InventorySlot}}, saved_at)`` or ``None`` when the
+    file is missing/malformed or belongs to a different character. Slots with
+    vnum 0 or a negative quantity are dropped and field values are
+    stringified; the rest of the snapshot is still usable.
+    """
+    if path is not None:
+        target = Path(path)
+    elif char_id is not None:
+        target = inventory_cache_path(char_id)
+    else:
+        return None
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("version") != INVENTORY_CACHE_VERSION:
+        return None
+    if char_id is not None and data.get("char_id") != int(char_id):
+        return None
+    raw_bags = data.get("bags")
+    if not isinstance(raw_bags, dict):
+        return None
+    bags: dict[int, dict[int, InventorySlot]] = {}
+    for raw_bag, raw_slots in raw_bags.items():
+        try:
+            bag = int(raw_bag)
+        except (TypeError, ValueError):
+            continue
+        if bag < 0 or not isinstance(raw_slots, dict):
+            continue
+        slots: dict[int, InventorySlot] = {}
+        for raw_index, raw_slot in raw_slots.items():
+            try:
+                index = int(raw_index)
+            except (TypeError, ValueError):
+                continue
+            if index < 0 or not isinstance(raw_slot, dict):
+                continue
+            try:
+                vnum = int(raw_slot.get("vnum", 0))
+                quantity = int(raw_slot.get("quantity", 0))
+            except (TypeError, ValueError):
+                continue
+            if vnum == 0 or quantity < 0:
+                continue
+            raw_fields = raw_slot.get("fields", [])
+            fields = (
+                tuple(str(value) for value in raw_fields)
+                if isinstance(raw_fields, list)
+                else ()
+            )
+            slots[index] = InventorySlot(
+                bag, index, vnum, quantity, fields
+            )
+        if slots:
+            bags[bag] = slots
+    try:
+        saved_at = float(data.get("saved_at", 0.0))
+    except (TypeError, ValueError):
+        saved_at = 0.0
+    return bags, saved_at

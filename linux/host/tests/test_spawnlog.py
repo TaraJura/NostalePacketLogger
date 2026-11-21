@@ -14,6 +14,8 @@ from ntpl.spawnlog import (
     load_gates,
     load_inventory,
     load_last_position,
+    log_inventory_bags,
+    log_was_truncated,
     load_player_families,
     load_player_metadata,
     load_player_spawns,
@@ -267,6 +269,31 @@ class SpawnLogTests(unittest.TestCase):
             InventorySlot(0, 63, -4962, 5, ("7", "1", "0", "0")),
         )
         self.assertEqual(bags[0][63].amount, 5)
+
+    def test_only_full_inv_lines_count_as_complete_bags(self):
+        log = self._write(
+            "02:00:00.000 [RECV] inv 0 30.885.0.0.0.0.0\r\n"
+            "02:00:00.000 [RECV] inv 1 0.2174.5\r\n"
+            "02:00:00.000 [RECV] ivn 2 0.2282.11.0\r\n"
+        )
+        self.assertEqual(log_inventory_bags(log), {0, 1})
+
+    def test_log_truncation_notice_is_detected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "log.txt"
+            path.write_text(
+                "14:19:33.739 [STATUS] log truncated at 16489 KB; "
+                "a new session file starts\r\n",
+                encoding="latin1",
+            )
+            self.assertTrue(log_was_truncated(path))
+            path.write_text(
+                "14:19:33.739 [RECV] mv 3 3003 118 3 5\r\n",
+                encoding="latin1",
+            )
+            self.assertFalse(log_was_truncated(path))
+            self.assertFalse(log_was_truncated(None))
+            self.assertFalse(log_was_truncated(Path(tmp) / "missing.txt"))
 
 
 class ClientLogPathTests(unittest.TestCase):

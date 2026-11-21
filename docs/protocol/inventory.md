@@ -36,6 +36,12 @@ A bag line with no tokens clears that bag. The engine stores each slot as an
 dot fields verbatim. `parse_inventory_token` is the shared parser used by the
 live handlers and the log backfill.
 
+The full burst is sent as part of character login (after `p_clear`, followed
+by `inv 0/1/2/3/6/7`), not on map changes, and **no client packet requests a
+refresh**. A host that misses it must see a relog/channel change, or use the
+host-side snapshot cache (`spawnlog.load_inventory_cache`); `Rescan` only
+re-reads the DLL log.
+
 ---
 
 ## `ivn` (RECV)
