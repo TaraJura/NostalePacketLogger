@@ -1,4 +1,4 @@
-# Project context — 2026-11-20
+# Project context — 2026-11-22
 
 Quick map for the next session. The detailed history is in
 [handoff-2026-11-19.md](handoff-2026-11-19.md); packet formats in
@@ -7,9 +7,20 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 317 unittest cases, 5 GTK4 smokes, 41 fake-server bot
-  smokes, and the native `speed-test` pass. Build: `make -C linux all
-  test-host`, tests above.
+- **Linux host**: 331 unittest cases, 6 GTK4 smokes, 41 fake-server bot
+  smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
+  linux all test-host`, tests above.
+- **Minigame tab** (seventh GUI page, appended after Malicious): Sheep Farm
+  helper. **Start** spams `KEY|<key>` (default `y`, the secondary attack; `z`
+  on QWERTZ) every 40–5000 ms through DLL 0.3.0, and **Focus nearby players**
+  selects the nearest other `kind == 1` character within a radius through the
+  client's own selector (`TARGET|id`, fallback `SEND|ncif 1 <id>`), never an
+  NPC, pet, monster or the local character. The DLL uses real `SendInput` when
+  the game window is foreground and posted keys otherwise. Per-client
+  `~/.config/ntpl/minigame-<winpid>.json`. Needs **DLL 0.3.0 and a game
+  restart/re-inject**; the host is 0.6.0. Covered by `test_minigame.py`,
+  `gui_minigame_smoke.py` and `key-test`; the key press and player TARGET are
+  **not yet live-verified**. See [minigame.md](minigame.md).
 - **Speed +** (**Malicious** tab, default 0): the DLL reads the server's
   `cond` speed, calls the client's own entity speed setter on the local
   player actor, and clamps the outgoing `walk` speed back to the server's
@@ -74,24 +85,29 @@ the data layer in [database.md](database.md).
 ~/.cache/ntpl/sources/                  cloned public packet projects
 ~/.cache/ntpl/mirror/                   cross-client Follow mirror bus (JSON lines)
 ~/.config/ntpl/bot-<winpid>.log        per-client bot/action log
+~/.config/ntpl/minigame-<winpid>.json  per-client Sheep Farm key/focus settings
 ```
 
 ## Next likely work
 
-1. Live-verify the bazaar open/search replay while standing at Bibi Basar
+1. Live-verify the Minigame tab at a Sheep Farm raid (automatic at :15 on
+   channels 1/2): restart the game with DLL 0.3.0, inject, start with `y`, then
+   watch the Bot log for `minigame keyboard ready` / `minigame focus -> …` and
+   the Wolves score; try `z` if `y` does nothing (QWERTZ).
+2. Live-verify the bazaar open/search replay while standing at Bibi Basar
    (the controller already waits/retries; last live attempt was out of range).
-2. Live-test **Mirror movement & spells** with two of our own clients: both
+3. Live-test **Mirror movement & spells** with two of our own clients: both
    GUIs publish to `~/.cache/ntpl/mirror`; the follower should replay the
    leader's walks and spells with its own char id. Fake-server verified.
-3. Live-test `c_reg` on a cheap item; no server acknowledgement is captured,
+4. Live-test `c_reg` on a cheap item; no server acknowledgement is captured,
    so relist is currently fake-server verified only.
-4. Grow the NosMall ND price map: the importer now lists only priced,
+5. Grow the NosMall ND price map: the importer now lists only priced,
    non-pet groups (18 today). Client COST blocks do not contain the web-shop
    price; add an item with **New**, set its Cost, then reopen the picker, or
    extend `known_reference_costs`.
-5. If desired: a CLI `ntpl bazar` monitor and a read-only MCP bazar tool
+6. If desired: a CLI `ntpl bazar` monitor and a read-only MCP bazar tool
    using the same controller; a price-map importer.
-6. Remember the UI preferences: never clear the table at a cycle start;
+7. Remember the UI preferences: never clear the table at a cycle start;
    profit-sorted with Only priced; cp1252/latin-1 name decoding.
 
 ## Commands
@@ -99,7 +115,7 @@ the data layer in [database.md](database.md).
 ```bash
 cd ~/games/gameforge/NostalePacketLogger
 make -C linux all test-host
-make -C linux host-test gui-test bot-test
+make -C linux host-test speed-test key-test gui-test bot-test
 PYTHONPATH=linux/host python3 -m ntpl db build
 PYTHONPATH=linux/host python3 -m ntpl db stats
 PYTHONPATH=linux/host python3 -m ntpl db packets --opcode rc_blist

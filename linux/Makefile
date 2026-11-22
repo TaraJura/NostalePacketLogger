@@ -31,7 +31,7 @@ INJ_OBJECTS := $(patsubst $(SRC_INJ)/%.cpp,$(BUILD)/injector/%.o,$(INJ_SOURCES))
 # changed PacketQueue capacity links against a stale ABI.
 -include $(DLL_OBJECTS:.o=.d) $(INJ_OBJECTS:.o=.d)
 
-.PHONY: all dll injector test-host host-test speed-test gui-test bot-test clean check
+.PHONY: all dll injector test-host host-test speed-test key-test gui-test bot-test clean check
 
 all: dll injector
 
@@ -80,13 +80,21 @@ $(BUILD)/SpeedBoostTest: test/speed_boost_test.cpp $(SRC_DLL)/speedboost.h $(SRC
 speed-test: $(BUILD)/SpeedBoostTest
 	$(BUILD)/SpeedBoostTest
 
+# Pure host-side test of the DLL's `KEY|<name>` parsing (no Wine).
+$(BUILD)/KeyNamesTest: test/key_names_test.cpp $(SRC_DLL)/key_names.h
+	@mkdir -p $(dir $@)
+	$(HOST_CXX) -std=c++17 -O2 -I$(SRC_DLL) -o $@ $<
+
+key-test: $(BUILD)/KeyNamesTest
+	$(BUILD)/KeyNamesTest
+
 gui-test:
 	./scripts/dev-test-gui.sh
 
 bot-test:
 	./scripts/dev-test-bot.sh
 
-check: all test-host speed-test
+check: all test-host speed-test key-test
 	@file $(BUILD)/PacketLogger.dll $(BUILD)/Injector.exe \
 		$(BUILD)/FakeGame.exe $(BUILD)/HookStubTest.exe
 

@@ -76,6 +76,18 @@ from .mapdata import (
     set_gate,
     terrain_rgb,
 )
+from .minigame import (
+    MAX_INTERVAL_MS,
+    MAX_RADIUS,
+    MIN_INTERVAL_MS,
+    MIN_RADIUS,
+    MinigameConfig,
+    load_config as load_minigame_config,
+    nearest_player,
+    nearby_players,
+    normalize_key,
+    save_config as save_minigame_config,
+)
 from .monsternames import load_monster_names, load_skill_descriptions
 from .mirror import (
     KIND_MOVE,
@@ -149,6 +161,16 @@ FAMILY_AUTO_INTERVAL_S = 2.5
 FAMILY_CONFIRM_TIMEOUT_S = 4.0
 FAMILY_COOLDOWN_S = 15.0
 FAMILY_AUTO_TICK_MS = 250
+#: Minigame key spam: one GLib tick drives both the key interval and the
+#: (slower) player focus, so changing a spin does not recreate a timer.
+MINIGAME_TICK_MS = 20
+MINIGAME_FOCUS_INTERVAL_S = 0.5
+#: Safety refresh for the selected player. The normal path re-selects as soon
+#: as the client's own target (`ncif`) is no longer that player, so a sheep
+#: cannot become the target of the next key press; this bound only re-asserts
+#: a selection that the client never reported.
+MINIGAME_FOCUS_REFRESH_S = 5.0
+MINIGAME_RENDER_INTERVAL_S = 0.5
 #: Click-to-walk tick; the next leg is handed to the client before the
 #: character reaches the end of the current one, so the walk never stops at a
 #: leg boundary. POS is polled faster while travelling to see the real cell.
@@ -738,6 +760,35 @@ class Application(Gtk.Application):
         self._family_invited_next_at = 0.0
         self._family_invited_dirty = False
         self._family_timer_source: int | None = None
+        # Minigame tab: Sheep Farm key spam and player-only focus. The config
+        # is per attached client, like the Family list and NosBazar settings.
+        self.minigame_page = None
+        self.minigame_toggle = None
+        self.minigame_key_entry = None
+        self.minigame_interval_spin = None
+        self.minigame_focus_switch = None
+        self.minigame_radius_spin = None
+        self.minigame_status = None
+        self.minigame_config = MinigameConfig()
+        self.minigame_config_path: Path | None = None
+        self.minigame_running = False
+        self.minigame_timer: int | None = None
+        self.minigame_guard = False
+        self.minigame_focus_id: int | None = None
+        self.minigame_focus_name = ""
+        self.minigame_focus_refresh_at = 0.0
+        self.minigame_focus_blocked: dict[int, float] = {}
+        # TARGET replies can arrive after the focus moved on; remember every
+        # id the tab asked for so a late ERR is never treated as combat.
+        self.minigame_target_requests: dict[int, float] = {}
+        self.minigame_next_key = 0.0
+        self.minigame_next_focus = 0.0
+        self.minigame_next_render = 0.0
+        # An old DLL answers "unknown command: KEY" and the tab stops.
+        self.dll_key_supported = True
+        # Do not create a stray minigame-<pid>.json for a window that never
+        # used the tab; an existing file is still kept by the shutdown save.
+        self._minigame_touched = False
         # Right-click "Copy item name" in the NosBazar items/results lists.
         self._install_copy_action()
 
@@ -843,6 +894,7 @@ class Application(Gtk.Application):
         family_page = self._build_family_page()
         self.family_page = family_page
         malicious_page = self._build_malicious_page()
+        minigame_page = self._build_minigame_page()
 
         self.notebook = Gtk.Notebook()
         self.notebook.append_page(packet_page, Gtk.Label(label="Packets"))
@@ -853,6 +905,9 @@ class Application(Gtk.Application):
         self.notebook.append_page(bazar_page, Gtk.Label(label="NosBazar"))
         self.notebook.append_page(family_page, Gtk.Label(label="Family"))
         self.notebook.append_page(malicious_page, Gtk.Label(label="Malicious"))
+        # Appended last: the screenshots and existing smokes address pages by
+        # index, and the core tabs keep their numbers.
+        self.notebook.append_page(minigame_page, Gtk.Label(label="Minigame"))
         self.notebook.set_vexpand(True)
         self.notebook.connect("switch-page", self._on_page_switch)
 
@@ -5505,6 +5560,535 @@ class Application(Gtk.Application):
         page.append(cast_row)
         return page
 
+    def _build_minigame_page(self) -> Gtk.Widget:
+        """Sheep Farm helper: key spam plus a players-only focus target."""
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        page.set_margin_top(18)
+        page.set_margin_bottom(18)
+        page.set_margin_start(18)
+        page.set_margin_end(18)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        heading = Gtk.Label()
+        heading.set_markup("<b>Minigame</b>")
+        heading.set_xalign(0)
+        header.append(heading)
+        header.append(
+            self._help_button(
+                "Minigame",
+                "Sheep Farm raid tools. In the raid an NPC sheep is worth 5 "
+                "points and another player 20, and the spacebar only targets "
+                "real sheep. Start sends one key press to the attached game "
+                "window every interval, without running the bot; Focus "
+                "nearby players selects the closest other character through "
+                "the client's own selector, keeps it while it stays in "
+                "range, and switches when it leaves. Sheep, pets, NPCs, "
+                "monsters and your own character are never chosen. The "
+                "default y is the secondary-weapon attack on layouts that "
+                "bind it to Y; on QWERTZ the same action is Z, so type z if y "
+                "does nothing. Keep the game window focused: the DLL then "
+                "sends real key input, as if typed; with the GUI focused it "
+                "posts the key to the game's queue instead. Use it with the "
+                "bot off: both change the client's target. The key press "
+                "needs DLL 0.3.0: after updating the build, restart the game "
+                "client and inject again (the GUI alone is not enough), then "
+                "press Start. This is automation; the account risk is yours.",
+            )
+        )
+        page.append(header)
+
+        controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        controls.set_margin_top(8)
+        controls.set_margin_bottom(8)
+        controls.set_margin_start(8)
+        controls.set_margin_end(8)
+
+        first = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        first.set_halign(Gtk.Align.START)
+        self.minigame_toggle = Gtk.ToggleButton(label="Start")
+        self.minigame_toggle.set_tooltip_text(
+            "Start or stop the key spam and player focus"
+        )
+        self.minigame_toggle.connect(
+            "toggled", lambda *_: self._on_minigame_toggled()
+        )
+        self._bind_toggle_color(self.minigame_toggle)
+        first.append(self.minigame_toggle)
+
+        first.append(Gtk.Label(label="Key"))
+        self.minigame_key_entry = Gtk.Entry()
+        self.minigame_key_entry.set_text(self.minigame_config.key)
+        self.minigame_key_entry.set_max_length(12)
+        self.minigame_key_entry.set_width_chars(8)
+        self.minigame_key_entry.set_tooltip_text(
+            "One letter/digit (default y) or a named key: space, enter, tab, "
+            "esc, F1–F12, arrows, page up/down. The secondary attack is Z on "
+            "a QWERTZ layout."
+        )
+        self.minigame_key_entry.connect(
+            "changed", lambda *_: self._on_minigame_settings_changed()
+        )
+        first.append(self.minigame_key_entry)
+
+        first.append(Gtk.Label(label="every"))
+        self.minigame_interval_spin = Gtk.SpinButton.new_with_range(
+            MIN_INTERVAL_MS, MAX_INTERVAL_MS, 10
+        )
+        self.minigame_interval_spin.set_value(
+            self.minigame_config.interval_ms
+        )
+        self.minigame_interval_spin.set_width_chars(6)
+        self.minigame_interval_spin.set_tooltip_text(
+            "Delay between key presses in milliseconds"
+        )
+        self.minigame_interval_spin.connect(
+            "value-changed", lambda *_: self._on_minigame_settings_changed()
+        )
+        first.append(self.minigame_interval_spin)
+        first.append(Gtk.Label(label="ms"))
+        controls.append(first)
+
+        second = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        second.set_halign(Gtk.Align.START)
+        self.minigame_focus_switch = Gtk.CheckButton(
+            label="Focus nearby players"
+        )
+        self.minigame_focus_switch.set_active(
+            self.minigame_config.focus_players
+        )
+        self.minigame_focus_switch.set_tooltip_text(
+            "Select the nearest other player character only — never an NPC, "
+            "pet or monster"
+        )
+        self.minigame_focus_switch.connect(
+            "toggled", lambda *_: self._on_minigame_settings_changed()
+        )
+        second.append(self.minigame_focus_switch)
+        second.append(Gtk.Label(label="within"))
+        self.minigame_radius_spin = Gtk.SpinButton.new_with_range(
+            MIN_RADIUS, MAX_RADIUS, 1
+        )
+        self.minigame_radius_spin.set_value(self.minigame_config.radius)
+        self.minigame_radius_spin.set_width_chars(4)
+        self.minigame_radius_spin.set_tooltip_text(
+            "Player search radius in map tiles (Chebyshev distance)"
+        )
+        self.minigame_radius_spin.connect(
+            "value-changed", lambda *_: self._on_minigame_settings_changed()
+        )
+        second.append(self.minigame_radius_spin)
+        second.append(Gtk.Label(label="tiles"))
+        controls.append(second)
+
+        page.append(
+            self._frame(
+                "Sheep Farm",
+                controls,
+                help_text=(
+                    "In the Sheep Farm raid players are disguised among the "
+                    "sheep NPCs, so the focus deliberately ignores every "
+                    "entity that is not another character; a selected player "
+                    "is what the spammed attack hits. Key is sent to the game "
+                    "window by the DLL; the interval is the delay between "
+                    "presses and the radius is in map tiles. Settings are "
+                    "saved per attached client."
+                ),
+            )
+        )
+
+        self.minigame_status = Gtk.Label(label="")
+        self.minigame_status.set_xalign(0)
+        self.minigame_status.set_wrap(True)
+        self.minigame_status.set_max_width_chars(80)
+        self.minigame_status.add_css_class("dim-label")
+        page.append(self.minigame_status)
+        self._minigame_render_status()
+        return page
+
+    # -- minigame -------------------------------------------------------
+
+    @staticmethod
+    def _minigame_path_for(winpid: int | None) -> Path:
+        override = os.environ.get("NTPL_MINIGAME_CONFIG")
+        if override:
+            return Path(override)
+        base = os.environ.get("XDG_CONFIG_HOME") or str(
+            Path.home() / ".config"
+        )
+        name = (
+            f"minigame-{winpid}.json"
+            if winpid is not None
+            else "minigame.json"
+        )
+        return Path(base) / "ntpl" / name
+
+    def _minigame_set_status(
+        self, text: str, css: str | None = None
+    ) -> None:
+        if self.minigame_status is None:
+            return
+        self.minigame_status.set_text(text)
+        for name in ("bazar-ok", "bazar-bad", "bazar-warn"):
+            self.minigame_status.remove_css_class(name)
+        if css is not None:
+            self.minigame_status.add_css_class(css)
+
+    def _minigame_read_config(self) -> MinigameConfig | None:
+        if (
+            self.minigame_key_entry is None
+            or self.minigame_interval_spin is None
+            or self.minigame_focus_switch is None
+            or self.minigame_radius_spin is None
+        ):
+            return None
+        key = normalize_key(self.minigame_key_entry.get_text())
+        if key is None:
+            self._minigame_set_status(
+                "Key must be one letter/digit or a named key "
+                "(space, enter, tab, esc, F1–F12, arrows).",
+                "bazar-bad",
+            )
+            return None
+        return MinigameConfig(
+            key=key,
+            interval_ms=int(self.minigame_interval_spin.get_value()),
+            focus_players=bool(self.minigame_focus_switch.get_active()),
+            radius=int(self.minigame_radius_spin.get_value()),
+        ).normalized()
+
+    def _minigame_apply_config(self) -> None:
+        self.minigame_guard = True
+        try:
+            if self.minigame_key_entry is not None:
+                self.minigame_key_entry.set_text(self.minigame_config.key)
+            if self.minigame_interval_spin is not None:
+                self.minigame_interval_spin.set_value(
+                    self.minigame_config.interval_ms
+                )
+            if self.minigame_focus_switch is not None:
+                self.minigame_focus_switch.set_active(
+                    self.minigame_config.focus_players
+                )
+            if self.minigame_radius_spin is not None:
+                self.minigame_radius_spin.set_value(
+                    self.minigame_config.radius
+                )
+        finally:
+            self.minigame_guard = False
+        self._minigame_render_status()
+
+    def _minigame_save_config(self) -> None:
+        if self.minigame_config_path is None:
+            return
+        try:
+            save_minigame_config(
+                self.minigame_config_path, self.minigame_config
+            )
+        except OSError as exc:
+            self._minigame_set_status(
+                f"Cannot save settings: {exc}", "bazar-bad"
+            )
+
+    def _on_minigame_settings_changed(self) -> None:
+        if self.minigame_guard:
+            return
+        config = self._minigame_read_config()
+        if config is None:
+            return
+        self.minigame_config = config
+        self._minigame_touched = True
+        self._minigame_save_config()
+        self._minigame_render_status()
+
+    def _minigame_reset_for_attach(self, winpid: int) -> None:
+        """Load this client's settings; a new client never auto-starts."""
+        self._minigame_stop(quiet=True)
+        self.dll_key_supported = True
+        self.minigame_config_path = self._minigame_path_for(winpid)
+        self.minigame_config = load_minigame_config(
+            self.minigame_config_path
+        )
+        self.minigame_focus_blocked.clear()
+        self.minigame_target_requests.clear()
+        self._minigame_apply_config()
+
+    def _on_minigame_toggled(self) -> None:
+        if self.minigame_guard or self.minigame_toggle is None:
+            return
+        if self.minigame_toggle.get_active():
+            self._minigame_start()
+        else:
+            self._minigame_stop()
+
+    def _minigame_abort(self, text: str) -> None:
+        self.minigame_running = False
+        if self.minigame_timer is not None:
+            GLib.source_remove(self.minigame_timer)
+            self.minigame_timer = None
+        self.minigame_guard = True
+        try:
+            if self.minigame_toggle is not None:
+                self.minigame_toggle.set_active(False)
+                self.minigame_toggle.set_label("Start")
+        finally:
+            self.minigame_guard = False
+        self._minigame_set_status(text, "bazar-bad")
+
+    def _minigame_start(self) -> None:
+        if self.client is None or not self.client.connected:
+            self._minigame_abort("Not connected to a game client.")
+            return
+        config = self._minigame_read_config()
+        if config is None:
+            message = (
+                self.minigame_status.get_text()
+                if self.minigame_status is not None
+                else ""
+            )
+            self._minigame_abort(message or "Fix the settings first.")
+            return
+        if not self.dll_key_supported:
+            self._minigame_abort(
+                "This DLL has no KEY command. Restart the game client and "
+                "inject the 0.3.0 DLL, then try again."
+            )
+            return
+        self.minigame_config = config
+        self._minigame_touched = True
+        if (
+            self.minigame_key_entry is not None
+            and self.minigame_key_entry.get_text() != config.key
+        ):
+            self.minigame_guard = True
+            self.minigame_key_entry.set_text(config.key)
+            self.minigame_guard = False
+        self._minigame_save_config()
+        if self.minigame_toggle is not None:
+            self.minigame_toggle.set_label("Stop")
+        self.minigame_running = True
+        now = time.monotonic()
+        self.minigame_next_key = now
+        self.minigame_next_focus = now
+        self.minigame_next_render = now + MINIGAME_RENDER_INTERVAL_S
+        self.minigame_focus_id = None
+        self.minigame_focus_refresh_at = 0.0
+        if self.minigame_timer is None:
+            self.minigame_timer = GLib.timeout_add(
+                MINIGAME_TICK_MS, self._minigame_tick
+            )
+        focus = (
+            f"players within {config.radius} tiles"
+            if config.focus_players
+            else "player focus off"
+        )
+        self._minigame_set_status(
+            f"Sending {config.key} every {config.interval_ms} ms · {focus}.",
+            "bazar-warn",
+        )
+        self._log_line(
+            f"minigame start: key {config.key} every "
+            f"{config.interval_ms} ms, focus={focus}"
+        )
+
+    def _minigame_stop(self, quiet: bool = False) -> None:
+        was_running = self.minigame_running
+        self.minigame_running = False
+        if self.minigame_timer is not None:
+            GLib.source_remove(self.minigame_timer)
+            self.minigame_timer = None
+        if self.minigame_toggle is not None:
+            self.minigame_guard = True
+            try:
+                self.minigame_toggle.set_active(False)
+                self.minigame_toggle.set_label("Start")
+            finally:
+                self.minigame_guard = False
+        self.minigame_focus_id = None
+        self.minigame_focus_name = ""
+        self.minigame_focus_refresh_at = 0.0
+        if quiet:
+            self._minigame_render_status()
+            return
+        if was_running:
+            self._log_line("minigame stop")
+        self._minigame_render_status()
+
+    def _minigame_player_name(self, entity: Entity) -> str:
+        name = (
+            entity.name or self.log_names.get(entity.entity_id, "")
+        ).strip()
+        return name or f"char {entity.entity_id}"
+
+    def _minigame_tick(self) -> bool:
+        if not self.minigame_running:
+            self.minigame_timer = None
+            return False
+        if self.client is None or not self.client.connected:
+            self._minigame_abort("Minigame stopped: not connected.")
+            return False
+        now = time.monotonic()
+        config = self.minigame_config
+        if config.focus_players and now >= self.minigame_next_focus:
+            self._minigame_focus(now)
+            self.minigame_next_focus = now + MINIGAME_FOCUS_INTERVAL_S
+        if now >= self.minigame_next_key:
+            try:
+                self.client.send_raw(f"KEY|{config.key}")
+            except (ConnectionLost, ValueError) as exc:
+                self._minigame_abort(f"Minigame stopped: {exc}")
+                return False
+            self.minigame_next_key = now + config.interval_ms / 1000.0
+        if now >= self.minigame_next_render:
+            self._minigame_render_status()
+            self.minigame_next_render = now + MINIGAME_RENDER_INTERVAL_S
+        return True
+
+    def _minigame_focus(self, now: float) -> None:
+        """Select the nearest other player, never an NPC or a monster."""
+        position = self._player_cell()
+        if position is None:
+            return
+        config = self.minigame_config
+        own_id = self._char_id()
+        world = self.engine.world
+
+        for entity_id, until in list(self.minigame_focus_blocked.items()):
+            if until <= now:
+                self.minigame_focus_blocked.pop(entity_id, None)
+        for entity_id, until in list(
+            self.minigame_target_requests.items()
+        ):
+            if until <= now:
+                self.minigame_target_requests.pop(entity_id, None)
+        blocked = set(self.minigame_focus_blocked)
+
+        target: tuple[Entity, int] | None = None
+        current = (
+            world.entities.get(self.minigame_focus_id)
+            if self.minigame_focus_id is not None
+            else None
+        )
+        if (
+            current is not None
+            and current.kind == 1
+            and current.entity_id != own_id
+            and current.entity_id not in blocked
+        ):
+            distance = max(
+                abs(current.x - position[0]),
+                abs(current.y - position[1]),
+            )
+            if distance <= config.radius:
+                target = (current, distance)
+        if target is None:
+            target = nearest_player(
+                world.entities.values(),
+                own_id,
+                position,
+                config.radius,
+                exclude=blocked,
+            )
+        if target is None:
+            if self.minigame_focus_id is not None:
+                self.minigame_focus_id = None
+                self.minigame_focus_name = ""
+                self._log_line("minigame focus: no player in range")
+            return
+
+        entity, distance = target
+        if (
+            entity.entity_id == self.minigame_focus_id
+            and now < self.minigame_focus_refresh_at
+            and world.target_id == self.minigame_focus_id
+        ):
+            # The client still has this player selected: re-selecting would
+            # only add another ncif. If a key press or the target's death
+            # moved the client's target, the next 0.5 s tick repairs it before
+            # the following key press.
+            return
+        # The client's own selector sets the local target and sends its ncif.
+        # Players are selected by type 1 when the DLL is too old for TARGET.
+        sent = False
+        if self.dll_target_supported:
+            # Remember the id for 10 s: its TARGET ERR/OK may arrive after
+            # the focus has already moved to another player.
+            self.minigame_target_requests[entity.entity_id] = now + 10.0
+            sent = self._client_target(entity.entity_id)
+        if not sent:
+            sent = self._send(f"ncif 1 {entity.entity_id}")
+        if not sent:
+            return
+        name = self._minigame_player_name(entity)
+        changed = entity.entity_id != self.minigame_focus_id
+        self.minigame_focus_id = entity.entity_id
+        self.minigame_focus_name = name
+        # Re-send soon: if TARGET turns out to be missing from this DLL, the
+        # "unknown command" reply lands after the send and the next tick must
+        # retry through the ncif fallback, not wait for a long refresh.
+        self.minigame_focus_refresh_at = now + MINIGAME_FOCUS_REFRESH_S
+        if changed:
+            self._log_line(
+                f"minigame focus -> {name} ({entity.entity_id}) at "
+                f"{distance} tiles"
+            )
+
+    def _minigame_render_status(self) -> None:
+        if self.minigame_status is None:
+            return
+        config = self.minigame_config
+        if not self.minigame_running:
+            focus = (
+                f"focus players within {config.radius} tiles"
+                if config.focus_players
+                else "focus off"
+            )
+            self._minigame_set_status(
+                f"Off · key {config.key} every {config.interval_ms} ms · "
+                f"{focus}."
+            )
+            return
+        parts = [
+            f"Sending {config.key} every {config.interval_ms} ms"
+        ]
+        if config.focus_players:
+            position = self._player_cell()
+            rows = nearby_players(
+                self.engine.world.entities.values(),
+                self._char_id(),
+                position,
+                config.radius,
+                exclude=set(self.minigame_focus_blocked),
+            )
+            count = (
+                "1 player"
+                if len(rows) == 1
+                else f"{len(rows)} players"
+            )
+            player = (
+                self.engine.world.entities.get(self.minigame_focus_id)
+                if self.minigame_focus_id is not None
+                else None
+            )
+            if player is not None and position is not None:
+                distance = max(
+                    abs(player.x - position[0]),
+                    abs(player.y - position[1]),
+                )
+                name = self._minigame_player_name(player)
+                parts.append(
+                    f"{count} in range · focusing {name} "
+                    f"({distance} tiles)"
+                )
+            elif rows:
+                parts.append(f"{count} in range · no target selected")
+            else:
+                parts.append(
+                    f"no player within {config.radius} tiles"
+                )
+        else:
+            parts.append("player focus off")
+        self._minigame_set_status(" · ".join(parts), "bazar-warn")
+
     def _install_css(self) -> None:
         provider = Gtk.CssProvider()
         provider.load_from_data(
@@ -8900,6 +9484,10 @@ class Application(Gtk.Application):
         self._bazar_reset_for_attach(client.winpid)
         self._bazar_seed_from_log()
         self._family_reset_for_attach(client.winpid)
+        self._minigame_reset_for_attach(client.winpid)
+        # A new client has its own DLL; the old "not supported" latches do
+        # not apply to it.
+        self.dll_target_supported = True
         self.client_label = f"{client.title} · PID {client.winpid}"
         self.dll_version = None
         self._update_window_title()
@@ -8979,52 +9567,94 @@ class Application(Gtk.Application):
                         except ValueError:
                             blocked = None
                         reason = " ".join(parts[3:])
-                        if blocked is not None:
-                            self.target_blocked[blocked] = (
-                                time.monotonic() + TARGET_BLOCK_S
-                            )
-                            if (
-                                "entity not found" in reason
-                                or "client refused" in reason
-                            ):
-                                # The client has no live object for it. The
-                                # server sends no `out` for a killed monster,
-                                # so without this the bot keeps selecting the
-                                # corpse and every attack is cancelled.
-                                self.engine.world.entities.pop(blocked, None)
-                                dirty = True
-                        self._set_status(message.payload)
-                        # Hundreds of ids can look like monsters in the world
-                        # state while the client cannot select them (killed
-                        # while out of view, never `out`). Dropping them one
-                        # by one used to look like frantic target switching;
-                        # after a few in a row, pause combat briefly instead.
                         now = time.monotonic()
-                        self.target_fail_events = [
-                            when
-                            for when in self.target_fail_events
-                            if now - when <= TARGET_FAIL_WINDOW_S
-                        ]
-                        self.target_fail_events.append(now)
-                        if (
-                            len(self.target_fail_events)
-                            >= TARGET_FAIL_TRIGGER
-                            and now >= self.combat_paused_until
-                        ):
-                            self.combat_paused_until = (
-                                now + TARGET_FAIL_PAUSE_S
+                        minigame_refusal = blocked is not None and (
+                            blocked == self.minigame_focus_id
+                            or self.minigame_target_requests.get(
+                                blocked, 0.0
                             )
-                            self.combat_pause_pos = self._player_cell()
-                            self.target_fail_events.clear()
-                            self._set_status(
-                                "target selection keeps failing (the client "
-                                "has no such monster); pausing combat"
-                            )
-                    elif len(parts) >= 5 and parts[2] == "OK":
-                        self._log_line(
-                            f"monster {parts[1]} selected "
-                            f"(entity {parts[3]}, controller {parts[4]})"
+                            > now
                         )
+                        if minigame_refusal and blocked is not None:
+                            # A player focus refusal is not a combat target:
+                            # do not delete the player from the world or
+                            # pause the bot. Retry another player instead.
+                            self.minigame_target_requests.pop(blocked, None)
+                            self.minigame_focus_blocked[blocked] = (
+                                now + TARGET_BLOCK_S
+                            )
+                            if blocked == self.minigame_focus_id:
+                                self.minigame_focus_id = None
+                                self.minigame_focus_name = ""
+                            self.minigame_focus_refresh_at = 0.0
+                            self._log_line(
+                                f"minigame focus refused {blocked}: {reason}"
+                            )
+                            self._minigame_set_status(
+                                f"Focus refused for player {blocked}: "
+                                f"{reason}",
+                                "bazar-warn",
+                            )
+                        else:
+                            if blocked is not None:
+                                self.target_blocked[blocked] = (
+                                    time.monotonic() + TARGET_BLOCK_S
+                                )
+                                if (
+                                    "entity not found" in reason
+                                    or "client refused" in reason
+                                ):
+                                    # The client has no live object for it.
+                                    # The server sends no `out` for a killed
+                                    # monster, so without this the bot keeps
+                                    # selecting the corpse and every attack
+                                    # is cancelled.
+                                    self.engine.world.entities.pop(
+                                        blocked, None
+                                    )
+                                    dirty = True
+                            self._set_status(message.payload)
+                            # Hundreds of ids can look like monsters in the
+                            # world state while the client cannot select them
+                            # (killed while out of view, never `out`).
+                            # Dropping them one by one used to look like
+                            # frantic target switching; after a few in a row,
+                            # pause combat briefly instead.
+                            self.target_fail_events = [
+                                when
+                                for when in self.target_fail_events
+                                if now - when <= TARGET_FAIL_WINDOW_S
+                            ]
+                            self.target_fail_events.append(now)
+                            if (
+                                len(self.target_fail_events)
+                                >= TARGET_FAIL_TRIGGER
+                                and now >= self.combat_paused_until
+                            ):
+                                self.combat_paused_until = (
+                                    now + TARGET_FAIL_PAUSE_S
+                                )
+                                self.combat_pause_pos = self._player_cell()
+                                self.target_fail_events.clear()
+                                self._set_status(
+                                    "target selection keeps failing (the "
+                                    "client has no such monster); pausing "
+                                    "combat"
+                                )
+                    elif len(parts) >= 5 and parts[2] == "OK":
+                        try:
+                            selected_id = int(parts[1])
+                        except ValueError:
+                            selected_id = None
+                        if (
+                            selected_id != self.minigame_focus_id
+                            and selected_id
+                            not in self.minigame_target_requests
+                        ):
+                            self._log_line(
+                                f"monster {parts[1]} selected "
+                                f"(entity {parts[3]}, controller {parts[4]})"
+                            )
                     dirty = True
                 elif message.payload.startswith("SPEED CORRECTED"):
                     # The DLL turned the boost off after the server corrected
@@ -9117,16 +9747,49 @@ class Application(Gtk.Application):
                         if message.payload.strip() == "CAST ON"
                         else "cast speed normal"
                     )
+                elif message.payload.startswith("KEY OK"):
+                    # The DLL accepts KEY| (it reports only state changes).
+                    if not self.dll_key_supported:
+                        self.dll_key_supported = True
+                    self._log_line("minigame keyboard ready")
+                elif message.payload.startswith("KEY ERR"):
+                    reason = message.payload[len("KEY "):]
+                    self._log_line(f"minigame keyboard refused: {reason}")
+                    self._minigame_abort(
+                        f"Minigame stopped: {reason}"
+                    )
                 elif message.payload.startswith("unknown command: CAST"):
                     # Old DLLs do not know the Cast speed command. The
                     # feature is host-side, so nothing is missing; stay
                     # quiet instead of showing a scary status line.
                     pass
+                elif message.payload.startswith("unknown command: KEY"):
+                    if self.dll_key_supported:
+                        self.dll_key_supported = False
+                        self._log_line(
+                            "minigame: this DLL has no KEY command; "
+                            "restart the game and inject 0.3.0"
+                        )
+                        if self.minigame_running:
+                            self._minigame_abort(
+                                "Minigame stopped: this DLL has no KEY "
+                                "command. Restart the game client and "
+                                "inject DLL 0.3.0."
+                            )
+                        else:
+                            self._minigame_set_status(
+                                "This DLL has no KEY command. Restart the "
+                                "game client and inject DLL 0.3.0.",
+                                "bazar-bad",
+                            )
                 elif message.payload.startswith(
                     "unknown command: TARGET"
                 ):
                     if self.dll_target_supported:
                         self.dll_target_supported = False
+                        # Retry the current minigame focus through ncif now
+                        # instead of after the normal refresh.
+                        self.minigame_focus_refresh_at = 0.0
                         self._set_status(
                             "DLL is too old for target selection; "
                             "falling back to ncif (re-inject the new DLL)"
@@ -9377,6 +10040,10 @@ class Application(Gtk.Application):
             if self.client_label:
                 where = f"{self.client_label} · {where}"
             self._set_status(where)
+        # A reconnect may be a restarted game with a newer DLL; let the first
+        # command report support again instead of keeping an old latch.
+        self.dll_key_supported = True
+        self.dll_target_supported = True
         # The GUI can attach after login, so there may be no `at` packet.
         # Ask the DLL for the client's own local position instead of sending a
         # probe walk (which would make the server teleport the character).
@@ -11476,6 +12143,12 @@ class Application(Gtk.Application):
         self._closing = True
         self._client_generation += 1
         self._stop_bot()
+        self._minigame_stop(quiet=True)
+        if self.minigame_config_path is not None and (
+            self._minigame_touched
+            or self.minigame_config_path.is_file()
+        ):
+            self._minigame_save_config()
         if self._speed_boost_source is not None:
             GLib.source_remove(self._speed_boost_source)
             self._speed_boost_source = None

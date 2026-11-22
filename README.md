@@ -89,14 +89,35 @@ The packet formats and state machine are documented in
 [docs/bazar.md](docs/bazar.md) and [docs/protocol/bazaar.md](docs/protocol/bazaar.md);
 the catalog/database side is in [docs/database.md](docs/database.md).
 
+## Minigame
+
+The seventh tab automates the **Sheep Farm** mini-raid (five minutes,
+free-for-all, NPC sheep worth 5 points, a disguised player 20). **Start** spams
+a key press at the game window every interval — default `y`, the
+secondary-weapon attack on layouts that bind it to Y (`z` on QWERTZ) — and
+**Focus nearby players** keeps the nearest *player* selected through the
+client's own selector. Pets, NPCs, monsters (including the sheep) and the local
+character are never chosen, so the spammed attack lands on a player rather than
+a sheep. The key and focus work with or without the bot (use the bot off in the
+raid: both select a target); each `KEY|` press is queued to a DLL thread (real
+`SendInput` when the game is focused, a posted key otherwise) and never delays
+packets. Settings are saved per client in
+`~/.config/ntpl/minigame-<winpid>.json`.
+
+`KEY|` needs **DLL 0.3.0**: updating the build is not enough, the running
+client keeps the old module. Restart the game, inject again, and check the
+title shows `DLL 0.3.0`. An old DLL is detected and the tab stops with a clear
+message. Details, edge cases and troubleshooting: [docs/minigame.md](docs/minigame.md).
+
 ## Quick start on Linux
 
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 317 Python unit tests
+make -C linux host-test                      # 331 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
-make -C linux gui-test                       # headless GTK4 smokes (xvfb)
+make -C linux key-test                       # DLL KEY| name parsing
+make -C linux gui-test                       # six headless GTK4 smokes (xvfb)
 make -C linux bot-test                       # 41 fake-server bot smokes
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path
@@ -138,6 +159,8 @@ Start with [docs/architecture.md](docs/architecture.md), then:
   relisting (ported from `TaraJura/Nostale-NB`); packet formats in
   [docs/protocol/bazaar.md](docs/protocol/bazaar.md) and
   [docs/protocol/inventory.md](docs/protocol/inventory.md)
+- [docs/minigame.md](docs/minigame.md) — the **Minigame** tab: Sheep Farm key
+  spam, player-only focus and the DLL `KEY|` command
 - [docs/database.md](docs/database.md) — local SQLite **game + packet
   database** built from the client archives and public NosTale projects;
   includes the full NosMall catalog and an import picker in the tab
@@ -163,7 +186,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 317 unit tests pass, the five GTK4 window smokes
+The Linux port builds, its 331 unit tests pass, the six GTK4 window smokes
 and 41 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 
@@ -206,6 +229,11 @@ An **Only players with a fairy** filter excludes fresh alt accounts; the map
 list labels each candidate fairy / no fairy / fairy unknown.
 Live-tested on `redenkor` and `sjkrimer`; see
 [docs/family.md](docs/family.md).
+
+The **Minigame** tab (page 7) is described in
+[Minigame](#minigame) above: Sheep Farm key spam with a players-only focus,
+per-client settings and a DLL `KEY|` command (0.3.0). Live-key verification is
+still pending; see [docs/minigame.md](docs/minigame.md).
 
 The client's own map grids are parsed from `NostaleData/NStcData.NOS`; live
 maps so far include **2, 3, 4, 20, 98, 103** and **104**, and every observed

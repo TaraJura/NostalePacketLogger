@@ -6,6 +6,7 @@
 #include "clientmove.h"
 #include "clienttarget.h"
 #include "config.h"
+#include "keyinput.h"
 #include "log.h"
 #include "memory.h"
 #include "packetlogger.h"
@@ -325,6 +326,44 @@ void handle_command(const std::string& command) {
         packetlogger::set_cast_zero(enabled != 0);
         tcpserver::send_line(
             packetlogger::cast_zero() ? "STATUS|CAST ON" : "STATUS|CAST OFF");
+        return;
+    }
+
+    // KEY|y -- one key press in the game client, used by the Minigame tab.
+    // The press is queued to a small key thread (WM_KEYDOWN, 25 ms,
+    // WM_KEYUP), so a 100 ms spam loop never blocks packet forwarding. The
+    // reply is sent only when the result changes; a per-press STATUS line
+    // would flood the host at 10-25 presses per second.
+    if (command.compare(0, 4, "KEY|") == 0) {
+        const std::string key = command.substr(4);
+        static bool reported = false;
+        static bool last_ok = false;
+        static DWORD last_error_at = 0;
+        std::string error;
+        if (!client_key(key, error)) {
+            // The GUI stops the loop on the first ERR, so a failing press is
+            // not a flood. Repeat the ERR at most every 250 ms so a second
+            // Start attempt (after the previous ERR) gets a fresh reason
+            // instead of silence; the log only changes with the state.
+            const DWORD now = GetTickCount();
+            if (!reported || last_ok || now - last_error_at >= 250) {
+                if (!reported || last_ok) {
+                    ntpl::logf(
+                        "KEY %s failed: %s", key.c_str(), error.c_str());
+                }
+                tcpserver::send_line("STATUS|KEY ERR " + error);
+                last_error_at = now;
+                reported = true;
+                last_ok = false;
+            }
+            return;
+        }
+        if (!reported || !last_ok) {
+            ntpl::logf("KEY %s accepted", key.c_str());
+            tcpserver::send_line("STATUS|KEY OK " + key);
+            reported = true;
+            last_ok = true;
+        }
         return;
     }
 

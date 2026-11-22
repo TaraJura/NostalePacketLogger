@@ -33,16 +33,18 @@ linux/
 │   ├── tcp_server.*         loopback server
 │   ├── memory.*             pattern scan, VirtualProtect patching
 │   ├── nostale_string.h     Delphi string layout
+│   ├── keyinput.*, key_names.h  KEY| key press (own game window)
 │   ├── log.*, config.*      file log and environment config
 │   └── dllmain.cpp          worker thread, command loop, shutdown
 ├── src/injector/            32-bit injector (Windows PIDs, works under Wine)
 ├── host/ntpl/               Python package (protocol, client, engine, mapdata,
-│                            cli, gui)
+│                            minigame, cli, gui)
 ├── host/tests/              stdlib unittest suite
 ├── scripts/                 inject.sh, host.sh, gui.sh, dev-test-wine.sh,
 │                            dev-test-bot.sh
 ├── test/fake_game.cpp       LoadLibraryA fixture for the Wine test
-└── test/gui_*.py            Xvfb smoke tests (packet window, map/bot tab)
+└── test/gui_*.py            Xvfb smoke tests (packet window, map/bot tab,
+                             picker, Family, Minigame)
 ```
 
 ## Build
@@ -54,8 +56,9 @@ make -C linux check                        # file(1) on the three PE outputs
 ```
 
 Outputs: `linux/build/PacketLogger.dll`, `Injector.exe`, `FakeGame.exe` — all
-`PE32 ... Intel i386`. The DLL imports only `KERNEL32`, `msvcrt` and `WS2_32`;
-libstdc++ and libgcc are linked statically, so nothing else has to be shipped.
+`PE32 ... Intel i386`. The DLL imports only `KERNEL32`, `USER32`, `msvcrt` and
+`WS2_32`; libstdc++ and libgcc are linked statically, so nothing else has to be
+shipped.
 
 MinGW headers on Linux are lowercase (`windows.h`, not `Windows.h`). The source
 uses lowercase includes for that reason.
@@ -64,11 +67,13 @@ uses lowercase includes for that reason.
 
 ```bash
 make -C linux all test-host
-make -C linux host-test          # 317 cases: protocol, client, engine, mapdata, config, names, noscrypto, headless, gameforge auth, client locks, bazar/inventory, database, mirror
+make -C linux host-test          # 331 cases: protocol, client, engine, mapdata, config, names, minigame, noscrypto, headless, gameforge auth, client locks, bazar/inventory, database, mirror
 make -C linux speed-test         # DLL speed-boost cond parsing and walk clamp
+make -C linux key-test           # DLL KEY| key-name parser
 make -C linux gui-test           # headless GTK4: map switch, tooltips, toggles,
                                  # banner, help popovers, client picker,
-                                 # multi-client locks, family invite, auto-invite
+                                 # multi-client locks, family invite, auto-invite,
+                                 # minigame key spam/player focus
 make -C linux bot-test           # 41 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, cross-client follow mirror, follow nameless/char id, portal blocking, speed boost control, cast speed control, cast assist, cast-ready pacing, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosBazar inventory scan/price-all, NosMall import filters
 ./linux/scripts/dev-test-wine.sh 25
 ```

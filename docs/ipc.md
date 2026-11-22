@@ -34,6 +34,7 @@ more `|` characters.
 | `MOVE|<x> <y>` | host → DLL | run the client's own MoveTo/pathfinding, so it walks visibly |
 | `POS` | host → DLL | reply `STATUS|POS <x> <y> <charId> <resting>` from the local player object |
 | `TARGET\|<entityId>` | host → DLL | select the entity in the client (target ring + the client's own `ncif`) |
+| `KEY\|<key>` | host → DLL | queue one key press for the game's own window; `STATUS\|KEY OK` / `KEY ERR` only when the result changes (DLL 0.3.0+) |
 | `QUIT|` | host → DLL | unhook and stop the server; the module stays mapped until the game exits |
 | `PORTALS\|1` / `PORTALS\|0` | host → DLL | drop or allow the client's own `preq` portal requests; reply `STATUS\|PORTALS BLOCKED` / `ALLOWED` |
 
@@ -48,7 +49,7 @@ decided by which side you are, not by the message.
    three resolved addresses, hook state, and drop counters. Example:
 
    ```
-   STATUS|ntpl 0.2.1 | recv=0x004A1B20 send=0x004A3C40 tnt=0x004B00A4 | hooks recv=ACTIVE send=ACTIVE | drops recv=0 send=0
+   STATUS|ntpl 0.3.0 | recv=0x004A1B20 send=0x004A3C40 tnt=0x004B00A4 | hooks recv=ACTIVE send=ACTIVE | drops recv=0 send=0
    ```
 
 3. The host may send `STATUS` at any time to ask again.
@@ -132,9 +133,49 @@ refused.
 The client's own `ncif` appears in the normal `SEND|ncif ...` stream, so a host
 can confirm the selection from packets alone.
 
+The selector is the game UI's generic selection routine; it accepts any
+client-side kind 1-8 except the not-targetable type. The Minigame tab uses it
+for **players** (`kind == 1`) as well as monsters, with an injected
+`SEND|ncif 1 <charId>` fallback for an older DLL.
+
 `FAILED` means the signature was found but the byte patch failed; `NOT-FOUND`
 means the client build does not match the signatures. Both are non-fatal: the
 DLL stays alive and keeps reporting.
+
+### Key command (DLL 0.3.0+)
+
+`KEY|<name>` queues one key press for the game's own top-level window
+(`TNosTaleMainF`; the DLL enumerates its own process, caches the window and
+never touches another client). `<name>` is one ASCII letter/digit or one of
+`space`, `enter`, `tab`, `esc`, `backspace`, `shift`, `ctrl`, `alt`, `up`,
+`down`, `left`, `right`, `home`, `end`, `insert`, `delete`, `pageup`,
+`pagedown`, `F1`-`F12` (aliases `return`, `escape`, `control`, `spacebar` are
+accepted).
+
+The press is asynchronous. A small key thread posts `WM_KEYDOWN`, holds the
+key for 25 ms and posts `WM_KEYUP`, so the packet worker and `TARGET`/`SEND`
+commands are never delayed. When the game window owns the foreground the DLL
+instead uses `SendInput`, which updates the thread keyboard state
+(`GetKeyboardState`/`GetKeyState`) exactly like a physical key; a posted
+message does not. The key-up is always posted to the game window too, so a
+focus change during the 25 ms hold cannot leave the key stuck. A 10-25 Hz
+spam loop therefore costs one short command per press and produces no packet
+or reply.
+
+`STATUS|KEY OK <key>` is sent once when the result becomes OK.
+`STATUS|KEY ERR <reason>` is sent on the first failure and then at most once
+every 250 ms, so a new Start attempt gets a fresh reason without a 10-25 Hz
+flood:
+
+```
+STATUS|KEY OK y
+STATUS|KEY ERR game window not found
+STATUS|KEY ERR unknown key: xyz
+```
+
+An older DLL answers `STATUS|unknown command: KEY|<name>` and the host stops
+the loop. The module stays mapped after `QUIT`, so a new `KEY` command needs a
+game-client restart and a fresh injection, not only a host restart.
 
 ### Portal blocking
 

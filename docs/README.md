@@ -7,6 +7,7 @@
 | [map.md](map.md) | maps, walkability, A*, the Map/Bot tab, path loop and auto-attack |
 | [bot-config.md](bot-config.md) | monster target filters, conditional spell rules, JSON export/import |
 | [bazar.md](bazar.md) | the NosBazar tab: cheapest-listing monitor, gold/ND profit, floor-protected relisting, per-client JSON |
+| [minigame.md](minigame.md) | the Minigame tab: Sheep Farm key spam, player-only focus, `KEY\|` DLL command and its requirements |
 | [database.md](database.md) | local SQLite game/packet database: client Item/monster/skill/map/NosMall data, protocol wiki, public GitHub packet projects, CLI queries and NosMall export |
 | [context.md](context.md) | quick map of the current state, user config/database paths and next likely work |
 | [mcp.md](mcp.md) | expose the engine to an AI agent over MCP: tools, the DLL broker, Claude Code config, security |
@@ -32,9 +33,9 @@ the host differ, the game's packets do not.
 - **Windows tree (`windows/`)** — the original working implementation. Injector
   + DLL + WinForms GUI, named pipes.
 - **Linux tree (`linux/`)** — MinGW DLL + TCP loopback + Python CLI + GTK4 GUI
-  + state engine. Builds cleanly, **291 host tests pass**, the GTK4 window
-  passes three headless smokes (packet window, client picker, multi-client
-  locks), and the DLL has
+  + state engine. Builds cleanly, **331 host tests pass**, the GTK4 window
+  passes six headless smokes (packet window, client picker, multi-client
+  locks, Family, Family auto-invite, Minigame), and the DLL has
   been verified against the **live NosTale client** under Wine 11: both hooks
   ACTIVE, drops 0, sit/stand via `rest`, and natural movement through the
   client's own MoveTo (`MOVE|x y` + `POS`). Several clients can run side by
@@ -62,9 +63,11 @@ the host differ, the game's packets do not.
   scanned from `NSgtdData.NOS` → `Skill.dat` (Always/HP/MP conditions, MP,
   range, cast time, cooldown); the whole configuration can be saved/loaded as
   JSON. The fourth **NosBazar** tab monitors the player auction house and can
-  relist with a floor, ported from Nostale-NB. `make gui-test` and `make
-  bot-test` pass (37 bot smokes, including the spell rotation, HP/MP recovery,
-  finish-kill-before-recovery, loot approach, the NosBazar monitor and relist,
-  the speed-boost control, and cross-client Follow packet mirroring). See
-  [map.md](map.md),
-  [bot-config.md](bot-config.md) and [bazar.md](bazar.md).
+  relist with a floor, ported from Nostale-NB. The seventh **Minigame** tab
+  spams a key and keeps the nearest other player selected for the Sheep Farm
+  raid. `make gui-test` and `make bot-test` pass (41 bot smokes, including the
+  spell rotation, HP/MP recovery, finish-kill-before-recovery, loot approach,
+  the NosBazar monitor and relist, the speed-boost control, and cross-client
+  Follow packet mirroring). See [map.md](map.md),
+  [bot-config.md](bot-config.md), [bazar.md](bazar.md) and
+  [minigame.md](minigame.md).
