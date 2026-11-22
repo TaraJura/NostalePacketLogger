@@ -682,6 +682,7 @@ class Application(Gtk.Application):
         self.bazar_section_notebook = None
         self._bazar_section_index: dict[str, int] = {}
         self.bazar_relist_list = None
+        self.bazar_relist_scroll = None
         self.bazar_relist_info = None
         self.bazar_relist_editor_label = None
         self.bazar_relist_hint = None
@@ -696,6 +697,7 @@ class Application(Gtk.Application):
         self.bazar_relist_add_items_button = None
         self.bazar_relist_add_inventory_button = None
         self.bazar_relist_remove_button = None
+        self.bazar_relist_group_button = None
         self._bazar_render_version = -1
         self._bazar_character_autofilled = False
         self._bazar_npc_autofilled = False
@@ -2337,6 +2339,14 @@ class Application(Gtk.Application):
     def _bazar_render_relist_items(self) -> None:
         if self.bazar_relist_list is None:
             return
+        # Ticking a row used to rebuild this list, which threw the scroll
+        # position back to the top. Every render now keeps it (the same
+        # pattern as the Inventory list).
+        adjustment = None
+        scroll_position = 0.0
+        if self.bazar_relist_scroll is not None:
+            adjustment = self.bazar_relist_scroll.get_vadjustment()
+            scroll_position = adjustment.get_value()
         selected = self.bazar_relist_selected
         child = self.bazar_relist_list.get_first_child()
         while child is not None:
@@ -2367,6 +2377,12 @@ class Application(Gtk.Application):
             self.bazar_relist_selected = None
             self._bazar_relist_item_selected(self.bazar_relist_list, None)
             self._bazar_update_relist_info()
+            if adjustment is not None:
+                GLib.idle_add(
+                    self._inventory_restore_scroll,
+                    adjustment,
+                    scroll_position,
+                )
             return
         for item in items:
             row = Gtk.ListBoxRow()
@@ -2393,6 +2409,10 @@ class Application(Gtk.Application):
             badge = Gtk.Label(label=self._bazar_relist_badge(item)[0])
             badge.add_css_class(self._bazar_relist_badge(item)[1])
             badge.set_valign(Gtk.Align.START)
+            # Kept on the row so a tick can update it in place instead of
+            # rebuilding the list under the user's cursor.
+            row.detail_label = detail  # type: ignore[attr-defined]
+            row.badge_label = badge  # type: ignore[attr-defined]
             # The tick is the item's membership in the relist set; the
             # badge explains why a ticked item still cannot send c_reg.
             track = Gtk.CheckButton()
@@ -2402,7 +2422,7 @@ class Application(Gtk.Application):
                 "Track this item for relisting. Untick to keep watching "
                 "its price without changing the listing; the floor is kept."
             )
-            track.connect(
+            handler = track.connect(
                 "toggled",
                 lambda button, name=item.name: (
                     self._bazar_relist_tracked_toggled(
@@ -2411,6 +2431,7 @@ class Application(Gtk.Application):
                 ),
             )
             row.relist_check = track  # type: ignore[attr-defined]
+            row.relist_handler = handler  # type: ignore[attr-defined]
             content = Gtk.Box(
                 orientation=Gtk.Orientation.HORIZONTAL, spacing=8
             )
@@ -2425,6 +2446,10 @@ class Application(Gtk.Application):
         else:
             self._bazar_relist_item_selected(self.bazar_relist_list, None)
         self._bazar_update_relist_info()
+        if adjustment is not None:
+            GLib.idle_add(
+                self._inventory_restore_scroll, adjustment, scroll_position
+            )
 
     @staticmethod
     def _bazar_relist_detail(item: BazarItem) -> str:
@@ -2474,14 +2499,55 @@ class Application(Gtk.Application):
         item = self._bazar_relist_set_tracked(name, tracked)
         if item is None:
             return
-        # The row is being torn down by the handler's own re-render when
-        # the filter hides it; defer the visual refresh one loop turn.
-        GLib.idle_add(self._bazar_relist_rerender_idle)
+        # Update the row in place; a rebuild here was what threw a scrolled
+        # list back to the top.
+        self._bazar_relist_refresh_item(item)
 
-    def _bazar_relist_rerender_idle(self) -> bool:
-        if not self._closing:
+    def _bazar_relist_row_by_name(self, name: str):
+        if self.bazar_relist_list is None:
+            return None
+        child = self.bazar_relist_list.get_first_child()
+        while child is not None:
+            if getattr(child, "item_name", None) == name:
+                return child
+            child = child.get_next_sibling()
+        return None
+
+    def _bazar_relist_refresh_item(self, item: BazarItem) -> None:
+        """Rewrite one row's badge/detail without rebuilding the list.
+
+        A rebuild is only needed when the active filter now hides or shows
+        the row; that render keeps the scroll position anyway.
+        """
+        row = self._bazar_relist_row_by_name(item.name)
+        if row is not None:
+            badge = getattr(row, "badge_label", None)
+            if badge is not None:
+                for css in ("bazar-ok", "bazar-warn", "dim-label"):
+                    badge.remove_css_class(css)
+                text, css = self._bazar_relist_badge(item)
+                badge.set_text(text)
+                badge.add_css_class(css)
+            detail = getattr(row, "detail_label", None)
+            if detail is not None:
+                detail.set_text(self._bazar_relist_detail(item))
+            # A button-driven change (Remove from relisting) must move the
+            # row's tick too; block the handler so it is not a user action.
+            check = getattr(row, "relist_check", None)
+            if check is not None and check.get_active() != bool(item.relist):
+                handler = getattr(row, "relist_handler", None)
+                if handler is not None:
+                    check.handler_block(handler)
+                check.set_active(bool(item.relist))
+                if handler is not None:
+                    check.handler_unblock(handler)
+        self._bazar_update_relist_info()
+        filtered = (
+            self.bazar_relist_filter is not None
+            and self.bazar_relist_filter.get_active()
+        )
+        if row is None or (filtered and not item.relist):
             self._bazar_render_relist_items()
-        return False
 
     def _bazar_relist_set_tracked(
         self, name: str | None, tracked: bool
@@ -2512,7 +2578,6 @@ class Application(Gtk.Application):
         if not changed:
             return item
         self._bazar_save_config(quiet=True)
-        self._bazar_render_items()
         self._bazar_update_relist_info()
         label = self._bazar_item_label(item)
         if tracked:
@@ -2533,13 +2598,100 @@ class Application(Gtk.Application):
             )
         return item
 
+    def _bazar_relist_set_tracked_many(
+        self, names: list[str], tracked: bool
+    ) -> int:
+        """Apply one relist action to several items with a single save."""
+        changed = 0
+        for name in names:
+            item = self._bazar_item_by_name(name)
+            if item is None:
+                continue
+            if bool(item.relist) == bool(tracked) and (
+                not tracked or item.enabled
+            ):
+                continue
+            item.relist = bool(tracked)
+            if tracked:
+                item.enabled = True
+            changed += 1
+        if not changed:
+            return 0
+        self._bazar_save_config(quiet=True)
+        self._bazar_render_relist_items()
+        self._bazar_log(
+            f"{changed} item(s) "
+            + ("added to relisting" if tracked else "removed from relisting")
+        )
+        return changed
+
+    def _bazar_relist_shown_names(self) -> list[str]:
+        if self.bazar_relist_list is None:
+            return []
+        names: list[str] = []
+        child = self.bazar_relist_list.get_first_child()
+        while child is not None:
+            name = getattr(child, "item_name", None)
+            if name:
+                names.append(name)
+            child = child.get_next_sibling()
+        return names
+
+    def _bazar_relist_selected_names(self) -> list[str]:
+        if self.bazar_relist_list is None:
+            return []
+        return [
+            name
+            for row in self.bazar_relist_list.get_selected_rows()
+            if (name := getattr(row, "item_name", None))
+        ]
+
+    def _bazar_relist_select_shown(self) -> None:
+        if self.bazar_relist_list is None:
+            return
+        select_all = getattr(self.bazar_relist_list, "select_all", None)
+        if select_all is not None:
+            select_all()
+            return
+        child = self.bazar_relist_list.get_first_child()
+        while child is not None:
+            self.bazar_relist_list.select_row(child)
+            child = child.get_next_sibling()
+
+    def _bazar_relist_unselect_all(self) -> None:
+        if self.bazar_relist_list is not None:
+            self.bazar_relist_list.unselect_all()
+
+    def _bazar_relist_set_all_shown(self, tracked: bool) -> None:
+        names = self._bazar_relist_shown_names()
+        if not names:
+            self._bazar_log("the relist list is empty")
+            return
+        if not self._bazar_relist_set_tracked_many(names, tracked):
+            self._bazar_log(
+                "nothing changed: every shown item is already "
+                + ("relisting" if tracked else "out of relisting")
+            )
+
+    def _bazar_relist_set_selected(self, tracked: bool) -> None:
+        names = self._bazar_relist_selected_names()
+        if not names:
+            self._bazar_log(
+                "select one or more rows in the relist list first "
+                "(Ctrl+click for more)"
+            )
+            return
+        if not self._bazar_relist_set_tracked_many(names, tracked):
+            self._bazar_log("nothing changed for the selected rows")
+
     def _bazar_relist_remove_selected(self) -> None:
         name = self.bazar_relist_selected
         if not name:
             self._bazar_log("select an item in the relist list first")
             return
-        self._bazar_relist_set_tracked(name, False)
-        self._bazar_render_relist_items()
+        item = self._bazar_relist_set_tracked(name, False)
+        if item is not None:
+            self._bazar_relist_refresh_item(item)
 
     def _bazar_relist_add_from_items(self) -> list[BazarItem]:
         """Move the Items section's selection into the relist set."""
@@ -2639,16 +2791,27 @@ class Application(Gtk.Application):
         return f"ready · floor {item.min_price:,} per unit"
 
     def _bazar_relist_item_selected(
-        self, _listbox: Gtk.ListBox, row: Gtk.ListBoxRow | None
+        self, listbox: Gtk.ListBox, row: Gtk.ListBoxRow | None
     ) -> None:
         if row is None:
-            self.bazar_relist_selected = None
-            if self.bazar_relist_editor_label is not None:
-                self.bazar_relist_editor_label.set_text("No item selected")
-            if self.bazar_relist_hint is not None:
-                self.bazar_relist_hint.set_text("")
-            self._bazar_set_relist_form_sensitive(False)
-            return
+            # In multiple-selection mode this signal also fires when one of
+            # several rows is deselected; keep editing a row that remains
+            # selected instead of disabling the whole editor.
+            remaining = (
+                listbox.get_selected_rows() if listbox is not None else []
+            )
+            if remaining:
+                row = remaining[0]
+            else:
+                self.bazar_relist_selected = None
+                if self.bazar_relist_editor_label is not None:
+                    self.bazar_relist_editor_label.set_text(
+                        "No item selected"
+                    )
+                if self.bazar_relist_hint is not None:
+                    self.bazar_relist_hint.set_text("")
+                self._bazar_set_relist_form_sensitive(False)
+                return
         name = getattr(row, "item_name", None)
         if not name:
             return
@@ -2704,6 +2867,9 @@ class Application(Gtk.Application):
         child = self.bazar_relist_list.get_first_child()
         while child is not None:
             if getattr(child, "item_name", None) == name:
+                # A programmatic selection is single, even though the list
+                # itself supports Ctrl+click groups.
+                self.bazar_relist_list.unselect_all()
                 self.bazar_relist_list.select_row(child)
                 return
             child = child.get_next_sibling()
@@ -3936,7 +4102,9 @@ class Application(Gtk.Application):
         left_info.add_css_class("dim-label")
         left.append(left_info)
         self.bazar_relist_list = Gtk.ListBox()
-        self.bazar_relist_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        # Multiple selection so one group action can cover several rows;
+        # the compact editor follows the row selected last.
+        self.bazar_relist_list.set_selection_mode(Gtk.SelectionMode.MULTIPLE)
         self.bazar_relist_list.set_activate_on_single_click(True)
         self.bazar_relist_list.connect(
             "row-selected", self._bazar_relist_item_selected
@@ -3947,6 +4115,7 @@ class Application(Gtk.Application):
             Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
         )
         list_scroll.set_vexpand(True)
+        self.bazar_relist_scroll = list_scroll
         left.append(list_scroll)
         left.append(self._build_bazar_relist_tracking())
         body.set_start_child(left)
@@ -3983,7 +4152,11 @@ class Application(Gtk.Application):
                     "fills vnum, tab and amount from the slot. Remove from "
                     "relisting (or the row tick) keeps the item and its "
                     "floor, only out of the relist set. Only relisting "
-                    "hides the rest of the list. Select an item, set the "
+                    "hides the rest of the list. Group actions… covers "
+                    "every row shown (relist / stop relisting) or the rows "
+                    "clicked with Ctrl (Relist selected / Stop relisting "
+                    "selected), plus Select all shown and Unselect all. "
+                    "Select an item, set the "
                     "exact Item vnum, the inventory Tab and the Amount, "
                     "then a positive Min price (the per-unit floor). Tick "
                     "Allow live re-listing and fill Character with your own "
@@ -4051,7 +4224,63 @@ class Application(Gtk.Application):
         )
         manage_row.append(self.bazar_relist_filter)
         box.append(manage_row)
+        self.bazar_relist_group_button = (
+            self._build_bazar_relist_group_button()
+        )
+        box.append(self.bazar_relist_group_button)
         return box
+
+    def _build_bazar_relist_group_button(self) -> Gtk.MenuButton:
+        """Bulk actions for the rows shown or the Ctrl+clicked rows."""
+        button = Gtk.MenuButton(label="Group actions…")
+        button.set_tooltip_text(
+            "Bulk actions: select or unselect rows, or put every shown row "
+            "or the Ctrl+clicked rows in or out of relisting at once."
+        )
+        popover = Gtk.Popover()
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+        box.set_margin_start(6)
+        box.set_margin_end(6)
+        entries = (
+            ("Select all shown", self._bazar_relist_select_shown),
+            ("Unselect all", self._bazar_relist_unselect_all),
+            None,
+            (
+                "Relist all shown",
+                lambda: self._bazar_relist_set_all_shown(True),
+            ),
+            (
+                "Stop relisting all shown",
+                lambda: self._bazar_relist_set_all_shown(False),
+            ),
+            None,
+            (
+                "Relist selected",
+                lambda: self._bazar_relist_set_selected(True),
+            ),
+            (
+                "Stop relisting selected",
+                lambda: self._bazar_relist_set_selected(False),
+            ),
+        )
+        for entry in entries:
+            if entry is None:
+                box.append(Gtk.Separator())
+                continue
+            label, callback = entry
+            item_button = Gtk.Button(label=label)
+            item_button.add_css_class("flat")
+            item_button.set_halign(Gtk.Align.FILL)
+            item_button.connect(
+                "clicked",
+                lambda _button, cb=callback: (popover.popdown(), cb()),
+            )
+            box.append(item_button)
+        popover.set_child(box)
+        button.set_popover(popover)
+        return button
 
     def _build_bazar_relist_editor(self) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)

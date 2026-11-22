@@ -231,7 +231,14 @@ re-ticking restores the previous setup. **Add from Items** uses the
 selection in the Items section, **Add from Inventory** uses the rows ticked
 in the Inventory section (filling vnum, tab and stack amount from the slot),
 **Remove from relisting** clears the selected row, and **Only relisting**
-hides the rest of the list. The badge explains a ticked item that still
+hides the rest of the list. Rows support **Ctrl+click** multi-selection;
+**Group actions…** applies one action to the whole visible list or to the
+selected rows: **Select all shown**, **Unselect all**, **Relist all shown**,
+**Stop relisting all shown**, **Relist selected**, **Stop relisting
+selected**. Each group action writes the config once and logs one line.
+Ticking a single row updates that row in place and every render restores
+the scroll position, so working down a long list never jumps back to the
+top. The badge explains a ticked item that still
 cannot send: **ready**, **needs floor**, **needs vnum/tab**, **no search**
 or **disabled**; an unticked item reads **not relisting**.
 

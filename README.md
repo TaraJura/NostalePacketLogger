@@ -62,7 +62,11 @@ navbar**: **NosMall** (ND-cost items, gold per ND) and **NPC resale**
   the current Items selection, **Add from Inventory** takes the rows ticked
   in Inventory and fills vnum/tab/amount from the slot, **Remove from
   relisting** clears the selected row, and **Only relisting** hides the
-  rest. Select an item, set its **Item vnum**, **Tab**, **Amount** and a
+  rest. Ctrl+click selects several rows; **Group actions…** offers **Select
+  all shown**, **Unselect all**, **Relist all shown**, **Stop relisting all
+  shown**, **Relist selected** and **Stop relisting selected**. A single tick
+  updates its row in place and renders keep the scroll position, so a long
+  list no longer jumps to the top. Select an item, set its **Item vnum**, **Tab**, **Amount** and a
   positive **Min price**; the badge reads **ready** / **needs floor** /
   **needs vnum/tab** / **not relisting**. Fill
   **Character** with your own name, tick **Allow live re-listing**, then

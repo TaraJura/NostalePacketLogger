@@ -22,7 +22,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import GLib
+from gi.repository import GLib, Gtk
 
 from gui_inventory_scan_smoke import InventoryServer
 from ntpl.bazar import load_config
@@ -162,6 +162,11 @@ def main() -> int:
             row.relist_check.set_active(True)
             result["after_tick"] = bubble.relist
             result["saved_after_tick"] = _saved_relist(bubble.name)
+            # The tick must update the row in place: a rebuilt list is what
+            # used to throw a scrolled list back to the top.
+            result["row_kept"] = (
+                _row_for(app.bazar_relist_list, bubble.name) is row
+            )
             # Select it and set the floor through the compact editor.
             app._bazar_select_relist_item(bubble.name)
             app.bazar_relist_form["min"].set_value(1000)
@@ -200,6 +205,12 @@ def main() -> int:
             app._bazar_select_relist_item(bubble.name)
             app._bazar_relist_remove_selected()
             result["removed"] = bubble.relist
+            removed_row = _row_for(app.bazar_relist_list, bubble.name)
+            result["removed_tick"] = (
+                None
+                if removed_row is None
+                else removed_row.relist_check.get_active()
+            )
             result["removed_floor"] = bubble.min_price
             result["still_configured"] = any(
                 item.name == bubble.name for item in app.bazar.config.items
@@ -221,6 +232,30 @@ def main() -> int:
                 )
                 for name in by_name
             }
+            # Group actions: Ctrl+click equivalent (select every row), then
+            # stop/start relisting for the whole selection or the whole list.
+            result["multi_select"] = (
+                app.bazar_relist_list.get_selection_mode()
+                == Gtk.SelectionMode.MULTIPLE
+            )
+            app._bazar_relist_select_shown()
+            result["selected_shown"] = len(
+                app.bazar_relist_list.get_selected_rows()
+            )
+            result["shown_rows"] = len(_rows(app.bazar_relist_list))
+            app._bazar_relist_set_selected(False)
+            result["bulk_stop"] = sum(
+                1 for item in app.bazar.config.items if item.relist
+            )
+            app._bazar_relist_set_all_shown(True)
+            result["bulk_all"] = sum(
+                1 for item in app.bazar.config.items if item.relist
+            )
+            app._bazar_relist_unselect_all()
+            result["unselected"] = len(
+                app.bazar_relist_list.get_selected_rows()
+            )
+            result["group_button"] = app.bazar_relist_group_button is not None
             result["ok"] = (
                 result["items"] == 7
                 and result["initial_relist"] == []
@@ -228,6 +263,7 @@ def main() -> int:
                 and result["ticks_off"]
                 and result["after_tick"] is True
                 and result["saved_after_tick"] is True
+                and result["row_kept"] is True
                 and result["floor_saved"] == 1000
                 and result["ready_after_floor"] is True
                 and result["badge_ready"] == "ready"
@@ -238,10 +274,17 @@ def main() -> int:
                 and result["feather_tab"] == 2
                 and result["feather_amount"] == 11
                 and result["removed"] is False
+                and result["removed_tick"] is False
                 and result["removed_floor"] == 1000
                 and result["still_configured"] is True
                 and result["queue"] == result["expected_queue"]
                 and result["monitor_count"] == 7
+                and result["multi_select"] is True
+                and result["selected_shown"] == result["shown_rows"]
+                and result["bulk_stop"] == 0
+                and result["bulk_all"] == 7
+                and result["unselected"] == 0
+                and result["group_button"] is True
                 and by_name[bubble.name].relist is False
                 and by_name[bubble.name].min_price == 1000
                 and by_name[feather.name].relist is True
@@ -250,13 +293,16 @@ def main() -> int:
             result["detail"] = (
                 f"ok={result['ok']} items={result['items']} "
                 f"initial={result['initial_relist']} "
-                f"tick={result['after_tick']} "
+                f"tick={result['after_tick']} row_kept={result['row_kept']} "
                 f"badge={result['badge_ready']} "
                 f"filtered={result['filtered_rows']} "
                 f"from_items={result['from_items']} "
                 f"from_inventory={result['from_inventory']} "
                 f"removed={result['removed']} "
-                f"queue={result['queue']}"
+                f"queue={result['queue']} "
+                f"selected={result['selected_shown']}/"
+                f"{result['shown_rows']} bulk_stop={result['bulk_stop']} "
+                f"bulk_all={result['bulk_all']}"
             )
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"check exception: {exc!r}"

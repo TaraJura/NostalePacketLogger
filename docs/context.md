@@ -65,7 +65,9 @@ the data layer in [database.md](database.md).
   truncation-aware), keeps old rows across refresh cycles, sorts by profit
   and has an **Only priced** filter. Relist is gated by the relist set (a
   per-row tick, **Add from Items** / **Add from Inventory**, **Remove from
-  relisting**), the live checkbox, a character name, a positive floor and an
+  relisting**), an **Only relisting** filter, Ctrl+click multi-selection and
+  **Group actions…** (select/unselect all, relist/stop all shown or
+  selected); the live checkbox, a character name, a positive floor and an
   inventory slot, and reports `register sent (no ack)`; **Relist Start**
   searches only the relist set while Monitor searches every enabled item.
   The page has a second-level navbar (**Inventory**,
