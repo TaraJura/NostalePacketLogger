@@ -7,9 +7,22 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 332 unittest cases, 6 GTK4 smokes, 41 fake-server bot
+- **Linux host**: 337 unittest cases, 6 GTK4 smokes, 41 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
-  linux all test-host`, tests above.
+  linux all test-host`, tests above. The host is **0.7.1**: the MCP now
+  seeds `world.entities` from the attached client's log
+  (`spawnlog.load_entities`) and has `game_resync` (`walk -1 -1` →
+  server `tp`) for a client that desynced during a warp.
+- **Autonomous play**: the observe → decide → act → confirm → survive policy
+  is in [autonomous-play.md](autonomous-play.md). Live 2026-11-22 (client
+  winPID 1996, char 10170): Ranger SP card 903 equipped, Warp Tower → map 20
+  Mountain Cave 1, one Wolf (vnum 200) killed with skill 833 and two
+  attacking wolves killed in self-defence; the character ended at 91% HP,
+  the GUI reconnected and the game was never closed. Key lessons: resync
+  with the impossible-walk probe, seed entities from the log, check the
+  target's HP in `su` (a killed monster sends no `out`), and leave the spawn
+  cluster before sitting — a character left standing next to two wolves lost
+  ~55 HP/s while the GUI was idle.
 - **Minigame tab** (seventh GUI page, appended after Malicious): Sheep Farm
   helper. **Start** spams `KEY|<key>` (default `y`, the secondary attack; `z`
   on QWERTZ) every 40–5000 ms through DLL 0.3.0, and **Focus nearby players**
@@ -18,7 +31,7 @@ the data layer in [database.md](database.md).
   NPC, pet, monster or the local character. The DLL uses real `SendInput` when
   the game window is foreground and posted keys otherwise. Per-client
   `~/.config/ntpl/minigame-<winpid>.json`. Needs **DLL 0.3.0 and a game
-  restart/re-inject**; the host is 0.7.0. Covered by `test_minigame.py`,
+  restart/re-inject**; the host is 0.7.1. Covered by `test_minigame.py`,
   `gui_minigame_smoke.py` and `key-test`; the key press and player TARGET are
   **not yet live-verified**. See [minigame.md](minigame.md).
 - **Speed +** (**Malicious** tab, default 0): the DLL reads the server's

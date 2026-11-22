@@ -241,8 +241,10 @@ After `listen()` succeeds the DLL writes `C:\ntpl-<pid>.port` (inside the
 prefix: `<prefix>/drive_c/ntpl-<pid>.port`) containing the port number, where
 `<pid>` is the game's **Windows** PID. It deletes the file on `QUIT`.
 
-The native host finds clients without probing the ports, because a probe would
-take over the DLL's single host slot and kick whoever is connected:
+The native host finds clients without probing the ports. The DLL accepts a
+new host only while none is connected, so a probe would sit in the listen
+backlog while a host is attached and could later become the new host after
+the current one disconnects:
 
 1. `Injector.exe --list`, run with the Wine binary and prefix taken
    from `/proc/<linux-pid>/exe` and `/proc/<linux-pid>/environ`, reports the

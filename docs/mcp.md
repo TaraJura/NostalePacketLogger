@@ -18,10 +18,11 @@ No third-party packages: the MCP layer is standard-library JSON-RPC.
 
 ## One DLL host, one broker
 
-The injected DLL accepts **one host** and silently replaces the previous one.
-The MCP server starts a broker that owns that single connection and
-rebroadcasts the packet stream to local TCP clients on port **47900**. Start
-the GUI against the broker:
+The injected DLL accepts **one host at a time**, and only while it has none
+(a second connection waits in the listen backlog; it does not replace a
+connected host). The MCP server starts a broker that owns that single
+connection and rebroadcasts the packet stream to local TCP clients on port
+**47900**. Start the GUI against the broker:
 
 ```bash
 linux/scripts/gui.sh --port 47900
@@ -32,7 +33,13 @@ MCP server runs: it would replace the broker and the two would keep kicking
 each other. Start it against the broker with `--port 47900`; if you stop the
 MCP server, restart the GUI on its default port.
 
-The server polls `POS` twice a second for the real cell and the sit flag.
+At startup the server seeds the world from the attached client's log: the
+last map/position event plus every entity `load_entities` can replay (`in`,
+`mv`, `tp`, `out`, map changes). A monster that spawned before the MCP
+connected and has not moved since is therefore still known, with its vnum
+when the log had a spawn. The live stream keeps updating positions after
+that. The server also polls `POS` twice a second for the real cell and the
+sit flag.
 `game_move` stands the character first if it is sitting and walks goals more
 than three cells away in A* legs (the server rejects a long MoveTo). Game
 packets (`u_s`, `rest`, `ncif`, `get`) are injected with the DLL's `SEND|`
@@ -80,6 +87,7 @@ Start the game and inject the DLL as usual first; the broker retries until
 | `game_send` | one raw packet | — |
 | `game_select` | `TARGET\|id` for monsters (target ring + client `ncif`); injected `ncif` for players | DLL `TARGET` reply |
 | `game_rest` | sit/stand toggle | `rest` echo |
+| `game_resync` | impossible `walk -1 -1` probe; the server's `tp` snaps a desynced client to the authoritative cell | server `tp` |
 | `game_pickup` | `get 1 <charId> <dropId>` | server `get` |
 | `game_wait_for` | wait for an opcode/substring | the packet |
 | `game_status` | connection state and last `STATUS` | — |
@@ -94,9 +102,14 @@ The **Game state** resource (`ntpl://game/state`) returns the same JSON as
 1. `game_state` → map, position, HP/MP.
 2. `game_entities` with `radius` → nearest monster.
 3. `game_travel` to a cell near it (or `game_move` for one leg).
-4. `game_attack` with its `entity_id` until it dies (`out` packet).
+4. `game_attack` with its `entity_id` until it dies: the kill signal is
+   `su` showing the target's HP at 0, or the target leaving the entity list
+   **without** an `out` (a killed monster gets no `out`; `out` means it left
+   view). See [autonomous-play.md](autonomous-play.md) for the survival
+   thresholds around this loop.
 5. `game_drops` + `game_pickup` for loot.
-6. `game_rest` when HP is low.
+6. `game_rest` when HP is low; `game_resync` after a warp if `POS` looks
+   stale.
 
 Movement is client-authoritative: `game_move`/`game_travel` call the client's
 own MoveTo, so the game pathfinds, animates and sends its `walk`; the tool

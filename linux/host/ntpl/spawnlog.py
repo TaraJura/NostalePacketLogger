@@ -277,6 +277,79 @@ def load_player_spawns(
     return players
 
 
+def load_entities(
+    path: str | Path | None = None,
+) -> dict[int, tuple[int, int, int, int]]:
+    """Return ``entityId -> (kind, vnum, x, y)`` for the current map.
+
+    Replays the log tail in order the way the client's entity list works:
+    ``in`` spawns carry the vnum, ``mv``/``tp`` update the position (an entity
+    seen only moving is kept with vnum 0), ``out`` removes it, and entering a
+    new map (``c_map ... 1``/``mapout``) clears the list. A host that attaches
+    mid-map can therefore start with every entity the log still knows instead
+    of only those that happen to move after it connects.
+    """
+    source = Path(path) if path is not None else default_log_path()
+    if source is None:
+        return {}
+    try:
+        log = _open_log_tail(source)
+    except OSError:
+        return {}
+
+    entities: dict[int, tuple[int, int, int, int]] = {}
+    with log:
+        for line in log:
+            marker = line.find(_IN_MARKER)
+            if marker >= 0:
+                record = line[marker + len(_IN_MARKER):].strip()
+                match = _ENTITY.match(record)
+                if match:
+                    kind = int(match.group(1))
+                    vnum = int(match.group(2))
+                    entity_id = int(match.group(3))
+                    rest = record[len(match.group(0)):].split()
+                    try:
+                        x, y = int(rest[0]), int(rest[1])
+                    except (IndexError, ValueError):
+                        continue
+                    entities[entity_id] = (kind, vnum, x, y)
+                    continue
+                match = _PLAYER.match(record)
+                if match:
+                    entity_id = int(match.group(2))
+                    rest = record[len(match.group(0)):].split()
+                    try:
+                        x, y = int(rest[0]), int(rest[1])
+                    except (IndexError, ValueError):
+                        continue
+                    entities[entity_id] = (1, 0, x, y)
+                continue
+            change = _ints_after(line, _CMAP_MARKER, 3)
+            if change and change[2] == 1:
+                entities.clear()
+                continue
+            if _MAPOUT_MARKER in line:
+                entities.clear()
+                continue
+            despawn = _ints_after(line, _OUT_MARKER, 2)
+            if despawn:
+                entities.pop(despawn[1], None)
+                continue
+            move = _ints_after(line, _MV_MARKER, 4)
+            if move:
+                kind, entity_id, x, y = move
+                old = entities.get(entity_id)
+                entities[entity_id] = (kind, old[1] if old else 0, x, y)
+                continue
+            tele = _ints_after(line, _TP_MARKER, 4)
+            if tele:
+                kind, entity_id, x, y = tele
+                old = entities.get(entity_id)
+                entities[entity_id] = (kind, old[1] if old else 0, x, y)
+    return entities
+
+
 def _family_fields(token: str) -> int:
     head = token.split(".", 1)[0]
     try:

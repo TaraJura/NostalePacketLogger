@@ -8,6 +8,7 @@ import unittest
 
 from ntpl.engine import Entity
 from ntpl.mcp_server import Broker, GameService, McpServer, ToolError
+from ntpl.protocol import Kind, Packet
 
 
 class FakeBroker:
@@ -69,6 +70,7 @@ class McpProtocolTests(unittest.TestCase):
         self.assertIn("game_move", names)
         self.assertIn("game_travel", names)
         self.assertIn("game_attack", names)
+        self.assertIn("game_resync", names)
         self.assertIn("game_portals", names)
 
     def test_state_tool(self):
@@ -79,6 +81,31 @@ class McpProtocolTests(unittest.TestCase):
         self.assertFalse(result["isError"])
         payload = json.loads(result["content"][0]["text"])
         self.assertTrue(payload["connected"])
+
+    def test_resync_waits_for_the_tp_and_returns_the_server_cell(self):
+        self.service.engine.world.self_id = 10170
+        response = {}
+
+        def invoke():
+            response["value"] = self.call(
+                20,
+                "tools/call",
+                {"name": "game_resync", "arguments": {"timeout": 2}},
+            )
+
+        thread = threading.Thread(target=invoke)
+        thread.start()
+        time.sleep(0.1)
+        self.service._feed_packet(
+            Packet(Kind.RECV, "tp 1 10170 15 96 0", time.time())
+        )
+        thread.join(5)
+        self.assertFalse(response["value"]["result"]["isError"])
+        payload = json.loads(
+            response["value"]["result"]["content"][0]["text"]
+        )
+        self.assertEqual(payload["position"], [15, 96])
+        self.assertIn("SEND|walk -1 -1 0 10", self.broker.sent)
 
     def test_move_against_a_dead_connection_is_an_error(self):
         self.broker.connected = False

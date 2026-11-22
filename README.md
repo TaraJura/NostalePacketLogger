@@ -117,12 +117,24 @@ client keeps the old module. Restart the game, inject again, and check the
 title shows `DLL 0.3.0`. An old DLL is detected and the tab stops with a clear
 message. Details, edge cases and troubleshooting: [docs/minigame.md](docs/minigame.md).
 
+## Autonomous play
+
+The MCP server can drive a character through observe → decide → act →
+confirm → survive: it seeds the map's entities from the attached client's
+log, resyncs a client that desynced during a warp with the `walk -1 -1` →
+`tp` probe, and confirms every hit and kill with the server's `su` packets.
+The policy — target risk, approach/kite geometry, HP thresholds, retreat and
+recovery, the GUI↔MCP single-host handover and the known failure modes — is
+in [docs/autonomous-play.md](docs/autonomous-play.md). Live 2026-11-22: an
+SP card was equipped, a Mt. Krem wolf was killed and the character survived
+two more wolves that joined the fight.
+
 ## Quick start on Linux
 
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 332 Python unit tests
+make -C linux host-test                      # 337 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux key-test                       # DLL KEY| name parsing
 make -C linux gui-test                       # six headless GTK4 smokes (xvfb)
@@ -175,6 +187,10 @@ Start with [docs/architecture.md](docs/architecture.md), then:
   includes the full NosMall catalog and an import picker in the tab
 - [docs/mcp.md](docs/mcp.md) — MCP server for agents: state, movement,
   combat, raw packets, and the local broker that lets the GUI watch too
+- [docs/autonomous-play.md](docs/autonomous-play.md) — the observe → decide →
+  act → survive playbook: `game_resync` after a warp, log entity seeding,
+  target risk and HP thresholds, retreat/recovery, GUI↔MCP handover and the
+  2026-11-22 live kill-and-survive session
 - [docs/handoff-2026-11-06.md](docs/handoff-2026-11-06.md) — current state and
   the exact post-reboot reinjection + auto-attack test procedure
 - [docs/live-session-2026-11-06.md](docs/live-session-2026-11-06.md) — what was
@@ -195,7 +211,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 332 unit tests pass, the six GTK4 window smokes
+The Linux port builds, its 337 unit tests pass, the six GTK4 window smokes
 and 41 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 

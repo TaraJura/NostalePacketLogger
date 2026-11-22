@@ -35,7 +35,7 @@ from typing import Any, Callable, TextIO
 from . import __version__
 from .client import PacketClient
 from .clients import discover_clients
-from .engine import Engine
+from .engine import Engine, Entity
 from .mapdata import (
     MapGrid,
     PortalMap,
@@ -55,7 +55,12 @@ from .protocol import (
     ProtocolError,
     default_port,
 )
-from .spawnlog import default_log_path, load_gates, load_last_position
+from .spawnlog import (
+    default_log_path,
+    load_entities,
+    load_gates,
+    load_last_position,
+)
 from .spawnlog import load_portals as load_log_portals
 from .spells import SpellInfo, load_spells
 
@@ -411,6 +416,10 @@ class GameService:
         except (OSError, ValueError):
             return
         map_id, x, y, char_id = load_last_position(self.log_file)
+        try:
+            seeded_entities = load_entities(self.log_file)
+        except (OSError, ValueError):
+            seeded_entities = {}
         with self.lock:
             world = self.engine.world
             if world.map_id is None and map_id is not None:
@@ -419,6 +428,21 @@ class GameService:
                     world.x, world.y = x, y
                 if char_id is not None:
                     world.self_id = char_id
+            # Entities that spawned before the MCP connected only exist in
+            # the log. Seed them so a stationary monster can still be found,
+            # approached and targeted; the live stream updates them after.
+            for entity_id, (kind, vnum, ex, ey) in seeded_entities.items():
+                if entity_id == world.self_id:
+                    continue
+                entity = world.entities.get(entity_id)
+                if entity is None:
+                    entity = Entity(entity_id, kind)
+                    world.entities[entity_id] = entity
+                entity.kind = kind
+                if vnum:
+                    entity.vnum = vnum
+                entity.x = ex
+                entity.y = ey
         for (gate_map, gx, gy), destination in load_gates(
             self.log_file
         ).items():
@@ -933,6 +957,43 @@ class GameService:
             "changed": True,
         }
 
+    def game_resync(self, timeout: float = 4.0) -> dict[str, Any]:
+        """Force the server's authoritative position into the client.
+
+        An impossible ``walk -1 -1`` makes the server answer ``tp`` with the
+        character's real cell; the client applies the same tp, so a client
+        that desynced during a warp (POS showing a stale/non-walkable cell)
+        snaps back to the server position without moving the character.
+        """
+        with self.lock:
+            self_id = self._world().self_id
+        if self_id is None:
+            raise ToolError("own char id unknown")
+        start = time.time()
+        self._send_packet("walk -1 -1 0 10")
+
+        def answered():
+            with self.lock:
+                for packet in reversed(self.tracked):
+                    if packet.timestamp < start:
+                        break
+                    if packet.opcode != "tp":
+                        continue
+                    values = packet.ints(4)
+                    if not values:
+                        continue
+                    kind, entity_id, x, y = values
+                    if kind == 1 and entity_id == self_id:
+                        return (x, y)
+            return None
+
+        position = self._wait(answered, timeout)
+        if position is None:
+            raise ToolError(
+                "no tp answer to the walk -1 -1 probe; the server ignored it"
+            )
+        return {"ok": True, "position": list(position)}
+
     def game_pickup(self, drop_id: int, timeout: float = 5.0) -> dict[str, Any]:
         with self.lock:
             char_id = self._world().self_id
@@ -1090,6 +1151,7 @@ TOOL_METHODS = {
     "game_send": "game_send",
     "game_select": "game_select",
     "game_rest": "game_rest",
+    "game_resync": "game_resync",
     "game_pickup": "game_pickup",
     "game_wait_for": "game_wait_for",
     "game_status": "game_status",
@@ -1279,6 +1341,14 @@ TOOLS: list[dict[str, Any]] = [
         "name": "game_rest",
         "description": "Sit or stand (toggles the client's rest).",
         "inputSchema": _schema({"sit": {"type": "boolean"}}),
+    },
+    {
+        "name": "game_resync",
+        "description": (
+            "Resync the client to the server position with the walk -1 -1 "
+            "probe: the server answers tp and the client applies it."
+        ),
+        "inputSchema": _schema({"timeout": {"type": "number", "minimum": 0.5}}),
     },
     {
         "name": "game_pickup",

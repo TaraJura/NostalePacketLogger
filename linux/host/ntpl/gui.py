@@ -9244,9 +9244,11 @@ class Application(Gtk.Application):
                     )
 
                 if not self._closing and generation == self._client_generation:
-                    # The DLL accepts one host at a time and replaces the old
-                    # one, so another CLI/monitor can kick the GUI off. Reconnect
-                    # instead of leaving the window dead.
+                    # The DLL accepts one host at a time only while none is
+                    # connected; a handover (e.g. the GUI paused and its
+                    # socket destroyed for an MCP session) leaves the GUI
+                    # disconnected until it reconnects. Reconnect instead of
+                    # leaving the window dead.
                     time.sleep(RECONNECT_DELAY)
 
         threading.Thread(target=worker, name="ntpl-gui-reader", daemon=True).start()

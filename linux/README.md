@@ -67,7 +67,7 @@ uses lowercase includes for that reason.
 
 ```bash
 make -C linux all test-host
-make -C linux host-test          # 332 cases: protocol, client, engine, mapdata, config, names, minigame, noscrypto, headless, gameforge auth, client locks, bazar/inventory, database, mirror
+make -C linux host-test          # 337 cases: protocol, client, engine, mapdata, config, names, minigame, noscrypto, headless, gameforge auth, client locks, bazar/inventory, database, mirror
 make -C linux speed-test         # DLL speed-boost cond parsing and walk clamp
 make -C linux key-test           # DLL KEY| key-name parser
 make -C linux gui-test           # headless GTK4: map switch, tooltips, toggles,

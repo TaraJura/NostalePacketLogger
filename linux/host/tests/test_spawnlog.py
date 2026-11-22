@@ -11,6 +11,7 @@ from ntpl.spawnlog import (
     client_log_path,
     default_log_path,
     load_bazaar_open,
+    load_entities,
     load_gates,
     load_inventory,
     load_last_position,
@@ -113,6 +114,36 @@ class SpawnLogTests(unittest.TestCase):
         self.assertEqual(
             load_player_spawns(log), {424242: ("", 10, 11)}
         )
+
+    def test_load_entities_replays_spawns_moves_out_and_map_clear(self):
+        log = self._write(
+            "1 [RECV] in 3 200 5030 10 20 2 100 100 0\r\n"
+            "2 [RECV] mv 3 5030 11 21 7\r\n"
+            "3 [RECV] in 2 955 3095 67 56 2 100 100 439 0\r\n"
+            "4 [RECV] out 2 3095\r\n"
+            "5 [RECV] in 1 Guder - 4165102 105 23 2 0 0 0\r\n"
+            "6 [RECV] mv 1 4165102 106 24 6\r\n"
+            "7 [RECV] c_map 0 20 1\r\n"
+            "8 [RECV] in 3 206 5112 30 40 2 100 100 0\r\n"
+            "9 [RECV] mv 3 5112 31 41 5\r\n"
+        )
+        self.assertEqual(
+            load_entities(log), {5112: (3, 206, 31, 41)}
+        )
+
+    def test_load_entities_keeps_movers_without_a_known_vnum(self):
+        log = self._write("1 [RECV] mv 3 6000 5 6 7\r\n")
+        self.assertEqual(load_entities(log), {6000: (3, 0, 5, 6)})
+
+    def test_load_entities_mapout_clears_the_list(self):
+        log = self._write(
+            "1 [RECV] in 3 200 5030 10 20 2\r\n"
+            "2 [RECV] mapout\r\n"
+        )
+        self.assertEqual(load_entities(log), {})
+
+    def test_load_entities_missing_log_is_empty(self):
+        self.assertEqual(load_entities("/nonexistent/NosTalePacketLog.txt"), {})
 
     def test_reads_monster_vnums_and_player_names(self):
         log = self._write(
