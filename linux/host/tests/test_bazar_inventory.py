@@ -54,6 +54,8 @@ class InventorySearchTests(unittest.TestCase):
         self.assertEqual((bubbl.inv_tab, bubbl.amount), (1, 7))
         self.assertEqual(bubbl.search_packet, build_search_packet([2174]))
         self.assertTrue(bubbl.enabled)
+        # Inventory scan is monitor-first; joining relisting is explicit.
+        self.assertFalse(bubbl.relist)
         self.assertEqual(bubbl.min_price, 0)
         self.assertEqual(plan.items[1].inv_tab, 2)
 

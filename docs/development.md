@@ -28,11 +28,11 @@ The MinGW compiler is `i686-w64-mingw32-g++`. Override with
 ## Tests
 
 ```bash
-make -C linux host-test        # 337 stdlib unittest cases
+make -C linux host-test        # 340 stdlib unittest cases
 make -C linux speed-test       # native DLL speed-boost/walk-clamp test
 make -C linux key-test         # native DLL KEY| key-name parser test
 make -C linux gui-test         # six headless GTK4 smokes, needs xvfb
-make -C linux bot-test         # 41 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, cross-client follow mirror, follow nameless/char id, portal blocking, speed boost control, cast speed control, cast assist, cast-ready pacing, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, NosBazar monitor/relist/copy, NosBazar inventory scan/price-all, NosMall import filters
+make -C linux bot-test         # 42 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, cross-client follow mirror, follow nameless/char id, portal blocking, speed boost control, cast speed control, cast assist, cast-ready pacing, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, NosBazar monitor/relist/copy, NosBazar inventory scan/price-all, NosBazar relist-set tracking, NosMall import filters
 make -C linux all test-host
 linux/scripts/dev-test-wine.sh 25
 ```

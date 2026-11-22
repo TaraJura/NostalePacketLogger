@@ -7,7 +7,7 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 337 unittest cases, 6 GTK4 smokes, 41 fake-server bot
+- **Linux host**: 340 unittest cases, 6 GTK4 smokes, 42 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
   linux all test-host`, tests above. The host is **0.7.1**: the MCP now
   seeds `world.entities` from the attached client's log
@@ -63,8 +63,12 @@ the data layer in [database.md](database.md).
   the client's own `npc_req`/`n_run` or DLL log, searches `c_blist` at 2.5 s
   pacing, parses the real 15-field `rc_blist` (minimum visible price,
   truncation-aware), keeps old rows across refresh cycles, sorts by profit
-  and has an **Only priced** filter. Relist is double-gated and reports
-  `register sent (no ack)`. The page has a second-level navbar (**Inventory**,
+  and has an **Only priced** filter. Relist is gated by the relist set (a
+  per-row tick, **Add from Items** / **Add from Inventory**, **Remove from
+  relisting**), the live checkbox, a character name, a positive floor and an
+  inventory slot, and reports `register sent (no ack)`; **Relist Start**
+  searches only the relist set while Monitor searches every enabled item.
+  The page has a second-level navbar (**Inventory**,
   **Relist**, **Monitor**, **Items**, **Configuration**); **Monitor** has a
   third-level navbar, **NosMall** (ND cost; gold per ND) and **NPC resale**
   (NPC gold cost, e.g. Pet Food or Bell of Sweet Home; Markup = listing ÷ NPC
@@ -73,8 +77,10 @@ the data layer in [database.md](database.md).
   when left at 0. **Inventory** scans
   every bag the client reports (including equipment bags 0/6/7, quantity-0
   rows and bound negative vnums), shows Item.dat names, NPC prices and known
-  ND costs, and **Set up relist…** opens **Relist** with the exact
-  vnum/tab/amount for the floor and start; **Price all** adds one search per
+  ND costs, and **Set up relist…** adds the item to the relist set and opens
+  **Relist** with the exact vnum/tab/amount for the floor and start; the
+  **Items** editor carries **Monitor**/**Relist** tracking switches;
+  **Price all** adds one search per
   distinct owned item. The **Monitor** table and the **Relist**/**Items**
   lists show the real item name resolved from each entry's vnum (local DB
   first, `Item.dat` fallback), with the configured shortcut only as the

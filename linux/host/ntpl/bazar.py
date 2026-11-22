@@ -97,6 +97,7 @@ STATUS_TEXT = {
     "quantity": "not enough in inventory",
     "no-slot": "not in inventory",
     "no-vnum": "no item vnum",
+    "not-selected": "not in relisting",
     "waiting": "waiting for Bibi Basar",
 }
 
@@ -348,7 +349,14 @@ class BazarItem:
     unk2: int = 4
     durability: int = 1
     medal: int = 2
+    #: Track this item at all: Monitor searches it. Off keeps the item in
+    #: the configuration and its saved floor, but skips every pass.
     enabled: bool = True
+    #: The relist set: only these items are searched by **Relist Start**
+    #: and may change a listing. Monitor-only items keep a floor without
+    #: ever sending `c_reg`. Configs written before this flag existed infer
+    #: it from a positive ``min_price``.
+    relist: bool = True
 
     @property
     def vnums(self) -> list[int]:
@@ -391,6 +399,7 @@ class BazarItem:
             "durability": self.durability,
             "medal": self.medal,
             "enabled": self.enabled,
+            "relist": self.relist,
         }
 
     @classmethod
@@ -415,13 +424,14 @@ class BazarItem:
         vnum = None if vnum_value is None else _as_int(vnum_value, 0, 0, 10**9)
         nos = _as_optional_float(data.get("nos_cost"))
         npc = _as_optional_float(data.get("npc_cost"))
+        minimum = _as_int(data.get("min_price"), 0, 0, 10**10)
         return cls(
             name=name,
             search_packet=search_packet,
             vnum=vnum,
             inv_tab=inv_tab,
             amount=_as_int(data.get("amount"), 5, 1, 1000),
-            min_price=_as_int(data.get("min_price"), 0, 0, 10**10),
+            min_price=minimum,
             nos_cost=nos,
             npc_cost=npc,
             unk1=_as_int(data.get("unk1"), 9, 0, 1000),
@@ -429,6 +439,9 @@ class BazarItem:
             durability=_as_int(data.get("durability"), 1, 0, 1000),
             medal=_as_int(data.get("medal"), 2, 0, 1000),
             enabled=_as_bool(data.get("enabled"), True),
+            # Before the flag existed a floor was the only way to enable
+            # relisting, so an old file keeps exactly that meaning.
+            relist=_as_bool(data.get("relist"), minimum > 0),
         )
 
 
@@ -595,6 +608,9 @@ def inventory_search_items(
             nos_cost=nos_cost,
             npc_cost=npc_cost,
             enabled=True,
+            # Inventory scan is a monitor-first action: the user chooses
+            # which items join relisting in the Relist section.
+            relist=False,
         )
         taken.add(item.name)
         plan.items.append(item)
@@ -918,6 +934,20 @@ class BazarController:
             if item.enabled and item.search_packet
         ]
 
+    def relist_items(self) -> list[BazarItem]:
+        """The relist set: enabled items the user marked for relisting.
+
+        A relist pass searches only these, so an item followed for price
+        discovery never gets its listing touched even when it carries a
+        ``min_price`` floor. Readiness (vnum, tab, floor) is still checked
+        item by item in :meth:`_maybe_relist`.
+        """
+        return [
+            item
+            for item in self.config.items
+            if item.enabled and item.relist and item.search_packet
+        ]
+
     # -- lifecycle ------------------------------------------------------
 
     @property
@@ -954,7 +984,11 @@ class BazarController:
         self.last_error = ""
         # Keep the last pass on screen; it is updated item by item.
         self._sync_results()
-        self._queue = self.enabled_items()
+        # A relist pass must search only the chosen relist set; Monitor
+        # searches every enabled item. `open` reuses the monitor queue.
+        self._queue = (
+            self.relist_items() if mode == "relist" else self.enabled_items()
+        )
         self._pending = None
         self._retry_done = False
         self._pass_number = 0
@@ -1130,7 +1164,11 @@ class BazarController:
 
     def _begin_pass(self, world: "WorldState", now: float) -> None:
         self.phase = "pass"
-        self._queue = self.enabled_items()
+        self._queue = (
+            self.relist_items()
+            if self.mode == "relist"
+            else self.enabled_items()
+        )
         self._pending = None
         self._next_send = now
         self._retry_done = False
@@ -1141,7 +1179,11 @@ class BazarController:
         self._sync_results()
         self.version += 1
         if not self._queue:
-            self.last_error = "no enabled item with a search packet"
+            self.last_error = (
+                "no item in the relist set with a search packet"
+                if self.mode == "relist"
+                else "no enabled item with a search packet"
+            )
             self._log(self.last_error)
             self.mode = None
             self.phase = "idle"
@@ -1344,6 +1386,15 @@ class BazarController:
         quote: BazarQuote,
         now: float,
     ) -> None:
+        if not item.relist:
+            # Items can be unticked while a pass is in flight; the tick is
+            # the user's decision, so never touch their listing.
+            quote.status = "not-selected"
+            self._log(
+                f"{self._item_label(item)}: not relisted "
+                "(not in the relist list)"
+            )
+            return
         if item.vnum is None or item.vnum <= 0:
             quote.status = "no-vnum"
             self._log(

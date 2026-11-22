@@ -56,13 +56,21 @@ navbar**: **NosMall** (ND-cost items, gold per ND) and **NPC resale**
   was missed, the list is empty or marked **partial** — relog once with the
   window open and it fills automatically; the last complete inventory is
   cached per character, so later attaches survive another log truncation.
-- **Relist** — select an item (or arrive from Set up relist…), set its
-  **Item vnum**, **Tab**, **Amount** and a positive **Min price**, and the
-  list marks it **ready** / **needs floor** / **monitor only**. Fill
+- **Relist** — the list is the relist set. Tick a row to include the item;
+  untick it to stop changing that listing while Monitor keeps watching it
+  (the item, its floor and its monitor state stay). **Add from Items** takes
+  the current Items selection, **Add from Inventory** takes the rows ticked
+  in Inventory and fills vnum/tab/amount from the slot, **Remove from
+  relisting** clears the selected row, and **Only relisting** hides the
+  rest. Select an item, set its **Item vnum**, **Tab**, **Amount** and a
+  positive **Min price**; the badge reads **ready** / **needs floor** /
+  **needs vnum/tab** / **not relisting**. Fill
   **Character** with your own name, tick **Allow live re-listing**, then
-  **Relist Start**. Each pass undercuts the cheapest other listing by one
-  gold, never below the floor; the status reports `register sent (no ack)`
-  because the server sends no confirmation for `c_reg`.
+  **Relist Start**. Each pass searches only the relist set and undercuts the
+  cheapest other listing by one gold, never below the floor; the status
+  reports `register sent (no ack)` because the server sends no confirmation
+  for `c_reg`. The **Items** editor carries the same two switches,
+  **Monitor** and **Relist**.
 - **Monitor** — starts/stops searches, opens the Bibi Basar dialog through
   the client's own send path, learns the map/session NPC id and dialog option
   from your own opening (or the DLL log), and searches at the required 2.5 s
@@ -134,11 +142,11 @@ two more wolves that joined the fight.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 337 Python unit tests
+make -C linux host-test                      # 340 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux key-test                       # DLL KEY| name parsing
 make -C linux gui-test                       # six headless GTK4 smokes (xvfb)
-make -C linux bot-test                       # 41 fake-server bot smokes
+make -C linux bot-test                       # 42 fake-server bot smokes
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path
 linux/scripts/dev-test-wine.sh 25
@@ -211,7 +219,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 337 unit tests pass, the six GTK4 window smokes
+The Linux port builds, its 340 unit tests pass, the six GTK4 window smokes
 and 41 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 

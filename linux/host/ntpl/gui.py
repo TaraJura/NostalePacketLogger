@@ -690,6 +690,12 @@ class Application(Gtk.Application):
         self.bazar_relist_save_button = None
         self.bazar_relist_open_button = None
         self.bazar_relist_selected: str | None = None
+        # Relist tracking controls: the "Only relisting" filter and the
+        # cross-section buttons that add or remove an item from the set.
+        self.bazar_relist_filter = None
+        self.bazar_relist_add_items_button = None
+        self.bazar_relist_add_inventory_button = None
+        self.bazar_relist_remove_button = None
         self._bazar_render_version = -1
         self._bazar_character_autofilled = False
         self._bazar_npc_autofilled = False
@@ -2083,6 +2089,15 @@ class Application(Gtk.Application):
         quantity = int(getattr(slot, "amount", slot.quantity) or 0)
         amount = min(1000, max(1, quantity))
         changed = False
+        # Set up relist is an explicit "put this in the relist set" action;
+        # a disabled item gets switched back on, otherwise the pass would
+        # never search it.
+        if not item.relist:
+            item.relist = True
+            changed = True
+        if not item.enabled:
+            item.enabled = True
+            changed = True
         if item.vnum != vnum:
             item.vnum = vnum
             changed = True
@@ -2328,14 +2343,24 @@ class Application(Gtk.Application):
             self.bazar_relist_list.remove(child)
             child = self.bazar_relist_list.get_first_child()
         items = list(self.bazar.config.items)
+        if self.bazar_relist_filter is not None and (
+            self.bazar_relist_filter.get_active()
+        ):
+            items = [item for item in items if item.relist]
         if not items:
             row = Gtk.ListBoxRow()
             row.set_activatable(False)
             row.set_selectable(False)
-            empty = Gtk.Label(
-                label="No items yet. Add them in Inventory or Items."
-            )
+            if self.bazar.config.items:
+                text = (
+                    "No item is in the relist set yet. Tick a row here, or "
+                    "use Add from Items / Add from Inventory."
+                )
+            else:
+                text = "No items yet. Add them in Inventory or Items."
+            empty = Gtk.Label(label=text)
             empty.set_xalign(0)
+            empty.set_wrap(True)
             empty.add_css_class("dim-label")
             row.set_child(empty)
             self.bazar_relist_list.append(row)
@@ -2368,10 +2393,29 @@ class Application(Gtk.Application):
             badge = Gtk.Label(label=self._bazar_relist_badge(item)[0])
             badge.add_css_class(self._bazar_relist_badge(item)[1])
             badge.set_valign(Gtk.Align.START)
+            # The tick is the item's membership in the relist set; the
+            # badge explains why a ticked item still cannot send c_reg.
+            track = Gtk.CheckButton()
+            track.set_active(bool(item.relist))
+            track.set_valign(Gtk.Align.START)
+            track.set_tooltip_text(
+                "Track this item for relisting. Untick to keep watching "
+                "its price without changing the listing; the floor is kept."
+            )
+            track.connect(
+                "toggled",
+                lambda button, name=item.name: (
+                    self._bazar_relist_tracked_toggled(
+                        name, button.get_active()
+                    )
+                ),
+            )
+            row.relist_check = track  # type: ignore[attr-defined]
             content = Gtk.Box(
                 orientation=Gtk.Orientation.HORIZONTAL, spacing=8
             )
             content.set_margin_end(10)
+            content.append(track)
             content.append(box)
             content.append(badge)
             row.set_child(content)
@@ -2401,7 +2445,8 @@ class Application(Gtk.Application):
     @staticmethod
     def _bazar_relist_ready(item: BazarItem) -> bool:
         return bool(
-            item.enabled
+            item.relist
+            and item.enabled
             and item.search_packet
             and item.vnum
             and item.vnum > 0
@@ -2410,15 +2455,188 @@ class Application(Gtk.Application):
         )
 
     def _bazar_relist_badge(self, item: BazarItem) -> tuple[str, str]:
-        if not item.search_packet:
-            return "no search", "bazar-warn"
+        if not item.relist:
+            return "not relisting", "dim-label"
         if not item.enabled:
             return "disabled", "dim-label"
+        if not item.search_packet:
+            return "no search", "bazar-warn"
         if self._bazar_relist_ready(item):
             return "ready", "bazar-ok"
         if item.vnum and item.inv_tab in (0, 1, 2):
             return "needs floor", "bazar-warn"
-        return "monitor only", "dim-label"
+        return "needs vnum/tab", "bazar-warn"
+
+    # -- relist tracking -------------------------------------------------
+
+    def _bazar_relist_tracked_toggled(self, name: str, tracked: bool) -> None:
+        """A row tick: add to or remove from the relist set immediately."""
+        item = self._bazar_relist_set_tracked(name, tracked)
+        if item is None:
+            return
+        # The row is being torn down by the handler's own re-render when
+        # the filter hides it; defer the visual refresh one loop turn.
+        GLib.idle_add(self._bazar_relist_rerender_idle)
+
+    def _bazar_relist_rerender_idle(self) -> bool:
+        if not self._closing:
+            self._bazar_render_relist_items()
+        return False
+
+    def _bazar_relist_set_tracked(
+        self, name: str | None, tracked: bool
+    ) -> BazarItem | None:
+        """Put one configured item in or out of the relist set.
+
+        Removing keeps the item configured, monitored and its floor intact,
+        so re-adding restores the previous setup. Adding re-enables an item
+        that was switched off entirely, because tracking it is pointless
+        while the Monitor skips it.
+        """
+        item = self._bazar_item_by_name(name)
+        if item is None:
+            return None
+        if bool(item.relist) == bool(tracked) and (
+            not tracked or item.enabled
+        ):
+            # Re-rendering can emit toggled for the state just set; only a
+            # real change is worth a config write and a log line.
+            return item
+        changed = False
+        if item.relist != bool(tracked):
+            item.relist = bool(tracked)
+            changed = True
+        if tracked and not item.enabled:
+            item.enabled = True
+            changed = True
+        if not changed:
+            return item
+        self._bazar_save_config(quiet=True)
+        self._bazar_render_items()
+        self._bazar_update_relist_info()
+        label = self._bazar_item_label(item)
+        if tracked:
+            if self._bazar_relist_ready(item):
+                self._bazar_log(
+                    f"{label}: added to relisting (floor "
+                    f"{item.min_price:,})"
+                )
+            else:
+                self._bazar_log(
+                    f"{label}: added to relisting; "
+                    f"{self._bazar_relist_hint_text(item)}"
+                )
+        else:
+            self._bazar_log(
+                f"{label}: removed from relisting (still monitored; "
+                "floor kept)"
+            )
+        return item
+
+    def _bazar_relist_remove_selected(self) -> None:
+        name = self.bazar_relist_selected
+        if not name:
+            self._bazar_log("select an item in the relist list first")
+            return
+        self._bazar_relist_set_tracked(name, False)
+        self._bazar_render_relist_items()
+
+    def _bazar_relist_add_from_items(self) -> list[BazarItem]:
+        """Move the Items section's selection into the relist set."""
+        item = self._bazar_item_by_name(self.bazar_selected_name)
+        if item is None:
+            self._bazar_log("select an item in the Items section first")
+            return []
+        if item.relist and item.enabled:
+            self._bazar_log(
+                f"{self._bazar_item_label(item)}: already in relisting"
+            )
+        else:
+            self._bazar_relist_set_tracked(item.name, True)
+        self._bazar_render_relist_items()
+        self._bazar_select_relist_item(item.name)
+        return [item]
+
+    def _bazar_relist_add_from_inventory(self) -> list[BazarItem]:
+        """Add the Inventory section's ticked rows to the relist set."""
+        slots = self._inventory_checked_slots()
+        if not slots:
+            self._bazar_log(
+                "tick one or more inventory rows in the Inventory section "
+                "first"
+            )
+            return []
+        valid = [
+            slot
+            for slot in slots
+            if slot.vnum > 0 and slot.bag in (0, 1, 2)
+        ]
+        skipped = len(slots) - len(valid)
+        if skipped:
+            self._bazar_log(
+                f"{skipped} slot(s) cannot be relisted (bound vnum or "
+                "bag 6/7); skipped"
+            )
+        if not valid:
+            return []
+        if not self.item_info_loaded:
+            # Adding resolves Item.dat names; retry once they arrive.
+            self._ensure_item_info_loaded(
+                self._bazar_relist_add_from_inventory
+            )
+            return []
+        created = self._inventory_add(valid)
+        added: list[BazarItem] = []
+        changed = bool(created)
+        for slot in valid:
+            item = self._bazar_item_by_vnum(abs(slot.vnum))
+            if item is None:
+                continue
+            vnum = abs(slot.vnum)
+            quantity = int(getattr(slot, "amount", slot.quantity) or 0)
+            amount = min(1000, max(1, quantity))
+            for attribute, value in (
+                ("relist", True),
+                ("enabled", True),
+                ("vnum", vnum),
+                ("inv_tab", slot.bag),
+                ("amount", amount),
+            ):
+                if getattr(item, attribute) != value:
+                    setattr(item, attribute, value)
+                    changed = True
+            added.append(item)
+        if changed:
+            self._bazar_save_config(quiet=True)
+        self._bazar_render_items()
+        self._bazar_render_relist_items()
+        self._bazar_update_relist_info()
+        if not added:
+            return []
+        self._bazar_select_relist_item(added[0].name)
+        floors = [item for item in added if item.min_price <= 0]
+        text = f"{len(added)} item(s) added to relisting"
+        if floors:
+            text += f"; {len(floors)} still need a Min price"
+        self._bazar_log(text)
+        return added
+
+    @staticmethod
+    def _bazar_relist_hint_text(item: BazarItem) -> str:
+        if not item.search_packet:
+            return "no search packet; add one in Items"
+        if item.vnum is None or item.vnum <= 0:
+            return "set the item vnum"
+        if item.inv_tab not in (0, 1, 2):
+            return "choose Equip, Main or Etc"
+        if item.min_price <= 0:
+            return "set a positive Min price to enable relisting"
+        if item.vnum not in item.vnums:
+            return (
+                "item vnum is not in the search group; edit Search vnums "
+                "in Items or use the exact inventory vnum"
+            )
+        return f"ready · floor {item.min_price:,} per unit"
 
     def _bazar_relist_item_selected(
         self, _listbox: Gtk.ListBox, row: Gtk.ListBoxRow | None
@@ -2466,22 +2684,7 @@ class Application(Gtk.Application):
             )
         self._bazar_set_relist_form_sensitive(True)
         if self.bazar_relist_hint is not None:
-            if not item.search_packet:
-                hint = "No search packet: add one in Items."
-            elif item.vnum is None or item.vnum <= 0:
-                hint = "Set the item vnum."
-            elif item.inv_tab not in (0, 1, 2):
-                hint = "Choose Equip, Main or Etc."
-            elif item.min_price <= 0:
-                hint = "Set a positive Min price to enable relisting."
-            elif item.vnum not in item.vnums:
-                hint = (
-                    "Item vnum is not in the search group; edit Search "
-                    "vnums in Items or use the exact inventory vnum."
-                )
-            else:
-                hint = f"Ready · floor {item.min_price:,} per unit."
-            self.bazar_relist_hint.set_text(hint)
+            self.bazar_relist_hint.set_text(self._bazar_relist_hint_text(item))
 
     def _bazar_set_relist_form_sensitive(self, enabled: bool) -> None:
         for widget in self.bazar_relist_form.values():
@@ -2555,6 +2758,12 @@ class Application(Gtk.Application):
                 f"{self._bazar_item_label(item)}: set a positive Min price "
                 "to enable relisting"
             )
+        elif not item.relist:
+            self._bazar_log(
+                f"{self._bazar_item_label(item)}: relist settings saved "
+                f"(floor {minimum:,} per unit); tick Relist to include it "
+                "in the relist set"
+            )
         else:
             self._bazar_log(
                 f"{self._bazar_item_label(item)}: relist settings saved "
@@ -2600,6 +2809,11 @@ class Application(Gtk.Application):
                 ),
                 "",
             )
+        tracked = sum(
+            1
+            for item in self.bazar.config.items
+            if item.relist and item.enabled
+        )
         ready = sum(
             1
             for item in self.bazar.config.items
@@ -2608,7 +2822,8 @@ class Application(Gtk.Application):
         parts = [
             f"character {character}" if character else "character missing",
             f"Bibi {npc}" if npc else "Bibi id missing",
-            f"{ready} relist-ready",
+            f"{tracked} relisting",
+            f"{ready} ready",
         ]
         label.set_text(" · ".join(parts))
 
@@ -2643,6 +2858,8 @@ class Application(Gtk.Application):
         )
         form["amount"].set_value(item.amount)
         form["min"].set_value(item.min_price)
+        form["enabled"].set_active(item.enabled)
+        form["relist"].set_active(item.relist)
         value, unit = item.cost()
         if unit == "ND":
             form["cost_type"].set_selected(1)
@@ -2672,6 +2889,8 @@ class Application(Gtk.Application):
         form["tab"].set_selected(0)
         form["amount"].set_value(5)
         form["min"].set_value(0)
+        form["enabled"].set_active(True)
+        form["relist"].set_active(False)
         form["cost_type"].set_selected(0)
         form["cost"].set_value(0)
         form["unk1"].set_value(9)
@@ -2771,6 +2990,8 @@ class Application(Gtk.Application):
             unk2=int(form["unk2"].get_value()),
             durability=int(form["durability"].get_value()),
             medal=int(form["medal"].get_value()),
+            enabled=bool(form["enabled"].get_active()),
+            relist=bool(form["relist"].get_active()),
         )
 
     def _bazar_save_item(self) -> None:
@@ -3727,6 +3948,7 @@ class Application(Gtk.Application):
         )
         list_scroll.set_vexpand(True)
         left.append(list_scroll)
+        left.append(self._build_bazar_relist_tracking())
         body.set_start_child(left)
         body.set_resize_start_child(True)
         right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -3753,22 +3975,83 @@ class Application(Gtk.Application):
                 "Relisting",
                 content,
                 help_text=(
-                    "Select an item, set the exact Item vnum, the inventory "
-                    "Tab and the Amount, then set a positive Min price (the "
-                    "per-unit floor). Tick Allow live re-listing and fill "
-                    "Character with your own name so the host never "
-                    "undercuts you. Relist Start searches every enabled item "
-                    "and sends one c_reg per eligible item per pass at "
-                    "cheapest minus one gold, but never below the floor. "
-                    "The server sends no acknowledgement, so the status says "
-                    "register sent (no ack); verify the listing in the "
-                    "bazaar. Items without a vnum, tab or positive floor are "
-                    "monitor-only and are skipped."
+                    "The list is the relist set: tick an item to include "
+                    "it, untick it to stop changing that listing while the "
+                    "Monitor keeps watching it. Add from Items takes the "
+                    "selection in the Items section; Add from Inventory "
+                    "takes the rows ticked in the Inventory section and "
+                    "fills vnum, tab and amount from the slot. Remove from "
+                    "relisting (or the row tick) keeps the item and its "
+                    "floor, only out of the relist set. Only relisting "
+                    "hides the rest of the list. Select an item, set the "
+                    "exact Item vnum, the inventory Tab and the Amount, "
+                    "then a positive Min price (the per-unit floor). Tick "
+                    "Allow live re-listing and fill Character with your own "
+                    "name so the host never undercuts you. Relist Start "
+                    "searches only the relist set and sends one c_reg per "
+                    "eligible item per pass at cheapest minus one gold, "
+                    "but never below the floor. The server sends no "
+                    "acknowledgement, so the status says register sent "
+                    "(no ack); verify the listing in the bazaar. Items "
+                    "without a vnum, tab or positive floor are skipped."
                 ),
         )
         relist_frame.set_vexpand(True)
         page.append(relist_frame)
         return page
+
+    def _build_bazar_relist_tracking(self) -> Gtk.Widget:
+        """Add/remove/filter controls under the relist item list."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        add_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6
+        )
+        self.bazar_relist_add_items_button = Gtk.Button(
+            label="Add from Items"
+        )
+        self.bazar_relist_add_items_button.set_tooltip_text(
+            "Add the item selected in the Items section to the relist set."
+        )
+        self.bazar_relist_add_items_button.connect(
+            "clicked", lambda *_: self._bazar_relist_add_from_items()
+        )
+        add_row.append(self.bazar_relist_add_items_button)
+        self.bazar_relist_add_inventory_button = Gtk.Button(
+            label="Add from Inventory"
+        )
+        self.bazar_relist_add_inventory_button.set_tooltip_text(
+            "Add the rows ticked in the Inventory section to the relist "
+            "set, with their vnum, tab and stack amount."
+        )
+        self.bazar_relist_add_inventory_button.connect(
+            "clicked", lambda *_: self._bazar_relist_add_from_inventory()
+        )
+        add_row.append(self.bazar_relist_add_inventory_button)
+        box.append(add_row)
+        manage_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6
+        )
+        self.bazar_relist_remove_button = Gtk.Button(
+            label="Remove from relisting"
+        )
+        self.bazar_relist_remove_button.set_tooltip_text(
+            "Stop changing the selected listing; the item stays monitored "
+            "and keeps its floor."
+        )
+        self.bazar_relist_remove_button.connect(
+            "clicked", lambda *_: self._bazar_relist_remove_selected()
+        )
+        manage_row.append(self.bazar_relist_remove_button)
+        self.bazar_relist_filter = Gtk.CheckButton(label="Only relisting")
+        self.bazar_relist_filter.set_tooltip_text(
+            "Hide items that are not in the relist set."
+        )
+        self.bazar_relist_filter.connect(
+            "toggled", lambda *_: self._bazar_render_relist_items()
+        )
+        manage_row.append(self.bazar_relist_filter)
+        box.append(manage_row)
+        return box
 
     def _build_bazar_relist_editor(self) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -4023,7 +4306,10 @@ class Application(Gtk.Application):
                 "already own in Inventory; Import NosMall adds a whole "
                 "catalog group with a ready c_blist packet; New and Delete "
                 "edit this list. Select a row to edit its label, search, "
-                "relist vnum/tab/amount and cost. The Cost type chooses the "
+                "relist vnum/tab/amount, cost and tracking. Tracking has "
+                "two switches: Monitor searches the item, Relist puts it in "
+                "the relist set that Relist Start may reprice. The Cost "
+                "type chooses the "
                 "Monitor view: NosMall ND → NosMall; NPC gold → NPC resale "
                 "(the Item.dat price fills in when left at 0); No cost → "
                 "NosMall as price discovery."
@@ -4041,7 +4327,9 @@ class Application(Gtk.Application):
             help_text=(
                 "One bazaar item. Relist needs Item vnum, Tab and a "
                 "positive Min price; the Relist tab offers a compact "
-                "editor for those fields. Raw packet overrides Search "
+                "editor for those fields and the relist-set tick. "
+                "Tracking: Monitor searches the item; Relist includes it "
+                "in Relist Start passes. Raw packet overrides Search "
                 "vnums. Cost is the ND or gold basis used to compute "
                 "profit and to choose the Monitor tab: NosMall ND, NPC "
                 "gold (auto-filled from Item.dat when 0) or No cost."
@@ -4218,6 +4506,25 @@ class Application(Gtk.Application):
             self._field_row(
                 Gtk.Label(label="Amount"), amount,
                 Gtk.Label(label="Min price"), minimum,
+            )
+        )
+        enabled = Gtk.CheckButton(label="Monitor")
+        enabled.set_active(True)
+        enabled.set_tooltip_text(
+            "Monitor searches this item. Off keeps its saved settings but "
+            "skips every pass."
+        )
+        form["enabled"] = enabled
+        relist = Gtk.CheckButton(label="Relist")
+        relist.set_active(False)
+        relist.set_tooltip_text(
+            "Include this item in the relist set (Relist Start searches and "
+            "may change its listing; needs vnum, tab and a positive floor)."
+        )
+        form["relist"] = relist
+        box.append(
+            self._field_row(
+                Gtk.Label(label="Tracking"), enabled, relist
             )
         )
         cost_type = Gtk.DropDown.new_from_strings(

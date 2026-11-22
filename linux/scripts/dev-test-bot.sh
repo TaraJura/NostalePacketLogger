@@ -83,3 +83,4 @@ run gui_bazar_relist_smoke.py
 run gui_bazar_copy_smoke.py
 run gui_nosmall_import_smoke.py
 run gui_inventory_scan_smoke.py
+run gui_relist_track_smoke.py

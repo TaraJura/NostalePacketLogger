@@ -208,6 +208,27 @@ class ItemConfigTests(unittest.TestCase):
         self.assertEqual([item.name for item in loaded.items], ["bubbl", "free"])
         self.assertEqual(loaded.items[0].vnums, [2174])
 
+    def test_relist_flag_defaults_from_the_floor(self) -> None:
+        # An old file has no flag: a positive floor meant "relist this".
+        with_floor = BazarItem.from_dict(
+            {
+                "name": "a",
+                "search_packet": build_search_packet([1]),
+                "vnum": 1,
+                "inv_tab": 1,
+                "min_price": 500,
+            }
+        )
+        monitor_only = BazarItem.from_dict({"name": "b", "min_price": 0})
+        self.assertTrue(with_floor.relist)
+        self.assertFalse(monitor_only.relist)
+        # An explicit flag wins, so a floor can be kept while paused.
+        paused = BazarItem.from_dict(
+            {"name": "c", "min_price": 500, "relist": False}
+        )
+        self.assertFalse(paused.relist)
+        self.assertFalse(paused.to_dict()["relist"])
+
     def test_invalid_config(self) -> None:
         with self.assertRaises(BazarError):
             BazarConfig.from_dict({"items": [{"name": "a"}, {"name": "a"}]})
@@ -451,6 +472,54 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(controller.phase, "waiting")
         self.assertFalse(engine.world.bazar.open)
         self.assertEqual(controller.results["a"].status, "timeout")
+
+    def test_relist_mode_searches_only_the_relist_set(self) -> None:
+        tracked = BazarItem(
+            "bubbl",
+            build_search_packet([2174]),
+            vnum=2174,
+            inv_tab=2,
+            amount=5,
+            min_price=5000,
+        )
+        watched = BazarItem(
+            "flask", build_search_packet([2282]), relist=False
+        )
+        controller, engine, clock, sent = self._controller(
+            [tracked, watched], character="root1"
+        )
+        self.assertEqual(
+            [item.name for item in controller.relist_items()], ["bubbl"]
+        )
+        self._open(controller, engine, clock, relist=True)
+        controller.tick(engine.world)  # send the first (only) search
+        searches = [
+            packet
+            for packet in sent
+            if packet.startswith("c_blist 0 0 0 0 0 0 0 0 1 ")
+        ]
+        self.assertEqual(searches, ["c_blist 0 0 0 0 0 0 0 0 1 2174"])
+
+    def test_item_out_of_the_relist_set_never_sends_register(self) -> None:
+        item = BazarItem(
+            "watched",
+            build_search_packet([2282]),
+            vnum=2282,
+            inv_tab=2,
+            amount=1,
+            min_price=100,
+            relist=False,
+        )
+        controller, engine, clock, sent = self._controller(
+            [item], character="root1"
+        )
+        engine.feed_text("RECV", "inv 2 0.2282.1")
+        quote = BazarQuote(item=item, price=5000, seller="Seller")
+        controller._maybe_relist(engine.world, item, quote, clock.now)
+        self.assertEqual(quote.status, "not-selected")
+        self.assertEqual(
+            [packet for packet in sent if packet.startswith("c_reg ")], []
+        )
 
     def test_relist_undercuts_and_respects_floor(self) -> None:
         item = BazarItem(

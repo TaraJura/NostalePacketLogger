@@ -51,11 +51,17 @@ full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
    If the list is empty or marked **partial**, the login dump was missed:
    relog once with the window open and it fills automatically (then it is
    cached for later attaches).
-4. In **Relist**, set the selected item's **Item vnum**, **Tab**, **Amount**
-   and a positive **Min price** (the per-unit floor), then **Save relist
-   settings**. Fill **Character** with your own name so the host recognises
-   your listing. The list marks each item **ready**, **needs floor** or
-   **monitor only**.
+4. In **Relist**, the list is the relist set. Tick a row to include the item,
+   untick it to stop changing that listing while the Monitor keeps watching
+   it; **Add from Items** takes the selection in the Items section, **Add
+   from Inventory** takes the rows ticked in Inventory (vnum, tab and stack
+   amount are filled from the slot), **Remove from relisting** clears the
+   selected row and **Only relisting** hides the rest. Set the selected
+   item's **Item vnum**, **Tab**, **Amount** and a positive **Min price**
+   (the per-unit floor), then **Save relist settings**. Fill **Character**
+   with your own name so the host recognises your listing. The list marks
+   each item **ready**, **needs floor**, **needs vnum/tab**, **not
+   relisting** or **disabled**.
 5. Open the **Monitor** section, click **Monitor Start** and watch the
    cheapest listing and profit. The third-level **NosMall** and **NPC
    resale** tabs split the rows by their cost type; each tab has its own
@@ -68,7 +74,8 @@ full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
 6. Use the **Items** section when you need more than the relist fields: the
    full editor has **Name** (the shortcut label), **Search vnums**,
    **Raw packet**, **Item vnum**, **Tab**, **Amount**, **Min price**,
-   **Cost** and the advanced `c_reg` fields. The **Cost** type chooses the
+   **Cost**, the **Tracking** switches (**Monitor**, **Relist**) and the
+   advanced `c_reg` fields. The **Cost** type chooses the
    monitor: **NosMall ND** → the NosMall tab, **NPC gold** → the NPC resale
    tab, **No cost** → the NosMall tab as price discovery. For NPC gold, leave
    the **Cost** at 0 on save and the Item.dat NPC price fills in. The list
@@ -114,11 +121,17 @@ update both tables and never clear the other view.
   `timeout: stale price`; a definitive “no listings” answer clears the price.
 - **All-timeout pass** — mark the bazaar closed, drop to waiting so the
   character cannot be flagged for search spam.
-- **Relist** — only in relist mode, only with a character name, a positive
+- **Relist** — only in relist mode, only for items in the relist set
+  (`BazarItem.relist`), and only with a character name, a positive
   `min_price`, an inventory slot for `(tab, vnum)`, and a cheapest **other**
   seller. Sends one `c_reg` per item per pass. No server acknowledgement for
   `c_reg` has been captured, so the row says **register sent (no ack)** rather
   than claiming the listing succeeded.
+- **Two tracking switches** — `enabled` puts an item in every Monitor pass;
+  `relist` puts it in the relist set. A relist pass searches only
+  `BazarController.relist_items()` (enabled, relist, search packet), so an
+  item watched for price discovery is never repriced even when it carries a
+  floor. Unticking `relist` mid-pass takes effect on the next answer.
 
 The bazaar/entity state lives in `WorldState.bazar`; inventory slots are
 `WorldState.inventory` (`bag → slot → InventorySlot`), gold is
@@ -165,10 +178,11 @@ ivn 0 30.885.0.0.0.0.0                     # one equipment slot
   becomes `inv_tab` when it is 0/1/2 with a positive vnum. A negative-only
   group is monitor-only (no tab, amount 1).
 - **Set up relist…** (enabled with exactly one checked row) adds that exact
-  slot and switches to the **Relist** section with its vnum, tab and amount
-  filled in; only a positive **Min price** is then needed before **Relist
-  Start**. Bound negative vnums and bags 6/7 are not relistable and are added
-  as monitor-only with a status message.
+  slot, marks the item in the relist set and switches to the **Relist**
+  section with its vnum, tab and amount filled in; only a positive **Min
+  price** is then needed before **Relist Start**. Bound negative vnums and
+  bags 6/7 are not relistable and are added as monitor-only with a status
+  message.
 - A new item gets a known ND cost when the curated map or the configured list
   has one; otherwise a positive Item.dat NPC price becomes **NPC gold** cost,
   so the profit column still works. Both can be cleared in the editor.
@@ -208,19 +222,35 @@ the **Items** list — shows the real name instead:
 
 ![NosBazar Relist section: item readiness list and compact vnum/tab/amount/floor editor](assets/gui-relist.png)
 
-The **Relist** section is the setup and control surface. Pick an item from
-its list (or arrive from **Set up relist…**) and edit the compact fields:
+The **Relist** section is the setup and control surface. The list shows every
+configured item with a **Relist** tick: ticked rows are the *relist set* that
+**Relist Start** searches and may reprice, while unticked rows stay
+configured and monitored but are never touched. A tick writes the config
+immediately; unticking keeps the item, its floor and its Monitor state, so
+re-ticking restores the previous setup. **Add from Items** uses the
+selection in the Items section, **Add from Inventory** uses the rows ticked
+in the Inventory section (filling vnum, tab and stack amount from the slot),
+**Remove from relisting** clears the selected row, and **Only relisting**
+hides the rest of the list. The badge explains a ticked item that still
+cannot send: **ready**, **needs floor**, **needs vnum/tab**, **no search**
+or **disabled**; an unticked item reads **not relisting**.
+
+Pick an item from the list (or arrive from **Set up relist…**) and edit the
+compact fields:
 
 - **Item vnum** — the exact template vnum in the inventory, not the search
   group. `Set up relist…` fills it from the slot.
 - **Tab** — `Tab none` for monitor-only, or Equip/Main/Etc for relisting.
 - **Amount** — how many from that slot; must not exceed the stack.
-- **Min price** — the per-unit floor; **must be positive** or the item stays
-  monitor-only.
+- **Min price** — the per-unit floor; **must be positive** or the item
+  cannot relist.
 
-The list marks each item **ready**, **needs floor**, **monitor only**,
-**no search** or **disabled**, and the line above it shows the character and
-Bibi readiness. **Save relist settings** writes the config.
+The list badge shows **ready**, **needs floor**, **needs vnum/tab**, **no
+search**, **disabled** or (unticked) **not relisting**; the line above the
+list shows the character, Bibi and the `N relisting · M ready` counts.
+**Save relist settings** writes the config. Saving a floor does not tick the
+row by itself: tick **Relist** (or use Set up relist… / Add from…) to put
+the item in the set.
 
 To run it:
 1. Tick **Allow live re-listing (changes your listings)**.
@@ -228,8 +258,8 @@ To run it:
    own listing).
 3. Click **Relist Start**.
 
-The controller opens the bazaar if needed, searches every enabled item at the
-2.5 s pacing, and for each relist-ready item sends one `c_reg` per pass:
+The controller opens the bazaar if needed, searches only the relist set at
+the 2.5 s pacing, and for each relist-ready item sends one `c_reg` per pass:
 
 ```
 c_reg 0 <tab> <slot> 9 4 1 0 <amount> <cheapest-1> <tax> 2
@@ -244,8 +274,9 @@ c_reg 0 <tab> <slot> 9 4 1 0 <amount> <cheapest-1> <tax> 2
 - The listing fee/tax is charged. `Relist Stop` ends the mode and unchecks
   the live gate; editing items while running stops the controller
   (`items changed`).
-- Items without a search packet, positive vnum, tab and positive floor are
-  monitor-only and never touched.
+- Items without a search packet, positive vnum, tab and positive floor, or
+  without the **Relist** tick, are skipped and never touched. Monitor still
+  searches unticked items (when **Monitor** is on) for price discovery.
 
 ## Configuration
 
@@ -288,7 +319,8 @@ Example:
       "unk2": 4,
       "durability": 1,
       "medal": 2,
-      "enabled": true
+      "enabled": true,
+      "relist": true
     }
   ]
 }
@@ -297,6 +329,11 @@ Example:
 - `search_packet` is the full `c_blist`; the GUI builds it from **Search
   vnums** unless the raw packet field is filled.
 - `name` is display-only; deduplicate names per file.
+- `enabled` is the overall tracking switch (Monitor searches the item);
+  `relist` is the relist set (Relist Start searches it and may send `c_reg`).
+  A config written before `relist` existed infers it from a positive
+  `min_price`, so an old file behaves exactly as before. Inventory additions
+  start with `relist: false`.
 - `nos_cost` (NosMall ND) puts the item in the **NosMall** monitor;
   `npc_cost` (NPC gold) puts it in **NPC resale**. If both are present,
   `nos_cost` wins and the item stays in NosMall. Both are per single piece.
@@ -304,10 +341,11 @@ Example:
 
 ## Safety and limits
 
-- **Relist is gated**: the checkbox, a character name, a positive `min_price`,
-  a slot in the chosen inventory bag with at least the configured amount, and
-  a cheapest listing whose vnum is inside the searched group. It never
-  undercuts your own listing.
+- **Relist is gated**: the row's **Relist** tick (the relist set), the live
+  checkbox, a character name, a positive `min_price`, a slot in the chosen
+  inventory bag with at least the configured amount, and a cheapest listing
+  whose vnum is inside the searched group. It never undercuts your own
+  listing.
 - **Monitor never sends `c_reg`.** The smoke asserts this; **Price all** also
   starts Monitor, so pricing an inventory cannot change a listing.
 - **Pacing**: do not lower the 2.5 s search interval; the game silently drops
