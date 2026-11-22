@@ -544,9 +544,54 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(
             register, ["c_reg 0 2 7 9 4 1 0 5 43999 109 2"]
         )
+        # Sent is not accepted: the server answers with rc_reg.
+        self.assertEqual(
+            controller.results["bubbl"].status, "register-pending"
+        )
+        engine.feed_text("RECV", "rc_reg 1")
+        controller.tick(engine.world)
         self.assertEqual(
             controller.results["bubbl"].status, "register-sent"
         )
+        self.assertIn("rc_reg 1", controller.results["bubbl"].detail)
+
+    def test_missing_rc_reg_marks_the_registration_ignored(self) -> None:
+        item = BazarItem(
+            "bubbl",
+            build_search_packet([2174]),
+            vnum=2174,
+            inv_tab=2,
+            amount=5,
+            min_price=43000,
+        )
+        sent: list[str] = []
+        logs: list[str] = []
+        clock = Clock()
+        controller = BazarController(
+            lambda packet: sent.append(packet) or True,
+            log=logs.append,
+            clock=clock,
+        )
+        controller.set_items([item], character="root1", refresh=30)
+        engine = Engine()
+        engine.world.bazar.npc_id = 9584
+        engine.feed_text("RECV", "inv 2 7.2174.5")
+        self._open(controller, engine, clock, relist=True)
+        controller.tick(engine.world)
+        engine.feed(
+            Packet(Kind.RECV, _response(44000, "Other"), clock.now)
+        )
+        controller.tick(engine.world)
+        self.assertTrue([p for p in sent if p.startswith("c_reg ")])
+        self.assertEqual(
+            controller.results["bubbl"].status, "register-pending"
+        )
+        clock.advance(3.1)
+        controller.tick(engine.world)
+        self.assertEqual(
+            controller.results["bubbl"].status, "register-no-ack"
+        )
+        self.assertTrue(any("ignored" in line for line in logs))
 
     def test_relist_skips_own_listing_user(self) -> None:
         item = BazarItem(
@@ -615,6 +660,8 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(
             register, ["c_reg 0 0 30 9 4 1 0 1 43999 21 2"]
         )
+        engine.feed_text("RECV", "rc_reg 1")
+        controller.tick(engine.world)
         self.assertEqual(
             controller.results["hat"].status, "register-sent"
         )

@@ -124,9 +124,17 @@ update both tables and never clear the other view.
 - **Relist** — only in relist mode, only for items in the relist set
   (`BazarItem.relist`), and only with a character name, a positive
   `min_price`, an inventory slot for `(tab, vnum)`, and a cheapest **other**
-  seller. Sends one `c_reg` per item per pass. No server acknowledgement for
-  `c_reg` has been captured, so the row says **register sent (no ack)** rather
-  than claiming the listing succeeded.
+  seller. Sends one `c_reg` per item per pass. The server acknowledges an
+  accepted registration with **`rc_reg <n>`** (1 in every live capture);
+  the row then reads **register accepted (rc_reg)**. A c_reg the server
+  ignores gets no packet, and after 3 s the row reads **register ignored
+  (no rc_reg)** rather than claiming the listing succeeded.
+- **c_reg item constants** — the four numbers after the slot (`unk1 unk2
+  durability 0`) must match the item. Relist Start repairs them for Main/Etc
+  items from Item.dat before the pass: `unk1 = 8 + INDEX[0]`, `unk2 = 4`;
+  equipment keeps its configured values. Live 2026-11-23: a stale `10 3`
+  pair made the server drop every Speech Bubble c_reg silently, while the
+  repaired `10 4` pair was accepted.
 - **Two tracking switches** — `enabled` puts an item in every Monitor pass;
   `relist` puts it in the relist set. A relist pass searches only
   `BazarController.relist_items()` (enabled, relist, search packet), so an
@@ -276,8 +284,11 @@ c_reg 0 <tab> <slot> 9 4 1 0 <amount> <cheapest-1> <tax> 2
 - If the cheapest listing is already yours, that item is skipped (`own`).
 - If the cheapest listing is at/below the floor, it is skipped (`floor`).
 - Missing slot / insufficient stack → `no-slot` / `quantity`.
-- The server sends **no acknowledgement** for `c_reg`; the status reads
-  `register sent (no ack)` and the new price. Verify the listing in the game.
+- An accepted `c_reg` is answered with `rc_reg <n>` within about a second;
+  the status reads **register accepted (rc_reg)**. No answer within 3 s means
+  the server ignored the packet: the status reads **register ignored (no
+  rc_reg)** and the log points at the c_reg item constants (fixed from
+  Item.dat on the next Relist Start). Verify the listing in the game too.
 - The listing fee/tax is charged. `Relist Stop` ends the mode and unchecks
   the live gate; editing items while running stops the controller
   (`items changed`).

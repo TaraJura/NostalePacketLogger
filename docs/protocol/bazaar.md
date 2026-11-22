@@ -133,7 +133,7 @@ c_reg 0 <invTab> <slot> <unk1> <unk2> <durability> 0 <amount> <price> <tax> <med
 | `0` | Packet type |
 | `invTab` | `0` Equip, `1` Main, `2` Etc |
 | `slot` | Slot index inside that bag (from `inv`/`ivn`) |
-| `unk1`, `unk2` | Per-item constants; defaults `9`/`4` (Nostale-NB uses 10/3 for some items) |
+| `unk1`, `unk2` | Per-item constants. Main/Etc: `8 + INDEX[0]` and `4` (see below); equipment keeps its own values. Nostale-NB's `10 3` pair is silently rejected on FrosTale. |
 | `durability` | Default `1` |
 | `isPackage` | Always `0` here |
 | `amount` | Pieces per listing (default 5) |
@@ -151,8 +151,18 @@ The reference computes it with its default amount 5 even when the listing
 amount differs; this port uses the configured amount and truncates integer
 math. Servers may recompute/ignore the field. Re-listing never goes below the
 item's `min_price` floor, and the port refuses to relist when no floor is set.
-**No `c_reg` acknowledgement has been captured**; the status is “register
-sent”, not “listed”. Confirm on a cheap item before relying on it.
+
+**`rc_reg <value>` is the acknowledgement** (RECV, ~0.3-0.6 s after an
+accepted c_reg; value 1 in every live capture on FrosTale). A c_reg the
+server ignores gets no packet at all — that is how a wrong item-constant
+pair is detected. Live 2026-11-23: `c_reg 0 2 44 10 3 1 0 5 11496 28 2`
+was ignored three times, while the same item with `10 4` was accepted.
+
+The four item constants are derived from Item.dat for Main/Etc items:
+`unk1 = 8 + INDEX[0]`, `unk2 = 4` (equipment carries its own values). The
+client's own packets confirm it: `5370` INDEX[0] 1 → `9 4 1 0`; the
+Etc stackables (INDEX[0] 2) → `10 4 4 0`. A stale `unk2` (e.g. the
+Nostale-NB default 3) makes the server drop the packet silently.
 
 ## Inventory needed for relisting
 

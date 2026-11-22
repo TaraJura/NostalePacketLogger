@@ -1429,12 +1429,48 @@ class Application(Gtk.Application):
             self._bazar_log("not connected")
             return
         self._bazar_apply_settings()
+        if self.bazar.mode == "relist":
+            self._bazar_log(
+                "Monitor replaces Relist; no listing changes until Relist "
+                "Start is pressed again"
+            )
         if not self.bazar.start_monitor(self.engine.world):
             self._bazar_log(self.bazar.last_error or "cannot start monitor")
             return
         self._bazar_start_timer()
         self._bazar_render_results()
         self._bazar_update_info()
+
+    def _bazar_repair_relist_fields(self) -> int:
+        """Align the ``c_reg`` item constants with Item.dat before a pass.
+
+        The server silently ignores a ``c_reg`` whose constant pair does not
+        match the item (live 2026-11-23: a Speech Bubble with UNK2 3 never
+        got ``rc_reg``, while every accepted packet used UNK2 4). For Main
+        and Etc items the client's UNK1 is ``8 + Item.dat INDEX[0]``;
+        equipment is left alone because its other fields carry durability.
+        """
+        repaired = 0
+        for item in self.bazar.config.items:
+            if not item.relist or not item.enabled:
+                continue
+            if item.inv_tab not in (1, 2) or not item.vnum:
+                continue
+            info = self.item_info.get(abs(item.vnum))
+            if info is None or info.index0 <= 0:
+                continue
+            unk1 = min(1000, 8 + info.index0)
+            if item.unk1 != unk1 or item.unk2 != 4:
+                item.unk1 = unk1
+                item.unk2 = 4
+                repaired += 1
+        if repaired:
+            self._bazar_save_config(quiet=True)
+            self._bazar_log(
+                f"relist: fixed c_reg item constants for {repaired} item(s) "
+                "from Item.dat"
+            )
+        return repaired
 
     def _bazar_start_relist(self) -> None:
         if self.bazar_live_relist is None or not self.bazar_live_relist.get_active():
@@ -1446,6 +1482,9 @@ class Application(Gtk.Application):
             self._bazar_log("not connected")
             return
         self._bazar_apply_settings()
+        self._bazar_repair_relist_fields()
+        if self.bazar.mode == "monitor":
+            self._bazar_log("Relist replaces Monitor")
         if not self.bazar.start_relist(self.engine.world):
             self._bazar_log(self.bazar.last_error or "cannot start relist")
             return
@@ -4163,9 +4202,13 @@ class Application(Gtk.Application):
                     "name so the host never undercuts you. Relist Start "
                     "searches only the relist set and sends one c_reg per "
                     "eligible item per pass at cheapest minus one gold, "
-                    "but never below the floor. The server sends no "
-                    "acknowledgement, so the status says register sent "
-                    "(no ack); verify the listing in the bazaar. Items "
+                    "but never below the floor. The server answers an "
+                    "accepted c_reg with rc_reg, so the status reads "
+                    "register accepted (rc_reg); no answer within 3 s means "
+                    "the packet was ignored (register ignored (no rc_reg)), "
+                    "and Relist Start repairs the item constants from "
+                    "Item.dat on the next try. Verify the listing in the "
+                    "bazaar. Items "
                     "without a vnum, tab or positive floor are skipped."
                 ),
         )

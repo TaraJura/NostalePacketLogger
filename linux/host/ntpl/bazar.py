@@ -79,6 +79,9 @@ DEFAULT_REFRESH_S = 30.0
 TAX_RATE = 0.0005
 #: How long after the last answer the bazaar is assumed to still be open.
 OPEN_FRESH_S = 90.0
+#: A c_reg the server accepts is answered with ``rc_reg`` within about half
+#: a second; a registration it ignores gets no packet at all.
+REGISTER_ACK_TIMEOUT_S = 3.0
 
 CONFIG_VERSION = 1
 MAX_ITEMS = 5000
@@ -93,7 +96,10 @@ STATUS_TEXT = {
     "error": "error",
     "own": "your listing",
     "floor": "below floor",
-    "register-sent": "register sent (no ack)",
+    "register-pending": "register sent, waiting for rc_reg",
+    "register-sent": "register accepted (rc_reg)",
+    "register-no-ack": "register ignored (no rc_reg)",
+    "register-unknown": "register sent (ack unknown)",
     "quantity": "not enough in inventory",
     "no-slot": "not in inventory",
     "no-vnum": "no item vnum",
@@ -679,6 +685,13 @@ class BazarState:
     responses: deque[tuple[int, str]] = field(
         default_factory=lambda: deque(maxlen=8)
     )
+    #: ``rc_reg <value>`` is the server's c_reg acknowledgement (1 observed
+    #: for every accepted registration). A c_reg it ignores gets no packet
+    #: at all, which is how a wrong item-constant pair is detected. The
+    #: monotonic counter lets a controller match its own send.
+    register_count: int = 0
+    register_value: int = 0
+    register_at: float = 0.0
     #: The Bibi Basar entity id and the dialog option/page that opened it,
     #: learned from the client's own packets when the user opens the bazaar.
     npc_id: int | None = None
@@ -904,6 +917,9 @@ class BazarController:
         self._wait_until = 0.0
         self._pass_done_at = 0.0
         self._last_pass_summary = ""
+        #: The c_reg waiting for ``rc_reg``: item, quote, the ack counter at
+        #: send time, the price and the deadline.
+        self._pending_registration: dict[str, Any] | None = None
 
     # -- configuration --------------------------------------------------
 
@@ -1015,18 +1031,63 @@ class BazarController:
         self._pending = None
         self._queue = []
         self._wait_until = 0.0
+        pending = self._pending_registration
+        if pending is not None:
+            # No tick will resolve it after a stop; do not leave the row
+            # claiming it is still waiting for the server.
+            quote: BazarQuote = pending["quote"]
+            quote.status = "register-unknown"
+            quote.detail = "stopped before rc_reg"
+            self._pending_registration = None
         self.version += 1
         if was_running:
             self._log(f"NosBazar stopped{f': {reason}' if reason else ''}")
+
+    def _registration_tick(
+        self, world: "WorldState", now: float
+    ) -> None:
+        """Resolve the in-flight c_reg from the server's ``rc_reg``."""
+        pending = self._pending_registration
+        if pending is None:
+            return
+        state = world.bazar
+        if state.register_count > pending["seen"]:
+            quote: BazarQuote = pending["quote"]
+            quote.status = "register-sent"
+            quote.detail = (
+                f"rc_reg {state.register_value} · {pending['price']:,}"
+            )
+            self._log(
+                f"{self._item_label(pending['item'])}: c_reg accepted "
+                f"(rc_reg {state.register_value})"
+            )
+            self._pending_registration = None
+            self.version += 1
+            return
+        if now >= pending["deadline"]:
+            quote = pending["quote"]
+            quote.status = "register-no-ack"
+            quote.detail = f"{pending['price']:,} ignored (no rc_reg)"
+            self._log(
+                f"{self._item_label(pending['item'])}: c_reg ignored by the "
+                "server (no rc_reg); its c_reg item constants do not match "
+                "Item.dat"
+            )
+            self._pending_registration = None
+            self.version += 1
 
     # -- tick -----------------------------------------------------------
 
     def tick(self, world: "WorldState", now: float | None = None) -> bool:
         """Advance the state machine; return True when the display changed."""
-        if self.mode is None:
+        if self.mode is None and self._pending_registration is None:
             return False
         moment = self._clock() if now is None else now
         before = (self.phase, self.version)
+        # A c_reg answer can arrive in any phase, including the cooldown.
+        self._registration_tick(world, moment)
+        if self.mode is None:
+            return (self.phase, self.version) != before
         if self.phase == "open":
             self._open_tick(world, moment)
         elif self.phase == "waiting":
@@ -1395,6 +1456,17 @@ class BazarController:
                 "(not in the relist list)"
             )
             return
+        # Resolve a previous registration first; never chain a second c_reg
+        # while the server's answer to the first one is still unknown.
+        self._registration_tick(world, now)
+        if self._pending_registration is not None:
+            quote.status = "error"
+            quote.detail = "previous c_reg still pending"
+            self._log(
+                f"{self._item_label(item)}: not relisted "
+                "(previous c_reg still pending)"
+            )
+            return
         if item.vnum is None or item.vnum <= 0:
             quote.status = "no-vnum"
             self._log(
@@ -1492,12 +1564,19 @@ class BazarController:
             quote.detail = "register send failed"
             self._log(f"{self._item_label(item)}: register send failed")
             return
-        quote.status = "register-sent"
+        quote.status = "register-pending"
         quote.detail = f"{new_price:,} (was {quote.price:,})"
+        self._pending_registration = {
+            "item": item,
+            "quote": quote,
+            "seen": world.bazar.register_count,
+            "deadline": now + REGISTER_ACK_TIMEOUT_S,
+            "price": new_price,
+        }
         self._log(
             f"{self._item_label(item)}: c_reg sent for {new_price:,} "
-            f"(cheapest was {quote.price:,} by {quote.seller}; no acknowledgement "
-            f"packet is known)"
+            f"(cheapest was {quote.price:,} by {quote.seller}); waiting for "
+            "rc_reg"
         )
 
     # -- display --------------------------------------------------------

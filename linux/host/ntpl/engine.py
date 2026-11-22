@@ -387,6 +387,18 @@ def _on_bazar_response(world: WorldState, packet: Packet) -> None:
     state.responses.append((state.response_count, packet.text))
 
 
+def _on_bazar_register_ack(world: WorldState, packet: Packet) -> None:
+    # rc_reg <value>: the server accepted a c_reg. It answers nothing for a
+    # registration it ignores, so the missing count is the failure signal.
+    if packet.direction is not Kind.RECV:
+        return
+    values = packet.ints(1)
+    state = world.bazar
+    state.register_count += 1
+    state.register_value = values[0] if values else 1
+    state.register_at = time.monotonic()
+
+
 def _on_npc_req(world: WorldState, packet: Packet) -> None:
     values = packet.ints(2)
     if values is None:
@@ -964,6 +976,7 @@ class Engine:
                 "ivn": _on_inventory_update,  # RECV: one bag slot
                 "gold": _on_gold,       # RECV: own gold
                 "rc_blist": _on_bazar_response,  # RECV: bazaar search answer
+                "rc_reg": _on_bazar_register_ack,  # RECV: c_reg accepted
                 "npc_req": _on_npc_req,  # SEND/RECV: NPC dialog
                 "n_run": _on_npc_run,   # SEND: NPC dialog option
                 "c_blist": _on_bazar_client_open,  # SEND: bazaar listing

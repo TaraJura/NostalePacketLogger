@@ -91,6 +91,10 @@ class BazarServer:
         if text.startswith("SEND|n_run 60 0 2 9584"):
             self._send("RECV|wopen  28 0 9584 0\n")
             return
+        if text.startswith("SEND|c_reg "):
+            # The live server acknowledges an accepted c_reg with rc_reg 1.
+            self._send("RECV|rc_reg 1\n")
+            return
         if text.startswith("SEND|c_blist "):
             parts = text.split()
             if len(parts) >= 12 and parts[10] == "0":

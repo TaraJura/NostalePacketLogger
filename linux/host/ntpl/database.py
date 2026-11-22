@@ -985,7 +985,7 @@ def item_info(connection: sqlite3.Connection) -> dict[int, ItemInfo]:
     """
     rows = connection.execute(
         """
-        SELECT i.vnum, i.name, i.price, i.category
+        SELECT i.vnum, i.name, i.price, i.category, i.data_json
         FROM items i
         JOIN (SELECT vnum, MAX(id) AS id FROM items GROUP BY vnum) last
           ON last.id = i.id
@@ -1010,7 +1010,15 @@ def item_info(connection: sqlite3.Connection) -> dict[int, ItemInfo]:
             category = int(row["category"] or 0)
         except (TypeError, ValueError):
             category = 0
-        info[vnum] = ItemInfo(vnum, name, price, category)
+        index0 = 0
+        try:
+            data = json.loads(row["data_json"] or "{}")
+            values = data.get("INDEX") if isinstance(data, dict) else None
+            if isinstance(values, list) and values:
+                index0 = int(values[0])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            index0 = 0
+        info[vnum] = ItemInfo(vnum, name, price, category, index0)
     return info
 
 

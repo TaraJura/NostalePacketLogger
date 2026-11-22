@@ -117,6 +117,10 @@ class ItemInfo:
     name: str
     npc_price: int = 0
     category: int = 0
+    #: ``INDEX[0]`` of the row. The client derives the first ``c_reg``
+    #: constant from it (``unk1 = 8 + index0``); 0 means the record did not
+    #: carry it.
+    index0: int = 0
 
 
 #: NosMall record categories that only hold companions and their supplies.
@@ -260,11 +264,13 @@ def load_item_info(
         vnum = values[0]
         npc_price = values[1] if len(values) > 1 and values[1] > 0 else 0
         types = _ints(record.get("TYPE", []), 1)
+        index = _ints(record.get("INDEX", []), 1)
         info[vnum] = ItemInfo(
             vnum=vnum,
             name=names.get(vnum) or f"item {vnum}",
             npc_price=npc_price,
             category=types[0] if types else 0,
+            index0=index[0] if index else 0,
         )
     return info
 

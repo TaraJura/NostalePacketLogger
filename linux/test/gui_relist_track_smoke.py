@@ -30,7 +30,7 @@ from ntpl.gui import Application
 from ntpl.nosmall import ItemInfo
 
 TEST_NAMES = {
-    2174: ItemInfo(2174, "Speech Bubble", 3000, 0),
+    2174: ItemInfo(2174, "Speech Bubble", 3000, 0, 2),
     1362: ItemInfo(1362, "Soulstone Blessing", 100, 0),
     2282: ItemInfo(2282, "Angel's Feather", 100, 0),
     2072: ItemInfo(2072, "Bell of Sweet Home", 400, 0),
@@ -256,6 +256,20 @@ def main() -> int:
                 app.bazar_relist_list.get_selected_rows()
             )
             result["group_button"] = app.bazar_relist_group_button is not None
+            # The c_reg item constants are repaired from Item.dat before a
+            # relist pass: INDEX[0] 2 -> UNK1 10, and the server expects
+            # UNK2 4 (the stale 10/3 pair is what broke live relisting).
+            bubble.unk1 = 10
+            bubble.unk2 = 3
+            result["repaired"] = app._bazar_repair_relist_fields()
+            result["fixed_fields"] = (bubble.unk1, bubble.unk2)
+            repaired_saved = {
+                item.name: item for item in load_config(config_path).items
+            }
+            result["saved_fields"] = (
+                repaired_saved[bubble.name].unk1,
+                repaired_saved[bubble.name].unk2,
+            )
             result["ok"] = (
                 result["items"] == 7
                 and result["initial_relist"] == []
@@ -285,6 +299,9 @@ def main() -> int:
                 and result["bulk_all"] == 7
                 and result["unselected"] == 0
                 and result["group_button"] is True
+                and result["repaired"] == 1
+                and result["fixed_fields"] == (10, 4)
+                and result["saved_fields"] == (10, 4)
                 and by_name[bubble.name].relist is False
                 and by_name[bubble.name].min_price == 1000
                 and by_name[feather.name].relist is True

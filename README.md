@@ -72,9 +72,11 @@ navbar**: **NosMall** (ND-cost items, gold per ND) and **NPC resale**
   **Character** with your own name, tick **Allow live re-listing**, then
   **Relist Start**. Each pass searches only the relist set and undercuts the
   cheapest other listing by one gold, never below the floor; the status
-  reports `register sent (no ack)` because the server sends no confirmation
-  for `c_reg`. The **Items** editor carries the same two switches,
-  **Monitor** and **Relist**.
+  reports **register accepted (rc_reg)** when the server answers, or
+  **register ignored (no rc_reg)** when it silently drops the packet (the
+  c_reg item constants are repaired from Item.dat before each pass).
+  The **Items** editor carries the same two tracking switches, **Monitor**
+  and **Relist**.
 - **Monitor** — starts/stops searches, opens the Bibi Basar dialog through
   the client's own send path, learns the map/session NPC id and dialog option
   from your own opening (or the DLL log), and searches at the required 2.5 s
@@ -146,7 +148,7 @@ two more wolves that joined the fight.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 340 Python unit tests
+make -C linux host-test                      # 341 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux key-test                       # DLL KEY| name parsing
 make -C linux gui-test                       # six headless GTK4 smokes (xvfb)
@@ -223,7 +225,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 340 unit tests pass, the six GTK4 window smokes
+The Linux port builds, its 341 unit tests pass, the six GTK4 window smokes
 and 41 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 

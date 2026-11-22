@@ -7,7 +7,7 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 340 unittest cases, 6 GTK4 smokes, 42 fake-server bot
+- **Linux host**: 341 unittest cases, 6 GTK4 smokes, 42 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
   linux all test-host`, tests above. The host is **0.7.1**: the MCP now
   seeds `world.entities` from the attached client's log
@@ -68,7 +68,9 @@ the data layer in [database.md](database.md).
   relisting**), an **Only relisting** filter, Ctrl+click multi-selection and
   **Group actions…** (select/unselect all, relist/stop all shown or
   selected); the live checkbox, a character name, a positive floor and an
-  inventory slot, and reports `register sent (no ack)`; **Relist Start**
+  inventory slot, reports **register accepted (rc_reg)** or **register
+  ignored (no rc_reg)** (the c_reg item constants are repaired from Item.dat
+  before a pass), and **Relist Start**
   searches only the relist set while Monitor searches every enabled item.
   The page has a second-level navbar (**Inventory**,
   **Relist**, **Monitor**, **Items**, **Configuration**); **Monitor** has a
