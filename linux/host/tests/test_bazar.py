@@ -20,6 +20,7 @@ from ntpl.bazar import (
     load_config,
     normalize_search_packet,
     parse_rc_blist,
+    monitor_source,
     save_config,
     search_vnums,
 )
@@ -159,6 +160,26 @@ class ItemConfigTests(unittest.TestCase):
         self.assertAlmostEqual(item.ratio(13798) or 0, 27596.0)
         self.assertEqual(BazarItem("y", npc_cost=300).cost_text(), "300 g")
         self.assertEqual(BazarItem("z").cost_text(), "-")
+
+    def test_monitor_source_follows_the_cost_unit(self) -> None:
+        self.assertEqual(
+            monitor_source(BazarItem("nd", nos_cost=0.5)), "nosmall"
+        )
+        self.assertEqual(
+            monitor_source(BazarItem("npc", npc_cost=300)), "npc"
+        )
+        # ND wins when a hand-edited file has both.
+        self.assertEqual(
+            monitor_source(
+                BazarItem("both", nos_cost=1, npc_cost=300)
+            ),
+            "nosmall",
+        )
+        self.assertEqual(monitor_source(BazarItem("free")), "nosmall")
+        self.assertEqual(
+            monitor_source(BazarItem("zero", nos_cost=0, npc_cost=0)),
+            "nosmall",
+        )
 
     def test_round_trip(self) -> None:
         config = BazarConfig(

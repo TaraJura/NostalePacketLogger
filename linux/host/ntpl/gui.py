@@ -27,15 +27,19 @@ from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango
 
 from . import __version__
 from .bazar import (
+    MONITOR_SOURCES,
     BazarController,
     BazarError,
     BazarItem,
+    BazarQuote,
     build_search_packet,
     default_config_path as default_bazar_config_path,
     inventory_search_items,
     load_config as load_bazar_config,
+    monitor_source,
     normalize_search_packet,
     save_config as save_bazar_config,
+    search_vnums,
     tracked_vnums,
 )
 from .botconfig import (
@@ -645,6 +649,15 @@ class Application(Gtk.Application):
         self.bazar_info = None
         self.bazar_status = None
         self.bazar_results_box = None
+        # The Monitor section's third-level views: NosMall (ND/no cost) and
+        # NPC resale (gold cost). Each view owns its table and Only priced
+        # filter; the singular attributes above point at the active view for
+        # older tests and the item-name refresh path.
+        self.bazar_results_boxes: dict[str, Gtk.Box] = {}
+        self.bazar_results_infos: dict[str, Gtk.Label] = {}
+        self.bazar_only_priced_checks: dict[str, Gtk.CheckButton] = {}
+        self.bazar_monitor_notebook = None
+        self._bazar_monitor_sources = MONITOR_SOURCES
         self.bazar_items_list = None
         self.bazar_items_info = None
         self.bazar_only_priced = None
@@ -2722,6 +2735,29 @@ class Application(Gtk.Application):
         inv_tab = None if tab_index == 0 else tab_index - 1
         cost_index = form["cost_type"].get_selected()
         cost = float(form["cost"].get_value())
+        # NPC resale: an Item.dat price is the usual gold cost. Fill it when
+        # the user leaves the cost at 0, so adding Pet Food or Bell of Sweet
+        # Home needs only the vnum and Cost = NPC gold.
+        if cost_index == 2 and cost <= 0:
+            lookup = vnum
+            if lookup is None and search_packet:
+                candidates = search_vnums(search_packet)
+                if len(candidates) == 1:
+                    lookup = candidates[0]
+            if lookup is not None:
+                info = self.item_info.get(abs(lookup))
+                if info is not None and info.npc_price > 0:
+                    cost = float(info.npc_price)
+                    form["cost"].set_value(cost)
+                    self._bazar_log(
+                        f"NPC price for vnum {lookup} is "
+                        f"{info.npc_price:,} g (Item.dat)"
+                    )
+                else:
+                    self._bazar_log(
+                        f"NPC price unknown for vnum {lookup}; enter it "
+                        "by hand or wait for item names to load"
+                    )
         return BazarItem(
             name=name,
             search_packet=search_packet,
@@ -3143,47 +3179,65 @@ class Application(Gtk.Application):
         return False
 
     def _bazar_render_results(self) -> None:
-        if self.bazar_results_box is None:
+        if not self.bazar_results_boxes:
             return
-        child = self.bazar_results_box.get_first_child()
-        while child is not None:
-            self.bazar_results_box.remove(child)
-            child = self.bazar_results_box.get_first_child()
         self._bazar_render_version = self.bazar.version
+        quotes = self.bazar.sorted_quotes()
+        for source in self._bazar_monitor_sources:
+            self._bazar_render_monitor_view(source, quotes)
 
-        items = self.bazar.config.items
+    def _bazar_render_monitor_view(
+        self, source: str, quotes: list[BazarQuote]
+    ) -> None:
+        box = self.bazar_results_boxes.get(source)
+        info = self.bazar_results_infos.get(source)
+        if box is None:
+            return
+        child = box.get_first_child()
+        while child is not None:
+            box.remove(child)
+            child = box.get_first_child()
+
+        items = [
+            quote
+            for quote in quotes
+            if monitor_source(quote.item) == source
+        ]
         if not items:
-            if self.bazar_results_info is not None:
-                self.bazar_results_info.set_text("No items")
-            empty = Gtk.Label(label="No items yet.")
+            if info is not None:
+                info.set_text("No items")
+            empty = Gtk.Label(
+                label=(
+                    "No NPC-resale items yet."
+                    if source == "npc"
+                    else "No NosMall items yet."
+                )
+            )
             empty.set_xalign(0)
             empty.add_css_class("dim-label")
-            self.bazar_results_box.append(empty)
+            box.append(empty)
             return
 
-        quotes = self.bazar.sorted_quotes()
-        only_priced = (
-            self.bazar_only_priced is not None
-            and self.bazar_only_priced.get_active()
-        )
+        check = self.bazar_only_priced_checks.get(source)
+        only_priced = check is not None and check.get_active()
         if only_priced:
-            visible = [quote for quote in quotes if quote.price is not None]
+            visible = [quote for quote in items if quote.price is not None]
         else:
-            visible = list(quotes)
-        hidden = len(quotes) - len(visible)
-        if self.bazar_results_info is not None:
+            visible = list(items)
+        hidden = len(items) - len(visible)
+        if info is not None:
             text = "Most profitable first"
             if only_priced:
                 text += f" · {len(visible)} priced"
             if hidden:
                 text += f" · {hidden} hidden"
-            self.bazar_results_info.set_text(text)
+            info.set_text(text)
 
         if not visible:
             empty = Gtk.Label(label="No priced items yet.")
             empty.set_xalign(0)
             empty.add_css_class("dim-label")
-            self.bazar_results_box.append(empty)
+            box.append(empty)
             return
 
         grid = Gtk.Grid()
@@ -3191,7 +3245,14 @@ class Application(Gtk.Application):
         grid.set_row_spacing(3)
         grid.set_margin_end(14)
         grid.set_margin_top(2)
-        headers = ("Item", "Cost", "NB Price", "Profit", "Seller", "Status")
+        headers = (
+            "Item",
+            "Cost",
+            "NB Price",
+            "Markup" if source == "npc" else "Profit",
+            "Seller",
+            "Status",
+        )
         aligns = (0.0, 0.0, 1.0, 1.0, 0.0, 0.0)
         for column, (title, align) in enumerate(zip(headers, aligns)):
             label = Gtk.Label()
@@ -3282,7 +3343,7 @@ class Application(Gtk.Application):
                 grid.attach(label, column, grid_row, 1, 1)
             if row_index < len(visible) - 1:
                 separator(grid_row + 1)
-        self.bazar_results_box.append(grid)
+        box.append(grid)
 
     def _bazar_seed_from_log(self) -> None:
         """Learn the Bibi id/option and inventory from this client's DLL log.
@@ -3411,11 +3472,14 @@ class Application(Gtk.Application):
                 "NosBazar",
                 "Section tabs: Inventory scans every owned slot and can set "
                 "up relisting; Relist sets the floor, character and starts "
-                "registrations; Monitor searches and shows prices/profit; "
-                "Items edits the searches; Configuration has the Bibi id, "
-                "refresh and config file. Open bazaar replays the Bibi Basar "
-                "dialog through the client's own send path. Relist changes "
-                "real listings and spends the fee.",
+                "registrations; Monitor searches and shows prices/profit, "
+                "with third-level NosMall (ND cost, gold per ND) and NPC "
+                "resale (NPC gold cost, such as Pet Food or Bell of Sweet "
+                "Home; gold markup) views; Items edits the searches and the "
+                "Cost type that chooses the monitor; Configuration has the "
+                "Bibi id, refresh and config file. Open bazaar replays the "
+                "Bibi Basar dialog through the client's own send path. "
+                "Relist changes real listings and spends the fee.",
             )
         )
         page.append(toolbar)
@@ -3792,57 +3856,114 @@ class Application(Gtk.Application):
         monitor_start = Gtk.Button(label="Monitor Start")
         monitor_start.add_css_class("suggested-action")
         monitor_start.set_tooltip_text(
-            "Search every item; sends search packets only."
+            "Search every item in one pass; sends search packets only."
         )
         monitor_start.connect("clicked", lambda *_: self._bazar_start_monitor())
         tools.append(monitor_start)
         monitor_stop = Gtk.Button(label="Monitor Stop")
         monitor_stop.connect("clicked", lambda *_: self._bazar_stop())
         tools.append(monitor_stop)
-        self.bazar_results_info = Gtk.Label(label="No items")
-        self.bazar_results_info.set_xalign(0)
-        self.bazar_results_info.set_hexpand(True)
-        self.bazar_results_info.add_css_class("dim-label")
-        tools.append(self.bazar_results_info)
-        self.bazar_only_priced = Gtk.CheckButton(label="Only priced")
-        self.bazar_only_priced.set_active(True)
-        self.bazar_only_priced.set_tooltip_text(
-            "Show only items with a current price."
-        )
-        self.bazar_only_priced.connect(
-            "toggled", lambda *_: self._bazar_render_results()
-        )
-        tools.append(self.bazar_only_priced)
         content.append(tools)
-        self.bazar_results_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=2
-        )
-        results_scroll = Gtk.ScrolledWindow()
-        results_scroll.set_policy(
-            Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC
-        )
-        results_scroll.set_child(self.bazar_results_box)
-        results_scroll.set_vexpand(True)
-        content.append(results_scroll)
+
+        # Third-level navbar: one shared search pass, two dashboards split by
+        # the cost basis. Each view owns its table and Only priced filter.
+        monitors = Gtk.Notebook()
+        monitors.set_vexpand(True)
+        monitors.set_scrollable(True)
+        self.bazar_monitor_notebook = monitors
+        titles = {"nosmall": "NosMall", "npc": "NPC resale"}
+        for source in self._bazar_monitor_sources:
+            monitors.append_page(
+                self._build_bazar_monitor_view(source),
+                Gtk.Label(label=titles[source]),
+            )
+        monitors.connect("switch-page", self._bazar_monitor_switched)
+        content.append(monitors)
+        self._bazar_monitor_switched(monitors, monitors.get_nth_page(0), 0)
+
         monitor_frame = self._frame(
                 "Monitor",
                 content,
                 help_text=(
-                    "Search every enabled configured item at the 2.5 s "
-                    "pacing and show the cheapest listing, seller, price and "
-                    "profit (gold per ND or NPC-gold markup). The Item "
-                    "column is the real item name for the item's vnum from "
-                    "the local database; hover the Item cell for the "
-                    "configured label and search vnums. A pass where every "
-                    "item times "
-                    "out retries after the refresh interval. Only priced "
-                    "hides rows without a current answer. Add and edit "
-                    "searches in Items; change listings in Relist."
+                    "One Monitor Start searches every enabled item at the "
+                    "2.5 s pacing. The third-level tabs split the results by "
+                    "cost basis: NosMall (Cost = NosMall ND, plus items "
+                    "whose cost is still unknown) shows gold per ND; NPC "
+                    "resale (Cost = NPC gold) shows the gold markup for "
+                    "items bought at an NPC and sold in the bazaar, for "
+                    "example Pet Food or Bell of Sweet Home. The Item column "
+                    "is the real Item.dat name; hover it for the configured "
+                    "label and search vnums. Only priced hides rows without "
+                    "a current answer; each tab has its own filter. Add and "
+                    "edit searches in Items, and choose the monitor with its "
+                    "Cost type. A pass where every item times out retries "
+                    "after the refresh interval."
                 ),
         )
         monitor_frame.set_vexpand(True)
         page.append(monitor_frame)
         return page
+
+    def _build_bazar_monitor_view(self, source: str) -> Gtk.Widget:
+        view = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        view.set_margin_top(4)
+        view.set_margin_start(4)
+        view.set_margin_end(4)
+        view.set_margin_bottom(4)
+        tools = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        info = Gtk.Label(label="No items")
+        info.set_xalign(0)
+        info.set_hexpand(True)
+        info.add_css_class("dim-label")
+        tools.append(info)
+        only = Gtk.CheckButton(label="Only priced")
+        only.set_active(True)
+        only.set_tooltip_text("Show only items with a current price.")
+        only.connect("toggled", lambda *_: self._bazar_render_results())
+        tools.append(only)
+        if source == "npc":
+            help_title = "NPC resale monitor"
+            help_text = (
+                "Items whose Cost type is NPC gold — the Item.dat NPC shop "
+                "price, such as Pet Food or Bell of Sweet Home. Profit shows "
+                "the gold markup (listing price ÷ NPC price); Cost is the "
+                "NPC purchase price. Add one in Items with Cost = NPC gold; "
+                "leaving the cost at 0 fills the Item.dat price on save. "
+                "One Monitor Start searches this list together with NosMall."
+            )
+        else:
+            help_title = "NosMall monitor"
+            help_text = (
+                "Items whose Cost type is NosMall ND, plus items whose cost "
+                "is still unknown (price discovery). Profit is the listing "
+                "price in gold per ND spent. Import catalog groups with "
+                "Import NosMall… in Items and set their ND cost. One Monitor "
+                "Start searches this list together with NPC resale."
+            )
+        tools.append(self._help_button(help_title, help_text))
+        view.append(tools)
+        results = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(
+            Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC
+        )
+        scroll.set_child(results)
+        scroll.set_vexpand(True)
+        view.append(scroll)
+        self.bazar_results_boxes[source] = results
+        self.bazar_results_infos[source] = info
+        self.bazar_only_priced_checks[source] = only
+        return view
+
+    def _bazar_monitor_switched(
+        self, _notebook, _page, index: int
+    ) -> None:
+        if index < 0 or index >= len(self._bazar_monitor_sources):
+            return
+        source = self._bazar_monitor_sources[index]
+        self.bazar_results_box = self.bazar_results_boxes.get(source)
+        self.bazar_results_info = self.bazar_results_infos.get(source)
+        self.bazar_only_priced = self.bazar_only_priced_checks.get(source)
 
     def _build_bazar_items_section(self) -> Gtk.Widget:
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -3902,7 +4023,10 @@ class Application(Gtk.Application):
                 "already own in Inventory; Import NosMall adds a whole "
                 "catalog group with a ready c_blist packet; New and Delete "
                 "edit this list. Select a row to edit its label, search, "
-                "relist vnum/tab/amount and cost."
+                "relist vnum/tab/amount and cost. The Cost type chooses the "
+                "Monitor view: NosMall ND → NosMall; NPC gold → NPC resale "
+                "(the Item.dat price fills in when left at 0); No cost → "
+                "NosMall as price discovery."
             ),
         )
         items_frame.set_vexpand(True)
@@ -3919,7 +4043,8 @@ class Application(Gtk.Application):
                 "positive Min price; the Relist tab offers a compact "
                 "editor for those fields. Raw packet overrides Search "
                 "vnums. Cost is the ND or gold basis used to compute "
-                "profit."
+                "profit and to choose the Monitor tab: NosMall ND, NPC "
+                "gold (auto-filled from Item.dat when 0) or No cost."
             ),
         )
         editor_frame.set_vexpand(True)

@@ -90,7 +90,8 @@ accepts both.
   `linux/build/PacketLogger.dll` is not enough: the old module stays mapped in
   the running client. Restart the game client and inject again (the picker's
   **Inject & connect**), then the window title/status shows `DLL 0.3.0`.
-- Host **0.6.0** for the tab. Only a GUI restart is needed for host changes.
+- Host **0.6.0 or newer** for the tab (0.7.0 today). Only a GUI restart is
+  needed for host changes.
 - The game window attached to this GUI window. The tab is per client, like the
   Family and NosBazar pages.
 

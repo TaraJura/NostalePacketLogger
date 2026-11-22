@@ -5,8 +5,10 @@ The **NosBazar** tab ports the two flows of
 client:
 
 1. **Monitor** — search each configured item, keep the cheapest listing and
-   show its profitability against a NosMall ND cost (gold per ND) or an NPC
-   gold cost (multiplier).
+   show its profitability. A third-level navbar splits the results into
+   **NosMall** (ND cost; gold per ND) and **NPC resale** (NPC gold cost;
+   gold markup), so the cash-shop and NPC-shop opportunities never mix. One
+   **Monitor Start** searches both lists.
 2. **Relist** — for an item in the inventory, undercut the cheapest other
    seller by one gold and send `c_reg`, never below the configured
    `min_price` floor.
@@ -16,7 +18,10 @@ client:
    inventory in one action.
 
 The page is split by a **second-level navbar** into **Inventory**, **Relist**,
-**Monitor**, **Items** and **Configuration** sections.
+**Monitor**, **Items** and **Configuration** sections. **Monitor** itself has
+a **third-level navbar** with **NosMall** and **NPC resale** views; the view
+is chosen per item by the **Cost** type in the editor, not by a separate
+configuration file.
 
 The packet formats and live captures are in
 [protocol/bazaar.md](protocol/bazaar.md).
@@ -52,8 +57,10 @@ full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
    your listing. The list marks each item **ready**, **needs floor** or
    **monitor only**.
 5. Open the **Monitor** section, click **Monitor Start** and watch the
-   cheapest listing and profit. The **Item** column shows the real item name
-   for the row's vnum (see [Item names](#item-names)), not the configured
+   cheapest listing and profit. The third-level **NosMall** and **NPC
+   resale** tabs split the rows by their cost type; each tab has its own
+   **Only priced** filter. The **Item** column shows the real item name for
+   the row's vnum (see [Item names](#item-names)), not the configured
    shortcut; hover the Item cell for the shortcut and search vnums (every
    result cell carries the raw `rc_blist` fields). Searches use 2.5 s
    pacing; timed-out items get one retry and the next pass starts after
@@ -61,11 +68,31 @@ full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
 6. Use the **Items** section when you need more than the relist fields: the
    full editor has **Name** (the shortcut label), **Search vnums**,
    **Raw packet**, **Item vnum**, **Tab**, **Amount**, **Min price**,
-   **Cost** and the advanced `c_reg` fields. The list shows the real item
-   name too. **Import NosMall…** adds whole catalog groups with a ready
-   `c_blist` packet; **New** and **Delete** edit the list.
+   **Cost** and the advanced `c_reg` fields. The **Cost** type chooses the
+   monitor: **NosMall ND** → the NosMall tab, **NPC gold** → the NPC resale
+   tab, **No cost** → the NosMall tab as price discovery. For NPC gold, leave
+   the **Cost** at 0 on save and the Item.dat NPC price fills in. The list
+   shows the real item name too. **Import NosMall…** adds whole catalog
+   groups with a ready `c_blist` packet; **New** and **Delete** edit the
+   list.
 7. To relist, tick **Allow live re-listing (changes your listings)** in the
    **Relist** section and click **Relist Start**. **Relist Stop** stops it.
+
+## Monitor views
+
+- **NosMall** — items with a positive `nos_cost`. Profit is the cheapest
+  listing in gold per ND spent. Items with no cost at all also appear here,
+  so a newly added search can be watched before its cost is known.
+- **NPC resale** — items with an NPC gold cost. Profit is the **Markup**
+  column: cheapest listing ÷ NPC price. Buy the item at the NPC and sell it
+  in the bazaar. The editor fills the price from Item.dat when the cost is
+  left at 0; examples are Pet Food (vnum 2077, 300 g) and Bell of Sweet Home
+  (vnum 2072, 400 g). Existing items added from the inventory already carry
+  their Item.dat NPC price, so they land here when no ND cost is known.
+
+One **Monitor Start** searches every enabled configured item, both views
+included. Each view has its own **Only priced** filter and row count; cycles
+update both tables and never clear the other view.
 
 ## What the controller does
 
@@ -270,7 +297,9 @@ Example:
 - `search_packet` is the full `c_blist`; the GUI builds it from **Search
   vnums** unless the raw packet field is filled.
 - `name` is display-only; deduplicate names per file.
-- `nos_cost` wins over `npc_cost`; both are per single piece.
+- `nos_cost` (NosMall ND) puts the item in the **NosMall** monitor;
+  `npc_cost` (NPC gold) puts it in **NPC resale**. If both are present,
+  `nos_cost` wins and the item stays in NosMall. Both are per single piece.
 - `min_price` is required for relisting; monitor-only items can leave it 0.
 
 ## Safety and limits
@@ -338,22 +367,26 @@ make -C linux bot-test     # includes gui_bazar_smoke.py
 `test_bazar.py` covers the real 15-field `rc_blist` shape (including a
 truncated tail and double spaces), the open sequence, pacing, retry/waiting
 behaviour, response cross-talk, the relist floor/own/slot/vnum checks and the
-equipment amount-0 rule, and that relist log lines use the display label
-passed by the GUI. `test_bazar_inventory.py` covers the inventory
+equipment amount-0 rule, the NosMall/NPC monitor classification, and that
+relist log lines use the display label passed by the GUI. `test_bazar_inventory.py` covers the inventory
 planner: duplicate collapse, negative/absolute vnums, bag preference,
 tracked-skip, unique names, cost precedence and the amount clamp.
 `test_inventory_cache.py` covers the per-character snapshot round-trip,
 character matching and malformed/bad-slot tolerance;
 `test_spawnlog.py` covers the full-`inv`-vs-`ivn` bag distinction and the
 truncation notice.
-`gui_bazar_smoke.py` spawns a fake Bibi NPC, answers the open and one search,
-and asserts the profit column, that the Item cell shows the real Item.dat name
-for a configured shortcut (`bubbl` → **Speech Bubble**, with the shortcut in
-the tooltip), that a late name load updates the Monitor, the Items list and
-the Relist list from the shortcut to the real name without overwriting
-unsaved editor values, that the row copy label and the Delete message (even
-while a pass stops) use the real name, that **Reload names** drops the
-one-shot name cache, and that no `c_reg` was sent.
+`gui_bazar_smoke.py` spawns a fake Bibi NPC, answers the open and the NosMall
+and NPC-resale searches, and asserts the profit column, that the third-level
+**NosMall** tab shows the ND item (Speech Bubble) and **NPC resale** shows the
+gold item (Pet Food, cost 300 g, Markup 5.0x), that switching the tabs swaps
+the active table, that the editor fills Bell of Sweet Home's 400 g Item.dat
+price when the NPC gold cost is 0, that the Item cell shows the real Item.dat
+name for a configured shortcut (`bubbl` → **Speech Bubble**, with the
+shortcut in the tooltip), that a late name load updates the Monitor, the
+Items list and the Relist list from the shortcut to the real name without
+overwriting unsaved editor values, that the row copy label and the Delete
+message (even while a pass stops) use the real name, that **Reload names**
+drops the one-shot name cache, and that no `c_reg` was sent.
 `gui_bazar_relist_smoke.py` checks that the live-relist gate blocks the first
 attempt and then asserts the exact `c_reg` packet and the `register-sent`
 status. `gui_inventory_scan_smoke.py` feeds the live inventory shapes

@@ -24,10 +24,12 @@ from ntpl.gui import Application
 from ntpl.nosmall import ItemInfo
 
 
-def _rc_blist(price: int, seller: str = "Seller") -> bytes:
+def _rc_blist(
+    price: int, seller: str = "Seller", vnum: int = 2174
+) -> bytes:
     # rc_blist <page> <15-field item>; field 6 is the price, field 2 the owner.
     entry = (
-        f"1001|2002|{seller}|2174|5|0|{price}|120|0|0|0|0|0|0|^0"
+        f"1001|2002|{seller}|{vnum}|5|0|{price}|120|0|0|0|0|0|0|^0"
     )
     return f"RECV|rc_blist 0 {entry}\n".encode()
 
@@ -96,6 +98,8 @@ class BazarServer:
                 self._send("RECV|rc_blist 0\n")
             elif parts and parts[-1] == "2174":
                 self._send(_rc_blist(13798).decode())
+            elif parts and parts[-1] == "2077":
+                self._send(_rc_blist(1500, vnum=2077).decode())
             else:
                 self._send("RECV|rc_blist 0\n")
             return
@@ -141,7 +145,11 @@ def main() -> int:
         try:
             # The configured name is a shortcut; the Monitor must show the
             # real Item.dat name for the vnum instead.
-            app.item_info = {2174: ItemInfo(2174, "Speech Bubble", 3000, 0)}
+            app.item_info = {
+                2174: ItemInfo(2174, "Speech Bubble", 3000, 0),
+                2077: ItemInfo(2077, "Pet Food", 300, 0),
+                2072: ItemInfo(2072, "Bell of Sweet Home", 400, 0),
+            }
             app.item_info_loaded = True
             item = BazarItem(
                 "bubbl",
@@ -152,11 +160,24 @@ def main() -> int:
                 min_price=43000,
                 nos_cost=0.5,
             )
+            # An NPC-resale item: gold cost, so it belongs in the second
+            # Monitor view, not the NosMall one.
+            npc_item = BazarItem(
+                "petfood",
+                build_search_packet([2077]),
+                vnum=2077,
+                inv_tab=2,
+                amount=5,
+                min_price=0,
+                npc_cost=300.0,
+            )
             app.bazar_character_entry.set_text("root1")
             # The real UI path: this renders the Monitor and both item lists.
-            app._bazar_set_items([item])
+            app._bazar_set_items([item, npc_item])
             app._bazar_start_monitor()
-            GLib.timeout_add(4500, check)
+            # One 2.5 s search per item after the open sequence; 8.5 s covers
+            # both the NosMall and the NPC-resale answer.
+            GLib.timeout_add(8500, check)
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"start exception: {exc!r}"
             app.quit()
@@ -185,6 +206,10 @@ def main() -> int:
             searches = [
                 line for line in lines
                 if line.startswith("SEND|c_blist ") and line.endswith(" 2174")
+            ]
+            npc_searches = [
+                line for line in lines
+                if line.startswith("SEND|c_blist ") and line.endswith(" 2077")
             ]
             opened = [
                 line for line in lines
@@ -218,6 +243,88 @@ def main() -> int:
                 cell.get_tooltip_text() if cell is not None else ""
             ) or ""
             name_ok = item_text == "Speech Bubble" and "bubbl" in tooltip
+
+            def cell_at(source: str, column: int, row: int = 2):
+                target = app.bazar_results_boxes.get(source)
+                grid = (
+                    target.get_first_child()
+                    if target is not None
+                    else None
+                )
+                if not isinstance(grid, Gtk.Grid):
+                    return None
+                label = grid.get_child_at(column, row)
+                return label if isinstance(label, Gtk.Label) else None
+
+            npc_quote = app.bazar.results.get("petfood")
+            npc_price = None if npc_quote is None else npc_quote.price
+            npc_profit = (
+                None if npc_quote is None else npc_quote.profit_text()
+            )
+            nosmall_name = cell_at("nosmall", 0)
+            npc_name = cell_at("npc", 0)
+            npc_cost = cell_at("npc", 1)
+            npc_markup = cell_at("npc", 3)
+            npc_header = cell_at("npc", 3, 0)
+            notebook = app.bazar_monitor_notebook
+            tabs_ok = (
+                notebook is not None
+                and notebook.get_n_pages() == 2
+                and notebook.get_tab_label_text(
+                    notebook.get_nth_page(0)
+                )
+                == "NosMall"
+                and notebook.get_tab_label_text(
+                    notebook.get_nth_page(1)
+                )
+                == "NPC resale"
+            )
+            notebook.set_current_page(1)
+            switched_ok = (
+                app.bazar_results_box
+                is app.bazar_results_boxes.get("npc")
+            )
+            active_npc_name = first_item_cell()
+            notebook.set_current_page(0)
+            back_ok = (
+                app.bazar_results_box
+                is app.bazar_results_boxes.get("nosmall")
+            )
+            split_ok = bool(
+                tabs_ok
+                and switched_ok
+                and back_ok
+                and nosmall_name is not None
+                and nosmall_name.get_text() == "Speech Bubble"
+                and npc_name is not None
+                and npc_name.get_text() == "Pet Food"
+                and npc_cost is not None
+                and npc_cost.get_text() == "300 g"
+                and npc_markup is not None
+                and npc_markup.get_text() == "5.0x"
+                and npc_header is not None
+                and npc_header.get_text() == "Markup"
+                and npc_price == 1500
+                and npc_profit == "5.0x"
+                and active_npc_name is not None
+                and active_npc_name.get_text() == "Pet Food"
+            )
+
+            # The editor auto-fills an NPC gold cost from Item.dat, so
+            # adding Bell of Sweet Home needs only the vnum.
+            app.bazar_form["name"].set_text("bell")
+            app.bazar_form["vnums"].set_text("2072")
+            app.bazar_form["raw"].set_text("")
+            app.bazar_form["vnum"].set_text("2072")
+            app.bazar_form["tab"].set_selected(0)
+            app.bazar_form["cost_type"].set_selected(2)
+            app.bazar_form["cost"].set_value(0)
+            auto_item = app._bazar_item_from_form()
+            autofill_ok = (
+                auto_item is not None
+                and auto_item.npc_cost == 400.0
+                and app.bazar_form["cost"].get_value() == 400
+            )
 
             def row_name(row):
                 label = getattr(row, "name_label", None)
@@ -293,11 +400,14 @@ def main() -> int:
                     loaded = load_config(config_path)
                 except Exception:  # noqa: BLE001
                     loaded = None
-                saved = loaded is not None and len(loaded.items) == 1
+                saved = loaded is not None and len(loaded.items) == 2
             result["ok"] = (
                 bool(opened)
                 and bool(empty_init)
                 and bool(searches)
+                and bool(npc_searches)
+                and split_ok
+                and autofill_ok
                 and price == 13798
                 and seller == "Seller"
                 and profit == "27,596 g/ND"
@@ -313,8 +423,11 @@ def main() -> int:
             )
             result["detail"] = (
                 f"opened={bool(opened)} init={bool(empty_init)} "
-                f"search={bool(searches)} price={price} seller={seller} "
-                f"profit={profit!r} no_register={no_register} "
+                f"search={bool(searches)} npc_search={bool(npc_searches)} "
+                f"price={price} seller={seller} "
+                f"profit={profit!r} npc={npc_name.get_text() if npc_name is not None else None!r}/"
+                f"{npc_price!r}/{npc_profit!r} split={split_ok} "
+                f"autofill={autofill_ok} no_register={no_register} "
                 f"item_name={item_text!r} tooltip={tooltip!r} "
                 f"late={late_before!r}->{late_after!r} "
                 f"lists={items_before!r}/{relist_before!r}->"

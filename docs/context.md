@@ -7,7 +7,7 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 331 unittest cases, 6 GTK4 smokes, 41 fake-server bot
+- **Linux host**: 332 unittest cases, 6 GTK4 smokes, 41 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
   linux all test-host`, tests above.
 - **Minigame tab** (seventh GUI page, appended after Malicious): Sheep Farm
@@ -18,7 +18,7 @@ the data layer in [database.md](database.md).
   NPC, pet, monster or the local character. The DLL uses real `SendInput` when
   the game window is foreground and posted keys otherwise. Per-client
   `~/.config/ntpl/minigame-<winpid>.json`. Needs **DLL 0.3.0 and a game
-  restart/re-inject**; the host is 0.6.0. Covered by `test_minigame.py`,
+  restart/re-inject**; the host is 0.7.0. Covered by `test_minigame.py`,
   `gui_minigame_smoke.py` and `key-test`; the key press and player TARGET are
   **not yet live-verified**. See [minigame.md](minigame.md).
 - **Speed +** (**Malicious** tab, default 0): the DLL reads the server's
@@ -52,7 +52,12 @@ the data layer in [database.md](database.md).
   truncation-aware), keeps old rows across refresh cycles, sorts by profit
   and has an **Only priced** filter. Relist is double-gated and reports
   `register sent (no ack)`. The page has a second-level navbar (**Inventory**,
-  **Relist**, **Monitor**, **Items**, **Configuration**). **Inventory** scans
+  **Relist**, **Monitor**, **Items**, **Configuration**); **Monitor** has a
+  third-level navbar, **NosMall** (ND cost; gold per ND) and **NPC resale**
+  (NPC gold cost, e.g. Pet Food or Bell of Sweet Home; Markup = listing ÷ NPC
+  price). One Start searches both; each view has its own Only priced filter.
+  The editor Cost type chooses the view; NPC gold auto-fills from Item.dat
+  when left at 0. **Inventory** scans
   every bag the client reports (including equipment bags 0/6/7, quantity-0
   rows and bound negative vnums), shows Item.dat names, NPC prices and known
   ND costs, and **Set up relist…** opens **Relist** with the exact

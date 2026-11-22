@@ -72,6 +72,16 @@
 | No keys after Stop | intended | Stop removes the timer; a press already queued to the DLL may still complete within ~25 ms |
 | Bot log has no minigame lines | the loop was never started, or the tab is attached to another client window | minigame settings and the loop are per attached game window; check the title/PID and press Start on the correct window |
 
+## NosBazar monitor views
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| **NPC resale** is empty although the item is configured | the item's Cost type is NosMall ND or No cost, so it belongs to the NosMall view | select the item in **Items**, set **Cost** to **NPC gold** and save. For Pet Food (vnum 2077) or Bell of Sweet Home (vnum 2072) leave the Cost at 0; the Item.dat price fills in |
+| An NPC item appears under **NosMall** | a hand-edited config has both `nos_cost` and `npc_cost`, and NosMall wins | set the Cost type to NPC gold in the editor (it clears the ND cost), or keep a separate NosMall entry for the ND variant |
+| **Markup** is below 1.0x | the cheapest bazaar listing is below the NPC purchase price | no resale profit; the row still shows the listing so you can compare |
+| The NPC price did not fill in | the Item vnum is blank with several search vnums, or item names are still loading / missing from the DB | set **Item vnum**, wait for the names to load, run `PYTHONPATH=linux/host python3 -m ntpl db build`, or type the price by hand |
+| One Start does not search only the visible tab | by design: one pass searches both lists and each tab shows its own results | use **Monitor Stop/Start** to restart both; use the per-tab **Only priced** filter to hide unanswered rows |
+
 ## UI
 
 | Symptom | Likely cause | Fix |

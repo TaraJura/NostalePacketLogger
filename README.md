@@ -40,7 +40,9 @@ plus the attached client's DLL version.
 The fourth tab turns the live packet stream into the player-auction-house
 workflow of [`TaraJura/Nostale-NB`](https://github.com/TaraJura/Nostale-NB),
 with a **second-level navbar**: **Inventory**, **Relist**, **Monitor**,
-**Items** and **Configuration**.
+**Items** and **Configuration**. **Monitor** has its own **third-level
+navbar**: **NosMall** (ND-cost items, gold per ND) and **NPC resale**
+(NPC-gold items such as Pet Food or Bell of Sweet Home, gold markup).
 
 - **Inventory** — lists every slot the client reports (Main/Etc, Equip, and
   the extra equipment bags 6/7) with the item name (local DB first, then
@@ -64,18 +66,24 @@ with a **second-level navbar**: **Inventory**, **Relist**, **Monitor**,
 - **Monitor** — starts/stops searches, opens the Bibi Basar dialog through
   the client's own send path, learns the map/session NPC id and dialog option
   from your own opening (or the DLL log), and searches at the required 2.5 s
-  pacing. Timed-out items get one retry; the next refresh follows the
-  configured interval. Results show the cheapest listing, seller, price,
-  profit (gold per NosMall ND or NPC-gold markup) and status, sorted **most
-  profitable first**; thin rules keep each row aligned, and **Only priced**
-  hides unanswered rows. The **Item** column is the real item name for the
-  row's vnum (local DB first, then Item.dat) whenever it resolves, not the
-  configured shortcut; hover the item name for the shortcut and search vnums.
+  pacing. One **Monitor Start** searches both third-level views; each has its
+  own **Only priced** filter and row count. The **NosMall** view shows ND
+  items with the profit in gold per ND; **NPC resale** shows items bought at
+  an NPC, e.g. Pet Food or Bell of Sweet Home, with the **Markup** column
+  (listing ÷ NPC price). Timed-out items get one retry; the next refresh
+  follows the configured interval. Results show the cheapest listing, seller,
+  price and status, sorted **most profitable first**; thin rules keep each row
+  aligned. The **Item** column is the real item name for the row's vnum
+  (local DB first, then Item.dat) whenever it resolves, not the configured
+  shortcut; hover the item name for the shortcut and search vnums.
 - **Items** — the full editor for one item: **Name** (the shortcut label),
   **Search vnums**, **Raw packet**, **Item vnum**, **Tab**, **Amount**,
-  **Min price**, **Cost** and the advanced `c_reg` fields. **Import
-  NosMall…** adds catalog groups with a known ND cost (pets/fairies/partner
-  supplies excluded), **New** and **Delete** edit the list.
+  **Min price**, **Cost** and the advanced `c_reg` fields. The **Cost** type
+  chooses the Monitor view: NosMall ND → NosMall, NPC gold → NPC resale (its
+  Item.dat price auto-fills when left at 0), No cost → NosMall as price
+  discovery. **Import NosMall…** adds catalog groups with a known ND cost
+  (pets/fairies/partner supplies excluded), **New** and **Delete** edit the
+  list.
 - **Configuration** — **Bibi id**, **Refresh (s)**, the per-client JSON path,
   **Save config**, **Reload**, and **Reload names** (re-read item names after
   rebuilding the database).
@@ -114,7 +122,7 @@ message. Details, edge cases and troubleshooting: [docs/minigame.md](docs/miniga
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 331 Python unit tests
+make -C linux host-test                      # 332 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux key-test                       # DLL KEY| name parsing
 make -C linux gui-test                       # six headless GTK4 smokes (xvfb)
@@ -155,8 +163,9 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 - [docs/family.md](docs/family.md) — the **Family** tab: `%Familyinvite`
   packet, server confirmation and live test accounts
 - [docs/bazar.md](docs/bazar.md) — the **NosBazar** tab: inventory scan,
-  cheapest-listing monitor with gold/ND and NPC markup, plus floor-protected
-  relisting (ported from `TaraJura/Nostale-NB`); packet formats in
+  two-view (NosMall / NPC resale) cheapest-listing monitor with gold/ND and
+  NPC-gold markup, plus floor-protected relisting (ported from
+  `TaraJura/Nostale-NB`); packet formats in
   [docs/protocol/bazaar.md](docs/protocol/bazaar.md) and
   [docs/protocol/inventory.md](docs/protocol/inventory.md)
 - [docs/minigame.md](docs/minigame.md) — the **Minigame** tab: Sheep Farm key
@@ -186,7 +195,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 331 unit tests pass, the six GTK4 window smokes
+The Linux port builds, its 332 unit tests pass, the six GTK4 window smokes
 and 41 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 

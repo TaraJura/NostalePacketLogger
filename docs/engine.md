@@ -299,7 +299,8 @@ Follow toggle and a raw send entry), **Map / Bot**, **Bot log** (a
 timestamped, selectable text view of every action the status bar reports --
 attacks, selections, walks, pickups, recovery, DLL errors -- capped at 4,000
 lines with a Clear log button), **NosBazar** (second-level sections:
-Inventory scan/Set up relist, Relist setup, Monitor results, Items editor,
+Inventory scan/Set up relist, Relist setup, Monitor results with third-level
+NosMall and NPC-resale views, Items editor,
 Configuration; [bazar.md](bazar.md)), **Family**, **Malicious** and
 **Minigame** (Sheep Farm key spam and player-only focus;
 [minigame.md](minigame.md)). The same

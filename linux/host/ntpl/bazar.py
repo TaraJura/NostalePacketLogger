@@ -432,6 +432,23 @@ class BazarItem:
         )
 
 
+#: The two Monitor views. ``nosmall`` is the ND-cost dashboard (and the
+#: original home of items whose cost is not known yet); ``npc`` is the
+#: gold-cost dashboard used for reselling NPC-shop items.
+MONITOR_SOURCES = ("nosmall", "npc")
+
+
+def monitor_source(item: BazarItem) -> str:
+    """Which Monitor view an item belongs to, from its effective cost unit.
+
+    ``BazarItem.cost`` prefers a NosMall ND price, so an item with both a
+    hand-edited ND cost and an NPC cost stays in the NosMall view; setting
+    the editor's Cost type to NPC gold clears the ND value and moves it.
+    """
+    _value, unit = item.cost()
+    return "npc" if unit == "g" else "nosmall"
+
+
 # -- inventory planning ---------------------------------------------
 
 
