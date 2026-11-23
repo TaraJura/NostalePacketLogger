@@ -62,6 +62,11 @@ BIBI_VNUM = 793
 #: answer (``rc_blist``) is no proof that the window is open: the server
 #: answers searches regardless, while it ignores a ``c_reg`` without it.
 BAZAR_WINDOW_TYPE = 32
+#: The portable **NosBazar medal** (Item.dat name "Gestore del NosBazar",
+#: live item 1955). Using it from a Main/Etc bag opens the bazaar without a
+#: nearby Bibi Basar: ``u_i 1 <charId> <bag> <slot> 0 0``. The controller
+#: falls back to it when no Bibi entity is visible.
+BAZAR_MEDAL_VNUM = 1955
 
 #: The client drops faster searches; Nostale-NB uses 2.5 s, the relist loop 2 s.
 SEARCH_INTERVAL_S = 2.5
@@ -923,6 +928,9 @@ class BazarController:
         self._open_npc: int | None = None
         self._open_seen = 0
         self._open_window_seen = 0
+        #: True while the open burst waits for the portable NosBazar medal,
+        #: which replaces npc_req/n_run when no Bibi Basar is visible.
+        self._open_medal = False
         self._open_step = 0
         self._open_next = 0.0
         self._open_deadline = 0.0
@@ -1123,7 +1131,9 @@ class BazarController:
 
     # -- opening --------------------------------------------------------
 
-    def _bibi_candidates(self, world: "WorldState") -> list[int]:
+    def _bibi_candidates(
+        self, world: "WorldState", verified_only: bool = False
+    ) -> list[int]:
         candidates: list[int] = []
         # A live Bibi entity wins: after a map change the configured/learned
         # id belongs to the previous map, while `in 2 793 <id>` names the one
@@ -1141,6 +1151,8 @@ class BazarController:
                 nearest = (distance, entity.entity_id)
         if nearest is not None:
             candidates.append(nearest[1])
+        if verified_only:
+            return candidates
         state = world.bazar
         # Only an id that is currently a Bibi Basar entity may be used. A
         # learned or configured id belongs to an entity instance; on another
@@ -1158,6 +1170,17 @@ class BazarController:
             candidates.append(value)
         return candidates
 
+    @staticmethod
+    def _medal_slot(world: "WorldState") -> tuple[int, int] | None:
+        """``(bag, slot)`` of the portable NosBazar medal, Main/Etc first."""
+        if world.self_id is None:
+            return None
+        for bag in (1, 2, 0):
+            slot = world.find_inventory(bag, BAZAR_MEDAL_VNUM)
+            if slot is not None:
+                return bag, slot.index
+        return None
+
     def _begin_open(self, world: "WorldState", now: float) -> None:
         state = world.bazar
         if (
@@ -1168,12 +1191,35 @@ class BazarController:
             self._begin_pass(world, now)
             return
 
-        candidates = self._bibi_candidates(world)
+        # A visible Bibi Basar is the normal path. Without one, use the
+        # portable NosBazar medal from the inventory before ever replaying an
+        # unverified stale NPC id.
+        candidates = self._bibi_candidates(world, verified_only=True)
+        medal = self._medal_slot(world)
+        if not candidates and medal is not None:
+            bag, slot = medal
+            self._open_medal = True
+            self._open_seen = state.response_count
+            self._open_window_seen = state.window_count
+            self._open_step = 0
+            self._open_next = now
+            self._open_deadline = now + OPEN_TIMEOUT_S
+            self.phase = "open"
+            self._send(
+                f"u_i 1 {world.self_id} {bag} {slot} 0 0"
+            )
+            self._log(
+                "Bibi Basar is not visible; using the NosBazar medal "
+                f"(vnum {BAZAR_MEDAL_VNUM}, bag {bag}, slot {slot})"
+            )
+            return
+        if not candidates:
+            candidates = self._bibi_candidates(world)
         if not candidates:
             self.last_error = (
-                "Bibi Basar is not visible on this map; walk next to one, "
-                "then start again (a stale id from another map is never "
-                "used, it would open the wrong NPC)"
+                "Bibi Basar is not visible and no NosBazar medal "
+                f"(vnum {BAZAR_MEDAL_VNUM}) is in the inventory; walk next "
+                "to Bibi or buy/keep a medal, then start again"
             )
             self._log(self.last_error)
             if self.mode == "open":
@@ -1185,6 +1231,7 @@ class BazarController:
             self._wait_until = now + self.config.refresh
             return
 
+        self._open_medal = False
         self._open_npc = candidates[0]
         self._open_seen = state.response_count
         self._open_window_seen = state.window_count
@@ -1195,6 +1242,37 @@ class BazarController:
 
     def _open_tick(self, world: "WorldState", now: float) -> None:
         state = world.bazar
+        if self._open_medal:
+            # The medal's own use opens the window; npc_req/n_run would be
+            # wrong here. A fresh wopen 32 is the whole confirmation.
+            if state.window_count > self._open_window_seen:
+                state.open = True
+                self._log("NosBazar window is open (medal)")
+                if self.mode == "open":
+                    self.mode = None
+                    self.phase = "idle"
+                    self.version += 1
+                    return
+                self._begin_pass(world, now)
+                return
+            if now >= self._open_deadline:
+                state.open = False
+                self.last_error = (
+                    "could not open NosBazar with the medal; keep a "
+                    f"vnum {BAZAR_MEDAL_VNUM} medal in the inventory and "
+                    f"retry in {self.config.refresh:g}s"
+                )
+                self._log(self.last_error)
+                if self.mode == "open":
+                    self.mode = None
+                    self.phase = "idle"
+                    self.version += 1
+                    return
+                self.phase = "waiting"
+                self._wait_until = now + self.config.refresh
+                return
+            self.version += 1
+            return
         if (
             state.response_count > self._open_seen
             and state.window_count > self._open_window_seen

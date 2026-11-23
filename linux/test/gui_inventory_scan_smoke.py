@@ -344,8 +344,26 @@ def main() -> int:
             result["partial_not_cached"] = not inventory_cache_path(
                 SELF_ID
             ).exists()
+            # Regression: with no live inventory, renders must seed the log
+            # once, not recurse through seed -> render -> seed (live
+            # 2026-11-23: 109k log lines and a frozen window).
+            app.engine.world.inventory = {}
+            app._inventory_seeded = False
+            seed_calls = {"n": 0}
+            original_seed = app._bazar_seed_from_log
+
+            def counting_seed(force: bool = False) -> None:
+                seed_calls["n"] += 1
+                return original_seed(force)
+
+            app._bazar_seed_from_log = counting_seed
+            for _unused in range(5):
+                app._inventory_render()
+            app._bazar_seed_from_log = original_seed
+            result["seed_calls"] = seed_calls["n"]
             ok = (
-                result["slots"] == 7
+                result["seed_calls"] <= 1
+                and result["slots"] == 7
                 and result["negative_name"] == "Sealed Hellord Spell Gun"
                 and result["names"].get((1, 0)) == "Speech Bubble"
                 and result["names"].get((1, 1)) == "Soulstone Blessing"
@@ -400,6 +418,7 @@ def main() -> int:
                 f"slots={result['slots']} after_one={result['after_one']} "
                 f"after_all={result['after_all']} mode={result['mode']} "
                 f"saved={result['saved']} unique={result['unique_packets']} "
+                f"seed_calls={result['seed_calls']} "
                 f"sections={result['sections']} "
                 f"auto_names={result['auto_count']}/"
                 f"{result['auto_name']!r} "

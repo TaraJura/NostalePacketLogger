@@ -42,6 +42,12 @@ full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
    different NPC — live 2026-11-23: it opened **Carve Runes** — it is
    refused and the controller waits, so changing map needs another manual
    bazaar opening (or walking next to a Bibi so her `in` packet is seen).
+   **No Bibi visible?** The controller falls back to the portable
+   **NosBazar medal** (Item.dat `Gestore del NosBazar`, vnum **1955**) from
+   the Main/Etc bag: it sends `u_i 1 <charId> <bag> <slot> 0 0`, waits for
+   `wopen 32`, and starts the pass. A visible Bibi always wins; a stale
+   unknown NPC id is only tried when no medal is in the inventory, and the
+   medal is never used a second time before the refresh interval.
 3. Open the **Inventory** section. It lists every slot you own automatically
    from the live `inv`/`ivn` stream (backfilled from the DLL log after a late
    attach): the real item name (local DB first, then Item.dat), bag/slot,
@@ -111,14 +117,16 @@ update both tables and never clear the other view.
 `ntpl.bazar.BazarController` is a tick-driven state machine; the GUI calls
 `tick()` every 100 ms and feeds it the engine's `WorldState`.
 
-- **Waiting** — no usable NPC id: report “Bibi Basar is not visible on this
-  map; walk next to one”, retry after the refresh interval. A learned id
-  that this map's entity list knows as another NPC (same id, different
-  entity instance) is never used, so Start cannot open the wrong dialog. No
-  search spam.
-- **Opening** — replay `npc_req`, then `n_run`, then the initial
-  `c_blist`/`c_slist`; success is a **fresh `wopen 32`** (the NosBazar
-  window) plus an `rc_blist`. A search answer alone is not enough: the
+- **Waiting** — no usable NPC id and no medal: report “Bibi Basar is not
+  visible and no NosBazar medal (vnum 1955) is in the inventory”, retry
+  after the refresh interval. A learned id that this map's entity list knows
+  as another NPC (same id, different entity instance) is never used, so
+  Start cannot open the wrong dialog. No search spam.
+- **Opening** — a visible Bibi: replay `npc_req`, then `n_run`, then the
+  initial `c_blist`/`c_slist`. Without one: use the NosBazar medal
+  (`u_i 1 <charId> <bag> <slot> 0 0`). Success is a **fresh `wopen 32`**
+  (the NosBazar window) plus an `rc_blist` on the NPC path; the medal path
+  only needs the window. A search answer alone is not enough: the
   server answers `c_blist` even with no bazaar window open (live
   2026-11-23 it answered while Carve Runes was open) while `c_reg` is
   ignored without the window. Timeout → waiting.
@@ -389,7 +397,8 @@ Example:
   **Price all** twice never duplicates rows.
 - **Late attach**: inventory comes from the live `inv`/`ivn` stream and, for
   packets missed before the GUI attached, from the client's own DLL log tail.
-  Rescan re-reads the log. The server sends the full inventory **only at
+  The log is read **once per attach** (a render never re-seeds it), so a
+  missing dump cannot start a render loop; **Rescan** forces the re-read. The server sends the full inventory **only at
   login** (there is no client request packet), and the DLL rewrites its log
   in place at 16 MB. If the GUI attached after login and the log was
   truncated before the dump, the frame says

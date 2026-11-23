@@ -63,6 +63,7 @@ from .clients import (
     client_lock_owner,
     discover_clients,
     inject_client,
+    read_port,
     release_client_lock,
     wait_for_port,
 )
@@ -1467,6 +1468,9 @@ class Application(Gtk.Application):
             self._bazar_log("not connected")
             return
         self._bazar_apply_settings()
+        # The controller falls back to the NosBazar medal when no Bibi is
+        # visible; make sure the inventory (and so the medal slot) is known.
+        self._inventory_slots()
         if self.bazar.mode == "relist":
             self._bazar_log(
                 "Monitor replaces Relist; no listing changes until Relist "
@@ -1519,6 +1523,7 @@ class Application(Gtk.Application):
             return
         self._bazar_apply_settings()
         self._bazar_repair_relist_fields()
+        self._inventory_slots()
         if self.bazar.mode == "monitor":
             self._bazar_log("Relist replaces Monitor")
         if not self.bazar.start_relist(self.engine.world):
@@ -1591,7 +1596,11 @@ class Application(Gtk.Application):
     def _inventory_slots(self) -> list[InventorySlot]:
         """Live slots, backfilled from the client log when none arrived."""
         slots = self._world_inventory_slots()
-        if not slots:
+        if not slots and not self._inventory_seeded:
+            # Seed once. Re-seeding from every render used to loop: the seed
+            # scheduled another inventory render, which found no live slots
+            # and seeded again (109k log lines and a frozen window, live
+            # 2026-11-23). Rescan forces a re-read explicitly.
             self._bazar_seed_from_log()
             slots = self._world_inventory_slots()
         return slots
@@ -1872,7 +1881,7 @@ class Application(Gtk.Application):
 
     def _inventory_reload(self) -> None:
         """Read the log again, refreshing slots missed before the attach."""
-        self._bazar_seed_from_log()
+        self._bazar_seed_from_log(force=True)
         self._update_bazar_inventory_info()
         self._inventory_render()
 
@@ -3809,14 +3818,24 @@ class Application(Gtk.Application):
                     elif column == 5:
                         label.set_max_width_chars(26)
                 if column == 5:
-                    if quote.status == "ok":
+                    if quote.status in ("ok", "register-sent"):
                         label.add_css_class("bazar-ok")
                     elif quote.status in (
-                        "timeout", "bad", "error", "quantity"
+                        "timeout",
+                        "bad",
+                        "error",
+                        "quantity",
+                        "register-no-ack",
+                        "no-window",
                     ):
                         label.add_css_class("bazar-bad")
                     elif quote.status in (
-                        "floor", "own", "no-slot", "no-vnum", "register-sent"
+                        "floor",
+                        "own",
+                        "no-slot",
+                        "no-vnum",
+                        "register-pending",
+                        "register-unknown",
                     ):
                         label.add_css_class("bazar-warn")
                     else:
@@ -3837,18 +3856,23 @@ class Application(Gtk.Application):
                 separator(grid_row + 1)
         box.append(grid)
 
-    def _bazar_seed_from_log(self) -> None:
+    def _bazar_seed_from_log(self, force: bool = False) -> None:
         """Learn the Bibi id/option and inventory from this client's DLL log.
 
         A GUI attaches after login: the client's earlier manual bazaar opening
         and the login inventory dump are still in the log, not in the live
         packet stream.  The entity id and the inventory slots are needed
-        before the first search/relist.
+        before the first search/relist.  ``force`` re-reads the log for the
+        Rescan button; a normal render never seeds twice.
         """
+        if self._inventory_seeded and not force:
+            return
+        # Set before the work below: the function schedules an inventory
+        # render, and a re-entrant seed while unseeded used to loop forever.
+        self._inventory_seeded = True
         path = self.log_file
         self._inventory_log_truncated = log_was_truncated(path)
         if not path:
-            self._inventory_seeded = True
             self._maybe_load_inventory_cache()
             self._save_inventory_cache()
             return
@@ -3866,19 +3890,30 @@ class Application(Gtk.Application):
                 npc_id = None
         if npc_id is not None:
             state = world.bazar
+            learned_option = (
+                option if option is not None else state.open_option
+            )
+            learned_page = page if page is not None else state.open_page
+            changed = (
+                state.npc_id != npc_id
+                or state.open_option != learned_option
+                or state.open_page != learned_page
+                or not state.option_learned
+            )
             state.npc_id = npc_id
-            state.open_option = option if option is not None else state.open_option
-            state.open_page = page if page is not None else state.open_page
+            state.open_option = learned_option
+            state.open_page = learned_page
             state.option_learned = option is not None
             self._bazar_sync_from_world()
-            self._bazar_log(
-                f"bazaar NPC {npc_id} learned from the client log"
-                + (
-                    f" (option {option}/{page})"
-                    if option is not None
-                    else ""
+            if changed:
+                self._bazar_log(
+                    f"bazaar NPC {npc_id} learned from the client log"
+                    + (
+                        f" (option {option}/{page})"
+                        if option is not None
+                        else ""
+                    )
                 )
-            )
         bags, gold = load_log_inventory(path)
         if bags:
             full_bags = log_inventory_bags(path)
@@ -3980,7 +4015,9 @@ class Application(Gtk.Application):
                 "Home; gold markup) views; Items edits the searches and the "
                 "Cost type that chooses the monitor; Configuration has the "
                 "Bibi id, refresh and config file. Open bazaar replays the "
-                "Bibi Basar dialog through the client's own send path. "
+                "Bibi Basar dialog through the client's own send path; with "
+                "no Bibi visible it uses the portable NosBazar medal (vnum "
+                "1955) from the inventory instead. "
                 "Relist changes real listings and spends the fee.",
             )
         )
@@ -10009,6 +10046,27 @@ class Application(Gtk.Application):
                         or generation != self._client_generation
                     ):
                         return
+                    # The port file can hold a stale value read before a new
+                    # DLL rewrote it (a reused Windows PID: live 2026-11-23
+                    # the GUI dialled 47823 while the DLL listened on
+                    # 47822). Re-read it on every failure instead of staying
+                    # dead on one wrong port.
+                    attached = self.attached_client
+                    fresh = (
+                        read_port(
+                            attached.context.prefix, attached.winpid
+                        )
+                        if attached is not None
+                        else None
+                    )
+                    if fresh is not None and fresh != client.port:
+                        client.port = fresh
+                        self.port = fresh
+                        attached.port = fresh
+                        GLib.idle_add(
+                            self._set_status,
+                            f"logger is on 127.0.0.1:{fresh} now; retrying",
+                        )
                     GLib.idle_add(
                         self._set_status,
                         f"not connected: {exc} — is the logger DLL "

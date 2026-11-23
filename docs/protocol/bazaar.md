@@ -45,6 +45,18 @@ DLL log (`spawnlog.load_bazaar_open`). Entity ids are per map instance: the
 learned id is only replayed while the current map's entity list knows it as
 Bibi Basar (vnum 793), never when the same id is a different NPC.
 
+Without a visible Bibi, the **portable NosBazar medal** (Item.dat
+`Gestore del NosBazar`, vnum **1955**) opens the same window from the
+inventory:
+
+```
+[SEND] u_i 1 <charId> <bag> <slot> 0 0   # use the medal (bag 1 Main / 2 Etc)
+[RECV] wopen 32 2 <page>                 # the bazaar window, no NPC dialog
+```
+
+No `npc_req`/`n_run` is involved on this path; a fresh `wopen 32` is the
+whole confirmation.
+
 ## Searching
 
 ```

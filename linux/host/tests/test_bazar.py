@@ -451,6 +451,37 @@ class ControllerTests(unittest.TestCase):
             [packet for packet in sent if packet.startswith("c_reg ")], []
         )
 
+    def test_medal_opens_the_bazaar_without_a_bibi(self) -> None:
+        # No Bibi entity: use the portable NosBazar medal from Etc slot 3
+        # instead of ever replaying the stale NPC id.
+        item = BazarItem("bubbl", build_search_packet([2174]))
+        controller, engine, clock, sent = self._controller([item])
+        engine.world.self_id = 7001
+        engine.feed_text("RECV", "inv 2 3.1955.1.0")
+        controller.start_monitor(engine.world)
+        self.assertEqual(
+            [packet for packet in sent if packet.startswith("npc_req ")], []
+        )
+        self.assertIn("u_i 1 7001 2 3 0 0", sent)
+        # The medal opens the window itself; a fresh wopen 32 is enough.
+        engine.feed_text("RECV", "wopen 32 2 642")
+        controller.tick(engine.world)
+        self.assertEqual(controller.phase, "pass")
+        controller.tick(engine.world)
+        self.assertIn("c_blist 0 0 0 0 0 0 0 0 1 2174", sent)
+
+    def test_visible_bibi_wins_over_the_medal(self) -> None:
+        item = BazarItem("bubbl", build_search_packet([2174]))
+        controller, engine, clock, sent = self._controller([item])
+        engine.world.self_id = 7001
+        engine.world.entities[9584] = Entity(
+            9584, 2, vnum=793, x=10, y=10
+        )
+        engine.feed_text("RECV", "inv 2 3.1955.1.0")
+        controller.start_monitor(engine.world)
+        controller.tick(engine.world)
+        self.assertEqual(sent, ["npc_req 2 9584"])
+
     def test_known_non_bibi_npc_id_is_never_opened(self) -> None:
         # Entity ids are per map: the learned id now points at Carve Runes
         # (live 2026-11-23). Pressing Start must wait, not open that dialog.
