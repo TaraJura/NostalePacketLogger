@@ -313,8 +313,8 @@ client's own entity speed setter on the local player actor (the field its
 walk builder reads), and clamps the outgoing `walk` speed back to the
 server's `cond` value — the server sees a normal walk while the client moves
 faster. Live 2026-11-20: base 11, +3 applied (actor 14), every walk packet
-stayed 11, no server correction. Scroll the spin or drag the scroll bar
-under it as far as you like (the DLL's emulated bound is 2,000,000,000;
+stayed 11, no server correction. Type or scroll the spin as far as you like
+(the DLL's emulated bound is 2,000,000,000;
 needs DLL 0.2.9): on the first value above the client's own 59 limit the DLL
 raises that check and extends the client's speed table, and values past the
 byte's 255 are emulated through its top entry. It applies immediately

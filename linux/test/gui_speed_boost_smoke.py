@@ -119,18 +119,13 @@ def main() -> int:
                     app.quit()
                 return False
             result["attach_zero"] = speed_lines(server.received)[0] == "SPEED|0"
-            # The Malicious spin has no 50/59 cap; the wheel and the scroll
-            # bar can raise it past the old million limit.
+            # The Malicious spin has no 50/59 cap; the wheel raises it past
+            # the old million limit.
             result["spin_range"] = (
                 app.speed_boost_spin.get_adjustment().get_upper()
                 >= 2000000000
             )
-            result["scale"] = (
-                app.speed_boost_scale is not None
-                and app.speed_boost_scale.get_adjustment()
-                is app.speed_boost_spin.get_adjustment()
-            )
-            app.speed_boost_scale.get_adjustment().set_value(1500000)
+            app.speed_boost_spin.get_adjustment().set_value(1500000)
             GLib.timeout_add(500, phase2)
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"phase1 exception: {exc!r}"
@@ -139,9 +134,9 @@ def main() -> int:
 
     def phase2() -> bool:
         try:
-            # The scroll bar moved the shared adjustment past the old cap;
-            # the spin shows it and the host sends the large value.
-            result["scale_above_cap"] = (
+            # The spin moved past the old cap and the host sends the large
+            # value.
+            result["spin_above_cap"] = (
                 int(app.speed_boost_spin.get_value()) == 1500000
             )
             result["sent_above_cap"] = "SPEED|1500000" in server.received
@@ -276,8 +271,7 @@ def main() -> int:
     result["ok"] = bool(
         result.get("attach_zero")
         and result.get("spin_range")
-        and result.get("scale")
-        and result.get("scale_above_cap")
+        and result.get("spin_above_cap")
         and result.get("sent_above_cap")
         and result.get("sent120")
         and result.get("sent_zero_again")
@@ -303,8 +297,7 @@ def main() -> int:
         result["detail"] = (
             f"attach_zero={result.get('attach_zero')} "
             f"spin_range={result.get('spin_range')} "
-            f"scale={result.get('scale')} "
-            f"scale_above_cap={result.get('scale_above_cap')} "
+            f"spin_above_cap={result.get('spin_above_cap')} "
             f"sent_above_cap={result.get('sent_above_cap')} "
             f"sent120={result.get('sent120')} "
             f"sent_zero_again={result.get('sent_zero_again')} "

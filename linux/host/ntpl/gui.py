@@ -511,7 +511,6 @@ class Application(Gtk.Application):
         # Flat client-side movement-speed bonus (0 = off), added by the DLL to
         # the local player's `cond` speed; see the Speed + control.
         self.speed_boost_spin = None
-        self.speed_boost_scale = None
         self._speed_boost_source = None
         # True while the DLL reports the server's accepted limit and the spin
         # is updated from it: that must not send a new SPEED command.
@@ -6411,7 +6410,7 @@ class Application(Gtk.Application):
                 "Client-side tweaks that need no bot. Speed + raises the "
                 "local player's walking speed by that many flat points "
                 "(12 + 3 = 15) and applies immediately, in manual play too. "
-                "Scroll the spin, drag the bar below it or type any value: "
+                "Scroll the spin or type any value: "
                 "the DLL raises the client's own 59 cap, extends its speed "
                 "table and scales the top entry past the speed byte, so "
                 "there is no small cap (up to 2,000,000,000). The DLL keeps "
@@ -6437,17 +6436,14 @@ class Application(Gtk.Application):
         # `cond` speed, the way a NosTale speed buff works (+1, +2, +3...).
         speed_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         speed_row.append(Gtk.Label(label="Speed +"))
-        # No small host-side cap: the wheel and the scroll bar below move the
-        # value up as far as the DLL can emulate it. The client's own 59 limit
-        # is raised by the DLL.
+        # No small host-side cap: the spin moves the value up as far as the
+        # DLL can emulate it. The client's own 59 limit is raised by the DLL.
         speed_adjustment = Gtk.Adjustment(
             value=0,
             lower=0,
             upper=SPEED_BOOST_MAX,
             step_increment=1,
             page_increment=1000000,
-            # 1% of the trough, so the scroll bar's thumb stays draggable.
-            page_size=SPEED_BOOST_MAX // 100,
         )
         self.speed_boost_spin = Gtk.SpinButton(
             adjustment=speed_adjustment, climb_rate=1.0, digits=0
@@ -6462,21 +6458,6 @@ class Application(Gtk.Application):
         )
         speed_row.append(self.speed_boost_spin)
         page.append(speed_row)
-
-        # A full-range scroll bar for the same adjustment: dragging it crosses
-        # the old million cap (and the byte limit) quickly, while the spin
-        # stays the precise input.
-        self.speed_boost_scale = Gtk.Scale(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            adjustment=speed_adjustment,
-        )
-        self.speed_boost_scale.set_draw_value(False)
-        self.speed_boost_scale.set_hexpand(True)
-        self.speed_boost_scale.set_tooltip_text(
-            "Drag to scroll Speed + far above the old cap; the spin takes an "
-            "exact value."
-        )
-        page.append(self.speed_boost_scale)
 
         # Cast speed: a plain switch. On = every client-side cooldown is
         # zeroed and the bot casts the moment the server is ready; off =

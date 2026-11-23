@@ -47,7 +47,7 @@ the data layer in [database.md](database.md).
   player actor, and clamps the outgoing `walk` speed back to the server's
   cond. The value applies immediately (no +1 probe since 0.2.5); a server
   `tp` correction settles at +1 (or off if +1 itself is rejected) and the
-  GUI shows the limit. The spin and the scroll bar under it have no small
+  GUI shows the limit. The spin has no small
   cap (up to 2,000,000,000): on the first value above the client's own 59
   limit the DLL raises that check and supplies a 256-entry speed table, and
   values above the byte's 255 are emulated by scaling its top entry. Client
