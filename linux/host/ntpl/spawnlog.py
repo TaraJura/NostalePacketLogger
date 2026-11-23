@@ -26,6 +26,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from .bazar import BAZAR_SKILL_WINDOW_S
 from .engine import InventorySlot, parse_inventory_token
 
 _IN_MARKER = "[RECV] in "
@@ -47,6 +48,9 @@ _NPCREQ_MARKER = "[SEND] npc_req "
 _NRUN_MARKER = "[SEND] n_run "
 _CBLIST_MARKER = "[SEND] c_blist "
 _CSLIST_MARKER = "[SEND] c_slist "
+_CSKILL_MARKER = "[SEND] c_skill"
+_WOPEN32_MARKER = "[RECV] wopen 32 "
+_LINE_STAMP = re.compile(r"^(\d{1,2}):(\d{2}):(\d{2})\.(\d{3}) ")
 _INV_MARKER = "[RECV] inv "
 _IVN_MARKER = "[RECV] ivn "
 _GOLD_MARKER = "[RECV] gold "
@@ -820,6 +824,47 @@ def load_bazaar_open(
             if opened and request is not None and run is not None:
                 npc_id, (option, page) = request, run
     return npc_id, option, page
+
+
+def _log_stamp(line: str) -> float | None:
+    """Seconds within the day from the DLL log's ``HH:MM:SS.mmm`` prefix."""
+    match = _LINE_STAMP.match(line)
+    if match is None:
+        return None
+    hours, minutes, seconds, millis = (int(part) for part in match.groups())
+    return hours * 3600.0 + minutes * 60.0 + seconds + millis / 1000.0
+
+
+def load_bazaar_skill(path: str | Path | None = None) -> bool:
+    """True when the client opened the NosBazar with its own shortcut.
+
+    On FrosTale the bazaar is neither a Bibi dialog nor the medal item:
+    pressing the client's NosBazar shortcut sends a bare ``c_skill`` and the
+    server answers ``wopen 32`` within ~0.2 s (11/11 openings in the
+    2026-11-23 live log, on four maps). A GUI that attaches afterwards has
+    to learn the trigger from this client's log, exactly like the Bibi
+    id/option, so the controller can replay it with no NPC and no medal.
+    """
+    source = Path(path) if path is not None else default_log_path()
+    if source is None:
+        return False
+    try:
+        log = _open_log_tail(source)
+    except OSError:
+        return False
+    skill_at: float | None = None
+    with log:
+        for line in log:
+            stamp = _log_stamp(line)
+            if stamp is None:
+                continue
+            if _CSKILL_MARKER in line:
+                skill_at = stamp
+                continue
+            if _WOPEN32_MARKER in line and skill_at is not None:
+                if 0.0 <= stamp - skill_at <= BAZAR_SKILL_WINDOW_S:
+                    return True
+    return False
 
 
 def log_inventory_bags(path: str | Path | None = None) -> set[int]:

@@ -606,6 +606,20 @@ class PortalLearningTests(unittest.TestCase):
             (entry.ts_id, entry.min_level, entry.max_level), (704, 90, 99)
         )
 
+    def test_client_shortcut_pairs_with_the_bazaar_window(self):
+        # FrosTale: a bare client `c_skill` is answered by `wopen 32`.
+        self.engine.feed(Packet(Kind.SEND, "c_skill", 100.0))
+        self.engine.feed(Packet(Kind.RECV, "wopen 32 2 626", 100.2))
+        self.assertTrue(self.engine.world.bazar.open_skill)
+
+    def test_client_shortcut_needs_a_fresh_window(self):
+        # A `c_skill` long before the window, or a non-bazaar window, is
+        # not the bazaar opening.
+        self.engine.feed(Packet(Kind.SEND, "c_skill", 100.0))
+        self.engine.feed(Packet(Kind.RECV, "wopen 28 2 626", 100.2))
+        self.engine.feed(Packet(Kind.RECV, "wopen 32 2 626", 110.0))
+        self.assertFalse(self.engine.world.bazar.open_skill)
+
     def test_gate_list_adds_every_portal_on_the_map(self):
         # `gp` carries no map id: it arrives after `at` on map entry.
         self.engine.feed(

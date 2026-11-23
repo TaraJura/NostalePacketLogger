@@ -146,7 +146,7 @@ class PacketBuilderTests(unittest.TestCase):
         self.assertEqual(calculate_tax(14999, 5), 37)
         self.assertEqual(
             build_register_packet(item, 7, 14999),
-            "c_reg 0 2 7 9 4 1 0 5 14999 37 2",
+            "c_reg 0 2 7 9 4 1 0 5 14999 37 2 0",
         )
         with self.assertRaises(BazarError):
             build_register_packet(item, 7, 0)
@@ -481,6 +481,22 @@ class ControllerTests(unittest.TestCase):
         controller.tick(engine.world)
         self.assertIn("c_blist 0 0 0 0 0 0 0 0 1 2174", sent)
 
+    def test_client_shortcut_opens_the_bazaar_without_an_npc(self) -> None:
+        # FrosTale: no Bibi entity and no medal; the client's own shortcut
+        # (c_skill) is the learned opener and a fresh wopen 32 confirms it.
+        item = BazarItem("bubbl", build_search_packet([2174]))
+        controller, engine, clock, sent = self._controller([item])
+        engine.world.bazar.open_skill = True
+        controller.start_monitor(engine.world)
+        self.assertIn("c_skill", sent)
+        self.assertEqual(controller.phase, "open")
+        self.assertTrue(controller.running)
+        engine.feed_text("RECV", "wopen 32 2 642")
+        controller.tick(engine.world)
+        self.assertEqual(controller.phase, "pass")
+        controller.tick(engine.world)
+        self.assertIn("c_blist 0 0 0 0 0 0 0 0 1 2174", sent)
+
     def test_visible_bibi_wins_over_the_medal(self) -> None:
         item = BazarItem("bubbl", build_search_packet([2174]))
         controller, engine, clock, sent = self._controller([item])
@@ -648,7 +664,7 @@ class ControllerTests(unittest.TestCase):
         controller.tick(engine.world)
         register = [p for p in sent if p.startswith("c_reg ")]
         self.assertEqual(
-            register, ["c_reg 0 2 7 9 4 1 0 5 43999 109 2"]
+            register, ["c_reg 0 2 7 9 4 1 0 5 43999 109 2 0"]
         )
         # Sent is not accepted: the server answers with rc_reg.
         self.assertEqual(
@@ -764,7 +780,7 @@ class ControllerTests(unittest.TestCase):
         controller.tick(engine.world)
         register = [p for p in sent if p.startswith("c_reg ")]
         self.assertEqual(
-            register, ["c_reg 0 0 30 9 4 1 0 1 43999 21 2"]
+            register, ["c_reg 0 0 30 9 4 1 0 1 43999 21 2 0"]
         )
         engine.feed_text("RECV", "rc_reg 1")
         controller.tick(engine.world)

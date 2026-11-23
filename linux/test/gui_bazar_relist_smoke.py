@@ -86,7 +86,7 @@ def main() -> int:
                 result["gate"]
                 and bool(searches)
                 and registers
-                == ["SEND|c_reg 0 2 7 9 4 1 0 5 13797 34 2"]
+                == ["SEND|c_reg 0 2 7 9 4 1 0 5 13797 34 2 0"]
                 and quote is not None
                 and quote.status == "register-sent"
             )

@@ -107,6 +107,7 @@ from .spawnlog import (
     client_log_path,
     inventory_cache_path,
     load_bazaar_open,
+    load_bazaar_skill,
     load_gates,
     load_inventory as load_log_inventory,
     load_inventory_cache,
@@ -3913,6 +3914,14 @@ class Application(Gtk.Application):
                         if option is not None
                         else ""
                     )
+                )
+        if load_bazaar_skill(path):
+            state = world.bazar
+            if not state.open_skill:
+                state.open_skill = True
+                self._bazar_log(
+                    "bazaar: this client opens NosBazar with its own "
+                    "shortcut (c_skill); the monitor will use it"
                 )
         bags, gold = load_log_inventory(path)
         if bags:

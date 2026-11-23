@@ -73,6 +73,14 @@ BAZAR_MEDAL_VNUM = 1955
 #: never gets its dialog option pressed. A manual opening with a verified
 #: Bibi entity can replace it.
 BAZAR_DIALOG_ID = 460
+#: Some servers open the bazaar with a bare client shortcut instead of an
+#: NPC or the medal: FrosTale answers the client's own ``c_skill`` send
+#: with ``wopen 32`` in ~0.2 s (11/11 openings in the 2026-11-23 live log,
+#: four different maps). The controller replays the exact packet the client
+#: sent once that pairing has been observed.
+BAZAR_SKILL_PACKET = "c_skill"
+#: A ``c_skill`` send this long before a ``wopen 32`` belongs to it.
+BAZAR_SKILL_WINDOW_S = 2.0
 
 #: The client drops faster searches; Nostale-NB uses 2.5 s, the relist loop 2 s.
 SEARCH_INTERVAL_S = 2.5
@@ -334,10 +342,17 @@ def build_register_packet(
         raise BazarError("price must be positive")
     amount = max(1, int(item.amount))
     tax = calculate_tax(price, amount)
+    # The client's own c_reg carries one more trailing field (always 0):
+    # every one of its 24 captured packets ends "<medal> 0" (logs 1512,
+    # 1564, 2344, 2408). The server ignored every registration the host
+    # sent without it in bag 2 (105 tries in log 1184, 901 in 2944, and the
+    # Speech Bubble live 2026-11-23), while the same item, slot and
+    # constants from the client's own UI were accepted. Send the client's
+    # exact shape.
     return (
         f"c_reg 0 {item.inv_tab} {int(slot)} "
         f"{int(item.unk1)} {int(item.unk2)} {int(item.durability)} 0 "
-        f"{amount} {int(price)} {tax} {int(item.medal)}"
+        f"{amount} {int(price)} {tax} {int(item.medal)} 0"
     )
 
 
@@ -735,6 +750,13 @@ class BazarState:
     npc_req_at: float = 0.0
     n_run: tuple[int, int, int] | None = None
     n_run_at: float = 0.0
+    #: The client opened the bazaar with its own shortcut: ``[SEND] c_skill``
+    #: answered by ``wopen 32`` within ``BAZAR_SKILL_WINDOW_S`` (FrosTale).
+    #: Learned from the client's traffic or its log; replaying the exact
+    #: packet needs neither a visible Bibi nor a medal item.
+    open_skill: bool = False
+    #: Timestamp of the newest client ``c_skill`` send, for the pairing.
+    open_skill_at: float = 0.0
 
     def responses_since(self, count: int) -> list[tuple[int, str]]:
         """Responses newer than ``count``, oldest first."""
@@ -942,6 +964,9 @@ class BazarController:
         #: True while the open burst waits for the portable NosBazar medal,
         #: which replaces npc_req/n_run when no Bibi Basar is visible.
         self._open_medal = False
+        #: True while the open waits for the client's own shortcut
+        #: (``c_skill`` on FrosTale), the learned opening with no NPC.
+        self._open_skill = False
         #: True once the npc_req reply carried the Bibi dialog id; the burst
         #: may then click its option and accept an already-open window.
         self._open_dialog_ok = False
@@ -1104,8 +1129,8 @@ class BazarController:
             quote.detail = f"{pending['price']:,} ignored (no rc_reg)"
             self._log(
                 f"{self._item_label(pending['item'])}: c_reg ignored by the "
-                "server (no rc_reg); its c_reg item constants do not match "
-                "Item.dat"
+                "server (no rc_reg); the listed slot or its item constants "
+                "may not match the live inventory"
             )
             self._pending_registration = None
             self.version += 1
@@ -1205,6 +1230,27 @@ class BazarController:
             self._begin_pass(world, now)
             return
 
+        # The client's own shortcut, when it has one: on FrosTale a bare
+        # `c_skill` is answered by `wopen 32` (live 2026-11-23, the reported
+        # "no Bibi, no medal" case). It needs neither an NPC nor an item, so
+        # it is the first choice once the pairing has been observed.
+        if state.open_skill:
+            self._open_skill = True
+            self._open_medal = False
+            self._open_dialog_ok = False
+            self._open_seen = state.response_count
+            self._open_window_seen = state.window_count
+            self._open_step = 0
+            self._open_next = now
+            self._open_deadline = now + OPEN_TIMEOUT_S
+            self.phase = "open"
+            self._send(BAZAR_SKILL_PACKET)
+            self._log(
+                "opening NosBazar with the client's own shortcut "
+                f"({BAZAR_SKILL_PACKET})"
+            )
+            return
+
         # A visible Bibi Basar is the normal path. Without one, use the
         # portable NosBazar medal from the inventory before ever replaying an
         # unverified stale NPC id.
@@ -1212,6 +1258,7 @@ class BazarController:
         medal = self._medal_slot(world)
         if not candidates and medal is not None:
             bag, slot = medal
+            self._open_skill = False
             self._open_medal = True
             self._open_seen = state.response_count
             self._open_window_seen = state.window_count
@@ -1245,6 +1292,7 @@ class BazarController:
             self._wait_until = now + self.config.refresh
             return
 
+        self._open_skill = False
         self._open_medal = False
         self._open_dialog_ok = False
         self._open_npc = candidates[0]
@@ -1257,6 +1305,37 @@ class BazarController:
 
     def _open_tick(self, world: "WorldState", now: float) -> None:
         state = world.bazar
+        if self._open_skill:
+            # The client's own shortcut (`c_skill` on FrosTale) opens the
+            # window itself; a fresh wopen 32 is the whole confirmation.
+            if state.window_count > self._open_window_seen:
+                state.open = True
+                self._log("NosBazar window is open (client shortcut)")
+                if self.mode == "open":
+                    self.mode = None
+                    self.phase = "idle"
+                    self.version += 1
+                    return
+                self._begin_pass(world, now)
+                return
+            if now >= self._open_deadline:
+                state.open = False
+                self.last_error = (
+                    "could not open NosBazar with the client shortcut "
+                    f"({BAZAR_SKILL_PACKET}); retry in "
+                    f"{self.config.refresh:g}s"
+                )
+                self._log(self.last_error)
+                if self.mode == "open":
+                    self.mode = None
+                    self.phase = "idle"
+                    self.version += 1
+                    return
+                self.phase = "waiting"
+                self._wait_until = now + self.config.refresh
+                return
+            self.version += 1
+            return
         if self._open_medal:
             # The medal's own use opens the window; npc_req/n_run would be
             # wrong here. A fresh wopen 32 is the whole confirmation.

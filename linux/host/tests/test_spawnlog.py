@@ -11,6 +11,7 @@ from ntpl.spawnlog import (
     client_log_path,
     default_log_path,
     load_bazaar_open,
+    load_bazaar_skill,
     load_entities,
     load_gates,
     load_inventory,
@@ -263,6 +264,27 @@ class SpawnLogTests(unittest.TestCase):
     def test_bazaar_open_without_a_client_packet_is_none(self):
         log = self._write("21:12:30.101 [SEND] npc_req 2 10284\r\n")
         self.assertEqual(load_bazaar_open(log), (None, None, None))
+
+    def test_bazaar_skill_learns_the_client_shortcut(self):
+        # FrosTale: the client's own `c_skill` opens the bazaar, answered by
+        # `wopen 32` ~0.1 s later (live 2026-11-23).
+        log = self._write(
+            "15:56:50.425 [SEND] c_skill\r\n"
+            "15:56:50.516 [RECV] wopen 32 2 626\r\n"
+        )
+        self.assertTrue(load_bazaar_skill(log))
+
+    def test_bazaar_skill_needs_the_paired_window(self):
+        # A c_skill long before the window, or a warehouse window, is not
+        # the bazaar opening.
+        log = self._write(
+            "15:56:40.000 [SEND] c_skill\r\n"
+            "15:56:50.516 [RECV] wopen 32 2 626\r\n"
+            "15:58:00.000 [SEND] c_skill\r\n"
+            "15:58:00.400 [RECV] wopen 28 2 626\r\n"
+        )
+        self.assertFalse(load_bazaar_skill(log))
+        self.assertFalse(load_bazaar_skill("/nonexistent/log.txt"))
 
     def test_inventory_replays_updates_and_gold(self):
         log = self._write(

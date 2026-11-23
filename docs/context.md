@@ -7,11 +7,15 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 352 unittest cases, 6 GTK4 smokes, 43 fake-server bot
+- **Linux host**: 357 unittest cases, 6 GTK4 smokes, 43 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
-  linux all test-host`, tests above. The host is **0.7.1**: the MCP now
-  seeds `world.entities` from the attached client's log
-  (`spawnlog.load_entities`) and has `game_resync` (`walk -1 -1` →
+  linux all test-host`, tests above. The host is **0.7.2**: it opens the
+  bazaar with the client's own shortcut (`c_skill` → `wopen 32`, FrosTale)
+  when no Bibi or medal is available, and sends the client's exact
+  twelve-field `c_reg` (the missing trailing `0` made the server ignore
+  every bag-2 registration, live 2026-11-23). 0.7.1 added the MCP seeding
+  of `world.entities` from the attached client's log
+  (`spawnlog.load_entities`) and `game_resync` (`walk -1 -1` →
   server `tp`) for a client that desynced during a warp.
 - **Autonomous play**: the observe → decide → act → confirm → survive policy
   is in [autonomous-play.md](autonomous-play.md). Live 2026-11-22 (client
@@ -31,7 +35,7 @@ the data layer in [database.md](database.md).
   NPC, pet, monster or the local character. The DLL uses real `SendInput` when
   the game window is foreground and posted keys otherwise. Per-client
   `~/.config/ntpl/minigame-<winpid>.json`. Needs **DLL 0.3.0 and a game
-  restart/re-inject**; the host is 0.7.1. Covered by `test_minigame.py`,
+  restart/re-inject**; the host is 0.7.2. Covered by `test_minigame.py`,
   `gui_minigame_smoke.py` and `key-test`; the key press and player TARGET are
   **not yet live-verified**. See [minigame.md](minigame.md).
 - **Stats tab** (eighth GUI page, appended last): a player **DPS meter**.
@@ -71,10 +75,13 @@ the data layer in [database.md](database.md).
   the client's own `npc_req`/`n_run` or DLL log (refusing an id this map's
   entity list knows as another NPC — ids are per map; a stale one opened
   Carve Runes); with no Bibi visible it uses the portable NosBazar medal
-  (vnum 1955, `u_i` from the Main/Etc bag) and waits for `wopen 32`. When the
-  bazaar is already open before the attach there is no new `wopen`; the
-  verified Bibi dialog (460; Carve Runes 11009 is never clicked) plus the
-  listing answer continue the scan. It
+  (vnum 1955, `u_i` from the Main/Etc bag) and waits for `wopen 32`.
+  A client whose own shortcut opens the bazaar (FrosTale: a bare `c_skill`
+  answered by `wopen 32`; learned live or from the DLL log) is replayed
+  first, so no NPC and no medal are needed. When the bazaar is already open
+  before the attach there is no new `wopen`; the verified Bibi dialog (460;
+  Carve Runes 11009 is never clicked) plus the listing answer continue the
+  scan. It
   searches `c_blist` at 2.5 s
   pacing, parses the real 15-field `rc_blist` (minimum visible price,
   truncation-aware), keeps old rows across refresh cycles, sorts by profit
@@ -85,7 +92,9 @@ the data layer in [database.md](database.md).
   selected); the live checkbox, a character name, a positive floor and an
   inventory slot, reports **register accepted (rc_reg)** or **register
   ignored (no rc_reg)** (a c_reg needs the bazaar window — `wopen 32` — and
-  `unk1` is repaired from Item.dat before a pass; `unk2` is item-specific), and **Relist Start**
+  the client's exact twelve-field shape: the trailing `0` matters, live
+  2026-11-23; `unk1` is repaired from Item.dat before a pass; `unk2` is
+  item-specific), and **Relist Start**
   searches only the relist set while Monitor searches every enabled item.
   The page has a second-level navbar (**Inventory**,
   **Relist**, **Monitor**, **Items**, **Configuration**); **Monitor** has a
@@ -133,6 +142,10 @@ the data layer in [database.md](database.md).
 
 ## Next likely work
 
+0. **Bushi King mode for the Minigame tab** (Jiří's request 2026-11-23):
+   spam `a` at the nearest Water/Fire/Centurio/Boxer Bushi, never the Bushi
+   King. Design proposal, **not approved yet**, with the raid's observed
+   packets: `docs/superpowers/specs/2026-11-23-bushi-king-minigame-design.md`.
 1. Live-verify the Minigame tab at a Sheep Farm raid (automatic at :15 on
    channels 1/2): restart the game with DLL 0.3.0, inject, start with `y`, then
    watch the Bot log for `minigame keyboard ready` / `minigame focus -> …` and

@@ -18,7 +18,11 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .bazar import BAZAR_WINDOW_TYPE, BazarState
+from .bazar import (
+    BAZAR_SKILL_WINDOW_S,
+    BAZAR_WINDOW_TYPE,
+    BazarState,
+)
 from .protocol import Kind, Packet
 
 
@@ -430,6 +434,24 @@ def _on_window_open(world: WorldState, packet: Packet) -> None:
     if values[0] == BAZAR_WINDOW_TYPE:
         state.window_open = True
         state.window_count += 1
+        # Some servers open the bazaar from a bare client shortcut: FrosTale
+        # answers the client's `c_skill` with `wopen 32` in ~0.2 s (11/11
+        # live openings 2026-11-23). Remember that this client opens it
+        # that way so the controller can replay it with no NPC or medal.
+        if (
+            0.0 <= packet.timestamp - state.open_skill_at
+            <= BAZAR_SKILL_WINDOW_S
+        ):
+            state.open_skill = True
+
+
+def _on_client_skill(world: WorldState, packet: Packet) -> None:
+    # SEND: `c_skill` with no arguments -- the client's own NosBazar
+    # shortcut on FrosTale. Timestamped here; `wopen 32` right after it
+    # proves the pairing.
+    if packet.direction is not Kind.SEND:
+        return
+    world.bazar.open_skill_at = packet.timestamp
 
 
 def _on_npc_req(world: WorldState, packet: Packet) -> None:
@@ -1030,6 +1052,8 @@ class Engine:
                 "n_run": _on_npc_run,   # SEND: NPC dialog option
                 "c_blist": _on_bazar_client_open,  # SEND: bazaar listing
                 "c_slist": _on_bazar_client_open,  # SEND: bazaar sellers
+                "c_skill": _on_client_skill,  # SEND: client shortcut (opens
+                #                                the bazaar on FrosTale)
                 "in": _on_spawn,        # RECV: entity spawned
                 "gidx": _on_family_index,  # RECV: player family id/name
                 "pairy": _on_fairy_info,  # RECV: player fairy element

@@ -76,7 +76,8 @@ navbar**: **NosMall** (ND-cost items, gold per ND) and **NPC resale**
   reports **register accepted (rc_reg)** when the server answers, or
   **register ignored (no rc_reg)** when it silently drops the packet (the
   bazaar window must be open — `wopen 32`, a search answer alone is not
-  proof — and `unk1` is repaired from Item.dat before each pass; `unk2` is
+  proof — the packet carries the client's own trailing `0` field, and
+  `unk1` is repaired from Item.dat before each pass; `unk2` is
   item-specific).
   The **Items** editor carries the same two tracking switches, **Monitor**
   and **Relist**.
@@ -85,8 +86,11 @@ navbar**: **NosMall** (ND-cost items, gold per ND) and **NPC resale**
   from your own opening (or the DLL log), and searches at the required 2.5 s
   pacing. A learned id that this map's entity list knows as another NPC is
   refused (ids are per map instance; it once opened Carve Runes), so walk
-  next to a Bibi on the current map before starting. With no Bibi visible the
-  controller uses the portable **NosBazar medal** (vnum 1955) from the
+  next to a Bibi on the current map before starting. If the client opens
+  the bazaar with its own shortcut (FrosTale: a bare `c_skill`, learned from
+  one manual opening or the DLL log) the controller replays exactly that
+  packet first, so no NPC or medal is needed. With no Bibi visible it also
+  uses the portable **NosBazar medal** (vnum 1955) from the
   Main/Etc bag (`u_i`) and waits for the bazaar window. If the bazaar is
   **already open**, it continues the scan without reopening it (the Bibi
   dialog reply 460 plus the listing answer are the proof). One **Monitor Start**
@@ -158,7 +162,7 @@ two more wolves that joined the fight.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 352 Python unit tests
+make -C linux host-test                      # 357 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux key-test                       # DLL KEY| name parsing
 make -C linux gui-test                       # six headless GTK4 smokes (xvfb)
@@ -237,7 +241,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 352 unit tests pass, the six GTK4 window smokes
+The Linux port builds, its 357 unit tests pass, the six GTK4 window smokes
 and 41 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 

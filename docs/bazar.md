@@ -42,12 +42,16 @@ full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
    different NPC — live 2026-11-23: it opened **Carve Runes** — it is
    refused and the controller waits, so changing map needs another manual
    bazaar opening (or walking next to a Bibi so her `in` packet is seen).
-   **No Bibi visible?** The controller falls back to the portable
-   **NosBazar medal** (Item.dat `Gestore del NosBazar`, vnum **1955**) from
-   the Main/Etc bag: it sends `u_i 1 <charId> <bag> <slot> 0 0`, waits for
-   `wopen 32`, and starts the pass. A visible Bibi always wins; a stale
-   unknown NPC id is only tried when no medal is in the inventory, and the
-   medal is never used a second time before the refresh interval.
+   **No Bibi visible?** If the client opens the bazaar with its own
+   shortcut — FrosTale answers a bare `c_skill` with `wopen 32` — the
+   controller replays exactly that packet first; it learns the pairing from
+   the client's own traffic or its DLL log. Otherwise it falls back to the
+   portable **NosBazar medal** (Item.dat `Gestore del NosBazar`, vnum
+   **1955**) from the Main/Etc bag: it sends
+   `u_i 1 <charId> <bag> <slot> 0 0`, waits for `wopen 32`, and starts the
+   pass. A visible Bibi wins over the medal; a stale unknown NPC id is only
+   tried when no medal is in the inventory, and the medal is never used a
+   second time before the refresh interval.
 3. Open the **Inventory** section. It lists every slot you own automatically
    from the live `inv`/`ivn` stream (backfilled from the DLL log after a late
    attach): the real item name (local DB first, then Item.dat), bag/slot,
@@ -117,20 +121,24 @@ update both tables and never clear the other view.
 `ntpl.bazar.BazarController` is a tick-driven state machine; the GUI calls
 `tick()` every 100 ms and feeds it the engine's `WorldState`.
 
-- **Waiting** — no usable NPC id and no medal: report “Bibi Basar is not
-  visible and no NosBazar medal (vnum 1955) is in the inventory”, retry
-  after the refresh interval. A learned id that this map's entity list knows
-  as another NPC (same id, different entity instance) is never used, so
-  Start cannot open the wrong dialog. No search spam.
-- **Opening** — a visible Bibi: replay `npc_req`, then `n_run`, then the
-  initial `c_blist`/`c_slist`. Without one: use the NosBazar medal
-  (`u_i 1 <charId> <bag> <slot> 0 0`). The `npc_req` reply names the dialog
+- **Waiting** — no usable NPC id, no shortcut and no medal: report “Bibi
+  Basar is not visible and no NosBazar medal (vnum 1955) is in the
+  inventory”, retry after the refresh interval. A learned id that this
+  map's entity list knows as another NPC (same id, different entity
+  instance) is never used, so Start cannot open the wrong dialog. No search
+  spam.
+- **Opening** — if the client's own shortcut is known (FrosTale: `c_skill`,
+  learned from the client's `c_skill` + `wopen 32` pairing or from its DLL
+  log), send it and wait for the window. Otherwise a visible Bibi: replay
+  `npc_req`, then `n_run`, then the initial `c_blist`/`c_slist`; without one,
+  use the NosBazar medal (`u_i 1 <charId> <bag> <slot> 0 0`). The `npc_req`
+  reply names the dialog
   (`npc_req 2 <id> 460` for Bibi); a different dialog (Carve Runes opened
   11009, live 2026-11-23) aborts **before** its option is clicked. Success
   on the NPC path is a **fresh `wopen 32`** or, when the bazaar was already
   open before the host attached, the verified Bibi dialog plus the `rc_blist`
   answer — the server sends no new `wopen` in that case, and the scan
-  continues. The medal path only needs the window. A search answer alone is
+  continues. The shortcut and medal paths only need the window. A search answer alone is
   not enough when the dialog is unverified: the
   server answers `c_blist` even with no bazaar window open (live
   2026-11-23 it answered while Carve Runes was open) while `c_reg` is
@@ -158,8 +166,10 @@ update both tables and never clear the other view.
   durability 0`) are item-specific. Relist Start repairs `unk1` for Main/Etc
   items from Item.dat (`8 + INDEX[0]`); `unk2` and durability are left as
   configured. A wrong tuple makes the server drop the packet silently (the
-  `rc_reg` timeout reports it). **The bazaar window must be open**; a c_reg
-  without `wopen 32` is ignored regardless of the constants.
+  `rc_reg` timeout reports it). The packet must match the client's own
+  shape, including its trailing `0` field. **The bazaar window must be
+  open**; a c_reg without `wopen 32` is ignored regardless of the
+  constants.
 - **Two tracking switches** — `enabled` puts an item in every Monitor pass;
   `relist` puts it in the relist set. A relist pass searches only
   `BazarController.relist_items()` (enabled, relist, search packet), so an
@@ -303,9 +313,12 @@ The controller opens the bazaar if needed, searches only the relist set at
 the 2.5 s pacing, and for each relist-ready item sends one `c_reg` per pass:
 
 ```
-c_reg 0 <tab> <slot> 9 4 1 0 <amount> <cheapest-1> <tax> 2
+c_reg 0 <tab> <slot> 9 4 1 0 <amount> <cheapest-1> <tax> 2 0
 ```
 
+- The last `0` is the client's own twelfth field; the server ignored every
+  registration the host sent without it (live 2026-11-23, bag 2), while the
+  client's own packet for the same item, slot and constants was accepted.
 - The price is the cheapest listing − 1 gold, never below **Min price**.
 - If the cheapest listing is already yours, that item is skipped (`own`).
 - If the cheapest listing is at/below the floor, it is skipped (`floor`).

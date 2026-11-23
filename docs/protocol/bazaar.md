@@ -65,6 +65,23 @@ inventory:
 No `npc_req`/`n_run` is involved on this path; a fresh `wopen 32` is the
 whole confirmation.
 
+A third opener exists on **FrosTale**: the client's own NosBazar shortcut.
+A bare `c_skill` send is answered with `wopen 32` about 0.1–0.2 s later,
+11 times out of 11 openings in the 2026-11-23 live log (four maps), with no
+`npc_req`/`n_run` and no `u_i`:
+
+```
+[SEND] c_skill
+[RECV] wopen 32 2 626
+[SEND] c_blist  0 0 0 0 0 0 0 0 0    # the client's own initial listing
+[SEND] c_slist 0 0 0
+```
+
+The host learns the pairing (a `c_skill` send at most 2 s before a
+`wopen 32`, from the live stream or this client's DLL log) and then replays
+the exact packet when it has to open the bazaar itself. No NPC entity and
+no medal are needed.
+
 ## Searching
 
 ```
@@ -153,7 +170,7 @@ confirmation.
 ## Registering / relisting (`c_reg`, SEND)
 
 ```
-c_reg 0 <invTab> <slot> <unk1> <unk2> <durability> 0 <amount> <price> <tax> <medal>
+c_reg 0 <invTab> <slot> <unk1> <unk2> <durability> 0 <amount> <price> <tax> <medal> 0
 ```
 
 | Field | Meaning |
@@ -168,6 +185,10 @@ c_reg 0 <invTab> <slot> <unk1> <unk2> <durability> 0 <amount> <price> <tax> <med
 | `price` | **Per-unit** price; the reference undercuts by 1 |
 | `tax` | Client-side tax estimate (see below) |
 | `medal` | NosMerchant medal flag; default `2` |
+| trailing `0` | Every client-sent packet carries it (24/24 in the 2026-11-22/23 logs). The server ignored the host's packets without it for bag-2 items — 105 attempts at 33 s spacing in one session and 901 in another — while the client's own packet for the same item, slot and constants was accepted (Speech Bubble, 2026-11-23). Send the client's exact shape. |
+
+The emulator packet definitions (NosCore, OpenNos) list only the eleven
+fields up to `medal`; the live client appends one more `0`.
 
 Tax in Nostale-NB:
 
