@@ -100,6 +100,13 @@ DEFAULT_OPEN_PAGE = 0
 DEFAULT_REFRESH_S = 30.0
 #: NosBazar tax: 0.05 % of price * amount, truncated.
 TAX_RATE = 0.0005
+#: The bazaar's minimum listing fee. The client sends 50 gold whenever the
+#: 0.05 % fee is smaller (live 2026-11-23: ``c_reg 0 2 45 10 3 1 0 2 10899
+#: 50 2 0`` = 10.9 gold computed, 50 sent, accepted; ``0 0 47 3 3 1 0 1
+#: 29997 50 2 0`` = 15 computed, 50 sent, accepted), and the server
+#: silently ignores a c_reg whose fee is below it. Every host registration
+#: it dropped carried 4, 23 or 28; every accepted one carried at least 50.
+TAX_MINIMUM = 50
 #: How long after the last answer the bazaar is assumed to still be open.
 OPEN_FRESH_S = 90.0
 #: A c_reg the server accepts is answered with ``rc_reg`` within about half
@@ -324,8 +331,14 @@ def _name_key(text: str) -> str:
 
 
 def calculate_tax(price: int, amount: int = 5) -> int:
-    """NosBazar's sale tax, truncated to whole gold (Nostale-NB formula)."""
-    return int(int(price) * max(1, int(amount)) * TAX_RATE)
+    """NosBazar's listing fee: 0.05 % of the total, minimum 50 gold.
+
+    The fee field is not just an estimate: a c_reg whose fee is below the
+    server's minimum is dropped without a word (``rc_reg`` never comes), so
+    a cheap listing such as 5 x Speech Bubble at 9,499 must still send 50.
+    """
+    fee = int(int(price) * max(1, int(amount)) * TAX_RATE)
+    return max(TAX_MINIMUM, fee)
 
 
 def build_register_packet(
@@ -344,11 +357,7 @@ def build_register_packet(
     tax = calculate_tax(price, amount)
     # The client's own c_reg carries one more trailing field (always 0):
     # every one of its 24 captured packets ends "<medal> 0" (logs 1512,
-    # 1564, 2344, 2408). The server ignored every registration the host
-    # sent without it in bag 2 (105 tries in log 1184, 901 in 2944, and the
-    # Speech Bubble live 2026-11-23), while the same item, slot and
-    # constants from the client's own UI were accepted. Send the client's
-    # exact shape.
+    # 1564, 2344, 2408). Send the client's exact shape.
     return (
         f"c_reg 0 {item.inv_tab} {int(slot)} "
         f"{int(item.unk1)} {int(item.unk2)} {int(item.durability)} 0 "

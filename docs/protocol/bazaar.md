@@ -185,21 +185,29 @@ c_reg 0 <invTab> <slot> <unk1> <unk2> <durability> 0 <amount> <price> <tax> <med
 | `price` | **Per-unit** price; the reference undercuts by 1 |
 | `tax` | Client-side tax estimate (see below) |
 | `medal` | NosMerchant medal flag; default `2` |
-| trailing `0` | Every client-sent packet carries it (24/24 in the 2026-11-22/23 logs). The server ignored the host's packets without it for bag-2 items — 105 attempts at 33 s spacing in one session and 901 in another — while the client's own packet for the same item, slot and constants was accepted (Speech Bubble, 2026-11-23). Send the client's exact shape. |
+| trailing `0` | Every client-sent packet carries it (24/24 in the 2026-11-22/23 logs); the host sends the client's exact shape. It is not what makes a registration work — the **fee minimum** below is. |
 
 The emulator packet definitions (NosCore, OpenNos) list only the eleven
 fields up to `medal`; the live client appends one more `0`.
 
-Tax in Nostale-NB:
+The fee field is **`max(50, int(price * amount * 0.0005))`** — a minimum of
+50 gold. The client sends 50 whenever the percentage is smaller, and the
+server **silently drops a c_reg whose fee is below its minimum**:
 
-```python
-int(price * amount * 0.0005)
+```
+c_reg 0 2 45 10 3 1 0 2 10899 50 2 0     # 10.9 computed, 50 sent -> rc_reg 1
+c_reg 0 0 47 3 3 1 0 1 29997 50 2 0      # 15 computed, 50 sent  -> rc_reg 1
+c_reg 0 2 44 10 3 1 0 5 9499 23 2        # 23 sent -> no answer (live 2026-11-23)
+c_reg 0 2 45 10 3 1 0 1 9332 4 2 0       # 4 sent  -> no answer (live 2026-11-23)
 ```
 
-The reference computes it with its default amount 5 even when the listing
-amount differs; this port uses the configured amount and truncates integer
-math. Servers may recompute/ignore the field. Re-listing never goes below the
-item's `min_price` floor, and the port refuses to relist when no floor is set.
+Every accepted registration in the 2026-11-22/23 logs carried at least 50;
+every dropped one carried 4, 23 or 28. The reference (Nostale-NB) computes
+`int(price * amount * 0.0005)` with its default amount 5 even when the
+listing amount differs; this port uses the configured amount, truncates
+integer math and applies the 50-gold minimum. Re-listing never goes below
+the item's `min_price` floor, and the port refuses to relist when no floor
+is set.
 
 **`rc_reg <value>` is the acknowledgement** (RECV, ~0.3-0.6 s after an
 accepted c_reg; value 1 in every live capture on FrosTale). A c_reg the

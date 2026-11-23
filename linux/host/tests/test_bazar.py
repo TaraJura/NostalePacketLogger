@@ -143,10 +143,12 @@ class PacketBuilderTests(unittest.TestCase):
             amount=5,
             min_price=43000,
         )
-        self.assertEqual(calculate_tax(14999, 5), 37)
+        # 5 x 14,999 = 74,995 -> 37 gold, below the server's 50 minimum.
+        self.assertEqual(calculate_tax(14999, 5), 50)
+        self.assertEqual(calculate_tax(10999, 10), 54)
         self.assertEqual(
             build_register_packet(item, 7, 14999),
-            "c_reg 0 2 7 9 4 1 0 5 14999 37 2 0",
+            "c_reg 0 2 7 9 4 1 0 5 14999 50 2 0",
         )
         with self.assertRaises(BazarError):
             build_register_packet(item, 7, 0)
@@ -780,7 +782,7 @@ class ControllerTests(unittest.TestCase):
         controller.tick(engine.world)
         register = [p for p in sent if p.startswith("c_reg ")]
         self.assertEqual(
-            register, ["c_reg 0 0 30 9 4 1 0 1 43999 21 2 0"]
+            register, ["c_reg 0 0 30 9 4 1 0 1 43999 50 2 0"]
         )
         engine.feed_text("RECV", "rc_reg 1")
         controller.tick(engine.world)

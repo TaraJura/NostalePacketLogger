@@ -167,9 +167,9 @@ update both tables and never clear the other view.
   items from Item.dat (`8 + INDEX[0]`); `unk2` and durability are left as
   configured. A wrong tuple makes the server drop the packet silently (the
   `rc_reg` timeout reports it). The packet must match the client's own
-  shape, including its trailing `0` field. **The bazaar window must be
-  open**; a c_reg without `wopen 32` is ignored regardless of the
-  constants.
+  shape, including its trailing `0` field and the **50-gold minimum
+  listing fee** (`calculate_tax`). **The bazaar window must be open**; a
+  c_reg without `wopen 32` is ignored regardless of the constants.
 - **Two tracking switches** — `enabled` puts an item in every Monitor pass;
   `relist` puts it in the relist set. A relist pass searches only
   `BazarController.relist_items()` (enabled, relist, search packet), so an
@@ -316,9 +316,11 @@ the 2.5 s pacing, and for each relist-ready item sends one `c_reg` per pass:
 c_reg 0 <tab> <slot> 9 4 1 0 <amount> <cheapest-1> <tax> 2 0
 ```
 
-- The last `0` is the client's own twelfth field; the server ignored every
-  registration the host sent without it (live 2026-11-23, bag 2), while the
-  client's own packet for the same item, slot and constants was accepted.
+- `<tax>` is the listing fee the server checks:
+  `max(50, int(price × amount × 0.0005))`. A c_reg below the 50-gold
+  minimum is **dropped silently** — the live 2026-11-23 failures were
+  cheap listings whose fee was 4, 23 or 28 gold (a 5 × 9,499 Speech Bubble
+  needs 50, not 23). The trailing `0` matches the client's own packet.
 - The price is the cheapest listing − 1 gold, never below **Min price**.
 - If the cheapest listing is already yours, that item is skipped (`own`).
 - If the cheapest listing is at/below the floor, it is skipped (`floor`).

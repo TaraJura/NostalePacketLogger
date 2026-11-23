@@ -76,9 +76,8 @@ navbar**: **NosMall** (ND-cost items, gold per ND) and **NPC resale**
   reports **register accepted (rc_reg)** when the server answers, or
   **register ignored (no rc_reg)** when it silently drops the packet (the
   bazaar window must be open — `wopen 32`, a search answer alone is not
-  proof — the packet carries the client's own trailing `0` field, and
-  `unk1` is repaired from Item.dat before each pass; `unk2` is
-  item-specific).
+  proof — the listing fee must be at least the bazaar's 50 gold, and `unk1`
+  is repaired from Item.dat before each pass; `unk2` is item-specific).
   The **Items** editor carries the same two tracking switches, **Monitor**
   and **Relist**.
 - **Monitor** — starts/stops searches, opens the Bibi Basar dialog through

@@ -9,11 +9,12 @@ the data layer in [database.md](database.md).
 
 - **Linux host**: 357 unittest cases, 6 GTK4 smokes, 43 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
-  linux all test-host`, tests above. The host is **0.7.2**: it opens the
+  linux all test-host`, tests above. The host is **0.7.3**: it opens the
   bazaar with the client's own shortcut (`c_skill` → `wopen 32`, FrosTale)
-  when no Bibi or medal is available, and sends the client's exact
-  twelve-field `c_reg` (the missing trailing `0` made the server ignore
-  every bag-2 registration, live 2026-11-23). 0.7.1 added the MCP seeding
+  when no Bibi or medal is available, and charges the bazaar's **50-gold
+  minimum listing fee** in `c_reg` (the server silently drops a registration
+  whose fee is below it — live 2026-11-23, every failure carried 4/23/28
+  gold and every accepted packet at least 50). 0.7.1 added the MCP seeding
   of `world.entities` from the attached client's log
   (`spawnlog.load_entities`) and `game_resync` (`walk -1 -1` →
   server `tp`) for a client that desynced during a warp.
@@ -92,9 +93,9 @@ the data layer in [database.md](database.md).
   selected); the live checkbox, a character name, a positive floor and an
   inventory slot, reports **register accepted (rc_reg)** or **register
   ignored (no rc_reg)** (a c_reg needs the bazaar window — `wopen 32` — and
-  the client's exact twelve-field shape: the trailing `0` matters, live
-  2026-11-23; `unk1` is repaired from Item.dat before a pass; `unk2` is
-  item-specific), and **Relist Start**
+  the client's exact twelve-field shape with the 50-gold minimum listing
+  fee (both live 2026-11-23); `unk1` is repaired from Item.dat before a
+  pass; `unk2` is item-specific), and **Relist Start**
   searches only the relist set while Monitor searches every enabled item.
   The page has a second-level navbar (**Inventory**,
   **Relist**, **Monitor**, **Items**, **Configuration**); **Monitor** has a
