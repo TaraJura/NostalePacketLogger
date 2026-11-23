@@ -154,11 +154,11 @@ two more wolves that joined the fight.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 344 Python unit tests
+make -C linux host-test                      # 349 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux key-test                       # DLL KEY| name parsing
 make -C linux gui-test                       # six headless GTK4 smokes (xvfb)
-make -C linux bot-test                       # 42 fake-server bot smokes
+make -C linux bot-test                       # 43 fake-server bot smokes
 
 # no game required: x86 hook stubs + DLL lifecycle + TCP + command path
 linux/scripts/dev-test-wine.sh 25
@@ -202,6 +202,8 @@ Start with [docs/architecture.md](docs/architecture.md), then:
   [docs/protocol/inventory.md](docs/protocol/inventory.md)
 - [docs/minigame.md](docs/minigame.md) — the **Minigame** tab: Sheep Farm key
   spam, player-only focus and the DLL `KEY|` command
+- [docs/stats.md](docs/stats.md) — the **Stats** tab: a player DPS meter fed
+  by the decoded `su` damage, with 5/10/30/60 s or session windows
 - [docs/database.md](docs/database.md) — local SQLite **game + packet
   database** built from the client archives and public NosTale projects;
   includes the full NosMall catalog and an import picker in the tab
@@ -231,7 +233,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 344 unit tests pass, the six GTK4 window smokes
+The Linux port builds, its 349 unit tests pass, the six GTK4 window smokes
 and 41 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 
@@ -279,6 +281,14 @@ The **Minigame** tab (page 7) is described in
 [Minigame](#minigame) above: Sheep Farm key spam with a players-only focus,
 per-client settings and a DLL `KEY|` command (0.3.0). Live-key verification is
 still pending; see [docs/minigame.md](docs/minigame.md).
+
+The **Stats** tab (page 8) is a player **DPS meter**. Every `su` hit from a
+player (attacker type 1, positive damage) adds the decoded damage field; the
+table lists player name, DPS in the chosen window (5/10/30/60 s or Session),
+damage, hits, share, last hit and session total, sorted by DPS. **Reset**
+clears the totals; the table refreshes twice a second while the tab is
+visible and the meter keeps collecting in the background. Other players
+appear when the server broadcasts their hits. See [docs/stats.md](docs/stats.md).
 
 The client's own map grids are parsed from `NostaleData/NStcData.NOS`; live
 maps so far include **2, 3, 4, 20, 98, 103** and **104**, and every observed

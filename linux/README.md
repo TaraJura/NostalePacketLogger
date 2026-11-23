@@ -67,14 +67,14 @@ uses lowercase includes for that reason.
 
 ```bash
 make -C linux all test-host
-make -C linux host-test          # 344 cases: protocol, client, engine, mapdata, config, names, minigame, noscrypto, headless, gameforge auth, client locks, bazar/inventory, database, mirror
+make -C linux host-test          # 349 cases: protocol, client, engine, mapdata, config, names, minigame, noscrypto, headless, gameforge auth, client locks, bazar/inventory, database, mirror
 make -C linux speed-test         # DLL speed-boost cond parsing and walk clamp
 make -C linux key-test           # DLL KEY| key-name parser
 make -C linux gui-test           # headless GTK4: map switch, tooltips, toggles,
                                  # banner, help popovers, client picker,
                                  # multi-client locks, family invite, auto-invite,
                                  # minigame key spam/player focus
-make -C linux bot-test           # 42 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, cross-client follow mirror, follow nameless/char id, portal blocking, speed boost control, cast speed control, cast assist, cast-ready pacing, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosBazar inventory scan/price-all, NosBazar relist-set tracking, NosMall import filters
+make -C linux bot-test           # 43 smokes: combat, rules/config, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, cross-client follow mirror, follow nameless/char id, portal blocking, speed boost control, cast speed control, cast assist, cast-ready pacing, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosBazar inventory scan/price-all, NosBazar relist-set tracking, NosMall import filters, Stats DPS meter
 ./linux/scripts/dev-test-wine.sh 25
 ```
 

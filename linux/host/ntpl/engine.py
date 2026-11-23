@@ -933,6 +933,10 @@ def _on_skill_used(world: WorldState, packet: Packet) -> None:
             }
     if attacker_type == 1 and attacker_id == world.self_id:
         world.self_hit_count += 1
+    # Live 2026-11-23 format: args[11] target HP %, args[12] damage,
+    # args[15]/args[16] target current/max HP. Older captures do not have
+    # this tail, so the values stay None for a short packet.
+    decoded = packet.ints(17)
     world.combat.append(
         {
             "attacker_type": attacker_type,
@@ -940,6 +944,10 @@ def _on_skill_used(world: WorldState, packet: Packet) -> None:
             "target_type": target_type,
             "target_id": target_id,
             "skill": skill,
+            "damage": decoded[12] if decoded else None,
+            "hp_percent": decoded[11] if decoded else None,
+            "target_hp": decoded[15] if decoded else None,
+            "target_hp_max": decoded[16] if decoded else None,
             "args": tuple(packet.args),
             "text": packet.text,
         }

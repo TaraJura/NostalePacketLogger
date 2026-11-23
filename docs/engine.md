@@ -294,16 +294,18 @@ The Targets filter applies to both Retaliate and nearest-target selection. See
 ## GUI
 
 `python3 -m ntpl gui` (or `linux/scripts/gui.sh`) opens the GTK4 window with
-seven tabs: **Packets** (packet table with RECV/SEND colours, a filter, a
+eight tabs: **Packets** (packet table with RECV/SEND colours, a filter, a
 Follow toggle and a raw send entry), **Map / Bot**, **Bot log** (a
 timestamped, selectable text view of every action the status bar reports --
 attacks, selections, walks, pickups, recovery, DLL errors -- capped at 4,000
 lines with a Clear log button), **NosBazar** (second-level sections:
 Inventory scan/Set up relist, Relist setup, Monitor results with third-level
 NosMall and NPC-resale views, Items editor,
-Configuration; [bazar.md](bazar.md)), **Family**, **Malicious** and
+Configuration; [bazar.md](bazar.md)), **Family**, **Malicious**,
 **Minigame** (Sheep Farm key spam and player-only focus;
-[minigame.md](minigame.md)). The same
+[minigame.md](minigame.md)) and **Stats** (a player DPS meter fed by the
+decoded `su` damage, with 5/10/30/60 s or session windows;
+[stats.md](stats.md)). The same
 lines are appended to
 `~/.config/ntpl/bot-<winpid>.log` once a client is attached (`bot.log` before
 that; `NTPL_BOT_LOG` overrides; rotates at 4 MiB), so several windows never

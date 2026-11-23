@@ -4,7 +4,7 @@
 
 A skill was used / damage was dealt. One of the most important packets for combat.
 
-**Format**: `su <attackerType> <attackerId> <targetType> <targetId> <skillVnum> <unknown> <unknown> <unknown> <unknown> <damage> <unknown> <unknown> <unknown> <hpPercent> ...`
+**Format**: `su <attackerType> <attackerId> <targetType> <targetId> <skillVnum> <unknown> <unknown> <unknown> <unknown> <unknown> <unknown> <hpPercent> <damage> <unknown> <unknown> <targetHp> <targetHpMax>`
 
 **Live examples** (2026-11-06):
 ```
@@ -13,7 +13,19 @@ su 1 14877915 3 5179 866 9 11 4401 0 0 0 0 5720 0 0 0 4140
     — player 14877915 used skill 866 on monster 5180/5179
 ```
 The first five fields (attacker, target, skill) are parsed by the engine.
-Damage/HP positions are not decoded yet; the engine keeps the raw args.
+The 2026-11-06 tails predate the current server format; on 2026-11-23 the
+tail decodes as **HP percent at args[11], damage at args[12], target
+current/max HP at args[15]/args[16]**:
+
+```
+su 1 7001 3 58489 934 60 25 3803 0 0 1 7 5852 5 0 10736 149353
+    — player 7001 dealt 5,852; monster 58489 is left at 10,736/149,353 (7 %)
+```
+
+The prior packet for that monster showed 10,736 HP, and 10,736 + 5,852 =
+16,588 is the HP before the hit, which confirms the damage position. The
+Stats tab's DPS meter consumes these fields; see [stats.md](../stats.md).
+Do not trust the 2026-11-06 example's tail positions.
 
 **Notes**:
 - Sent for every hit in combat

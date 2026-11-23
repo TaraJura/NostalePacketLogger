@@ -7,7 +7,7 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 344 unittest cases, 6 GTK4 smokes, 42 fake-server bot
+- **Linux host**: 349 unittest cases, 6 GTK4 smokes, 43 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
   linux all test-host`, tests above. The host is **0.7.1**: the MCP now
   seeds `world.entities` from the attached client's log
@@ -34,6 +34,14 @@ the data layer in [database.md](database.md).
   restart/re-inject**; the host is 0.7.1. Covered by `test_minigame.py`,
   `gui_minigame_smoke.py` and `key-test`; the key press and player TARGET are
   **not yet live-verified**. See [minigame.md](minigame.md).
+- **Stats tab** (eighth GUI page, appended last): a player **DPS meter**.
+  Every `su` hit from a player (attacker type 1, positive damage) adds the
+  decoded damage (`args[12]`, target HP `args[15]/[16]`); the table shows
+  name, DPS, damage, hits, share, last hit and session total, with a
+  5/10/30/60 s or Session window and Reset. Partner/monster hits and
+  zero-damage buffs are ignored. Refreshes twice a second while visible;
+  collection continues in the background. Covered by `test_dpsmeter.py`
+  and `gui_stats_smoke.py`. See [stats.md](stats.md).
 - **Speed +** (**Malicious** tab, default 0): the DLL reads the server's
   `cond` speed, calls the client's own entity speed setter on the local
   player actor, and clamps the outgoing `walk` speed back to the server's
