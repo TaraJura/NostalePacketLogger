@@ -16,6 +16,12 @@ Packets we've seen in logs but haven't fully documented yet. When investigating,
 | Opcode | Dir | Context | Raw Example |
 |--------|-----|---------|-------------|
 | `gidx` | RECV | On spawn/map load | `gidx 1 4165102 682.916 Fallen_Angels 5 0\|0\|0` |
+| `toria` | SEND | Bushi King Defence raid (map 9307, 2026-11-23): one hit on a Bushi; the raid sends no `u_s`. Preceded by `ncif 3 <id>` | `toria 3 2490820` |
+| `toria_o` | RECV | Bushi King Defence raid start, with `evnt` and `toris_o` | `toria_o 1266` |
+| `toris_o` | RECV | Bushi King Defence raid start | `toris_o 1267` |
+| `trboss` | RECV | Bushi King Defence raid: HP of the Bushi King (vnum 839) at (6, 36), every ~10 s: `trboss 3 <id> <hp> <maxHp>` | `trboss 3 2490803 193262 193262` |
+| `tbboss` | RECV | Bushi King Defence raid: HP of the Bushi King at (66, 36), same format | `tbboss 3 2490802 193262 193262` |
+| `evnt` | RECV | Bushi King Defence raid start (timer?) | `evnt 1 0 -48000 -48000` |
 
 ---
 
