@@ -7,7 +7,7 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 351 unittest cases, 6 GTK4 smokes, 43 fake-server bot
+- **Linux host**: 352 unittest cases, 6 GTK4 smokes, 43 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
   linux all test-host`, tests above. The host is **0.7.1**: the MCP now
   seeds `world.entities` from the attached client's log
@@ -71,7 +71,10 @@ the data layer in [database.md](database.md).
   the client's own `npc_req`/`n_run` or DLL log (refusing an id this map's
   entity list knows as another NPC — ids are per map; a stale one opened
   Carve Runes); with no Bibi visible it uses the portable NosBazar medal
-  (vnum 1955, `u_i` from the Main/Etc bag) and waits for `wopen 32`. It
+  (vnum 1955, `u_i` from the Main/Etc bag) and waits for `wopen 32`. When the
+  bazaar is already open before the attach there is no new `wopen`; the
+  verified Bibi dialog (460; Carve Runes 11009 is never clicked) plus the
+  listing answer continue the scan. It
   searches `c_blist` at 2.5 s
   pacing, parses the real 15-field `rc_blist` (minimum visible price,
   truncation-aware), keeps old rows across refresh cycles, sorts by profit

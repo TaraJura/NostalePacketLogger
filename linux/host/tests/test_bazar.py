@@ -368,6 +368,7 @@ class ControllerTests(unittest.TestCase):
         else:
             controller.start_monitor(engine.world)
         controller.tick(engine.world)
+        engine.feed_text("RECV", "npc_req 2 9584 460")
         clock.advance(0.31)
         controller.tick(engine.world)
         clock.advance(0.31)
@@ -384,6 +385,7 @@ class ControllerTests(unittest.TestCase):
         controller.start_monitor(engine.world)
         controller.tick(engine.world)
         self.assertEqual(sent, ["npc_req 2 9584"])
+        engine.feed_text("RECV", "npc_req 2 9584 460")
         clock.advance(0.31)
         controller.tick(engine.world)
         self.assertEqual(sent[-1], "n_run 60 0 2 9584")
@@ -406,29 +408,38 @@ class ControllerTests(unittest.TestCase):
         ))
 
     def test_open_requires_the_bazaar_window(self) -> None:
-        # rc_blist is answered even without the bazaar window (live
-        # 2026-11-23: it answered while Carve Runes was open), so only a
-        # wopen 32 after the burst may count as the bazaar.
+        # npc_req replies with the Carve Runes dialog (11009): its option
+        # must never be clicked, and the search answer alone is no proof.
         item = BazarItem("bubbl", build_search_packet([2174]))
         controller, engine, clock, sent = self._controller([item])
         controller.start_monitor(engine.world)
-        controller.tick(engine.world)
+        controller.tick(engine.world)  # npc_req
+        engine.feed_text("RECV", "npc_req 2 9584 11009")
         clock.advance(0.31)
         controller.tick(engine.world)
+        self.assertEqual(controller.phase, "waiting")
+        self.assertIn("dialog", controller.last_error)
+        self.assertNotIn("n_run 60 0 2 9584", sent)
+
+    def test_already_open_bazaar_continues_without_wopen(self) -> None:
+        # The bazaar was opened before this host attached, so the server
+        # sends no fresh wopen 32 (live 2026-11-23). The verified Bibi
+        # dialog plus the listing answer must start the pass anyway.
+        item = BazarItem("bubbl", build_search_packet([2174]))
+        controller, engine, clock, sent = self._controller([item])
+        controller.start_monitor(engine.world)
+        controller.tick(engine.world)  # npc_req
+        engine.feed_text("RECV", "npc_req 2 9584 460")
         clock.advance(0.31)
-        controller.tick(engine.world)
-        engine.feed_text("RECV", "wopen  83 0 0 0")
+        controller.tick(engine.world)  # n_run
+        clock.advance(0.31)
+        controller.tick(engine.world)  # c_blist + c_slist
         engine.feed(Packet(Kind.RECV, _response(1000), clock.now))
         controller.tick(engine.world)
-        self.assertEqual(controller.phase, "open")
-        self.assertEqual(
-            [
-                packet
-                for packet in sent
-                if packet.startswith("c_blist 0 0 0 0 0 0 0 0 1 ")
-            ],
-            [],
-        )
+        self.assertEqual(controller.phase, "pass")
+        self.assertTrue(engine.world.bazar.window_open)
+        controller.tick(engine.world)
+        self.assertIn("c_blist 0 0 0 0 0 0 0 0 1 2174", sent)
 
     def test_register_requires_an_open_bazaar_window(self) -> None:
         item = BazarItem(
@@ -868,6 +879,7 @@ class ControllerTests(unittest.TestCase):
         controller, engine, clock, sent = self._controller([item])
         self.assertTrue(controller.open_bazaar(engine.world))
         controller.tick(engine.world)
+        engine.feed_text("RECV", "npc_req 2 9584 460")
         clock.advance(0.31)
         controller.tick(engine.world)
         clock.advance(0.31)

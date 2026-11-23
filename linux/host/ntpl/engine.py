@@ -377,6 +377,16 @@ def _learn_bazar_open(world: WorldState, packet: Packet) -> None:
             state.open_option = option
             state.open_page = page
             state.option_learned = True
+            # A verified Bibi entity confirms the dialog id for this server;
+            # an unverified id might be another NPC (Carve Runes), so leave
+            # the known default in place then.
+            if (
+                entity is not None
+                and getattr(entity, "vnum", 0) == BIBI_VNUM
+                and state.dialog_npc_id == state.npc_req_id
+                and state.dialog_id is not None
+            ):
+                state.bazaar_dialog_id = state.dialog_id
 
 
 def _on_bazar_response(world: WorldState, packet: Packet) -> None:
@@ -434,6 +444,9 @@ def _on_npc_req(world: WorldState, packet: Packet) -> None:
     else:
         state.dialog_npc_id = entity_id
         state.dialog_at = packet.timestamp
+        # npc_req 2 <entityId> <dialogId>: 460 is Bibi Basar.
+        reply = packet.ints(3)
+        state.dialog_id = reply[2] if reply is not None else None
 
 
 def _on_npc_run(world: WorldState, packet: Packet) -> None:
@@ -494,6 +507,7 @@ def _reset_bazar_map_state(world: WorldState) -> None:
     state.window_at = 0.0
     state.npc_id = None
     state.dialog_npc_id = None
+    state.dialog_id = None
     state.npc_req_id = None
     state.n_run = None
 

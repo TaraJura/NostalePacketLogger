@@ -87,7 +87,9 @@ navbar**: **NosMall** (ND-cost items, gold per ND) and **NPC resale**
   refused (ids are per map instance; it once opened Carve Runes), so walk
   next to a Bibi on the current map before starting. With no Bibi visible the
   controller uses the portable **NosBazar medal** (vnum 1955) from the
-  Main/Etc bag (`u_i`) and waits for the bazaar window. One **Monitor Start**
+  Main/Etc bag (`u_i`) and waits for the bazaar window. If the bazaar is
+  **already open**, it continues the scan without reopening it (the Bibi
+  dialog reply 460 plus the listing answer are the proof). One **Monitor Start**
   searches both third-level views; each has its
   own **Only priced** filter and row count. The **NosMall** view shows ND
   items with the profit in gold per ND; **NPC resale** shows items bought at
@@ -156,7 +158,7 @@ two more wolves that joined the fight.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 351 Python unit tests
+make -C linux host-test                      # 352 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux key-test                       # DLL KEY| name parsing
 make -C linux gui-test                       # six headless GTK4 smokes (xvfb)
@@ -235,7 +237,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 351 unit tests pass, the six GTK4 window smokes
+The Linux port builds, its 352 unit tests pass, the six GTK4 window smokes
 and 41 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 

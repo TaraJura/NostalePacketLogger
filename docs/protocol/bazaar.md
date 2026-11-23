@@ -38,7 +38,15 @@ socket even when no bazaar window is open, but it **ignores `c_reg`** without
 it (live 2026-11-23: searches were answered while Carve Runes was open and
 every registration went unanswered; the same bubble registered fine once
 the bazaar window was open). The host therefore requires a fresh `wopen 32`
-after the open burst and checks it again before each `c_reg`.
+after the open burst and checks it again before each `c_reg` — except when
+the bazaar was **already open before the host attached**: no new `wopen`
+arrives then, so a verified Bibi dialog (`[RECV] npc_req 2 <id> 460`) plus
+the `rc_blist` answer to the initial `c_blist` is accepted and the scan
+continues (live 2026-11-23, the reported case).
+
+The dialog id identifies the NPC before any option is clicked: Bibi opens
+**460**, Carve Runes opened **11009**. The host refuses to click an option
+when the reply dialog does not match the known Bibi dialog.
 
 A GUI that attaches after login can recover the id/option from the client's
 DLL log (`spawnlog.load_bazaar_open`). Entity ids are per map instance: the

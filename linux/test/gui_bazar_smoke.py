@@ -86,7 +86,7 @@ class BazarServer:
             self._send("STATUS|POS 25 117 14881134 0\n")
             return
         if text.startswith("SEND|npc_req 2 9584"):
-            self._send("RECV|npc_req 2 9584 439\n")
+            self._send("RECV|npc_req 2 9584 460\n")
             return
         if text.startswith("SEND|n_run 60 0 2 9584"):
             # Type 32 is the NosBazar window (a warehouse is 28; the live

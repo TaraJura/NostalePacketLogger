@@ -67,6 +67,12 @@ BAZAR_WINDOW_TYPE = 32
 #: nearby Bibi Basar: ``u_i 1 <charId> <bag> <slot> 0 0``. The controller
 #: falls back to it when no Bibi entity is visible.
 BAZAR_MEDAL_VNUM = 1955
+#: The dialog id the server opens for Bibi Basar (live 2026-11-23:
+#: ``[RECV] npc_req 2 10284 460``). It identifies the NPC before any option
+#: is clicked, so a stale id that is another NPC (Carve Runes opened 11009)
+#: never gets its dialog option pressed. A manual opening with a verified
+#: Bibi entity can replace it.
+BAZAR_DIALOG_ID = 460
 
 #: The client drops faster searches; Nostale-NB uses 2.5 s, the relist loop 2 s.
 SEARCH_INTERVAL_S = 2.5
@@ -720,6 +726,11 @@ class BazarState:
     #: option it clicked (``n_run``), with their timestamps.
     dialog_npc_id: int | None = None
     dialog_at: float = 0.0
+    #: Dialog id from the last ``[RECV] npc_req`` reply (460 for Bibi).
+    dialog_id: int | None = None
+    #: Expected Bibi dialog id; a different dialog means the id belongs to
+    #: another NPC and its option must not be clicked.
+    bazaar_dialog_id: int | None = BAZAR_DIALOG_ID
     npc_req_id: int | None = None
     npc_req_at: float = 0.0
     n_run: tuple[int, int, int] | None = None
@@ -931,6 +942,9 @@ class BazarController:
         #: True while the open burst waits for the portable NosBazar medal,
         #: which replaces npc_req/n_run when no Bibi Basar is visible.
         self._open_medal = False
+        #: True once the npc_req reply carried the Bibi dialog id; the burst
+        #: may then click its option and accept an already-open window.
+        self._open_dialog_ok = False
         self._open_step = 0
         self._open_next = 0.0
         self._open_deadline = 0.0
@@ -1232,6 +1246,7 @@ class BazarController:
             return
 
         self._open_medal = False
+        self._open_dialog_ok = False
         self._open_npc = candidates[0]
         self._open_seen = state.response_count
         self._open_window_seen = state.window_count
@@ -1273,17 +1288,26 @@ class BazarController:
                 return
             self.version += 1
             return
-        if (
-            state.response_count > self._open_seen
-            and state.window_count > self._open_window_seen
+        fresh_window = state.window_count > self._open_window_seen
+        answered = state.response_count > self._open_seen
+        # The full burst (npc_req, n_run, initial c_blist/c_slist) must have
+        # been sent: a wopen 32 often arrives right after n_run, before the
+        # initial listing request, and accepting then would skip it.
+        if self._open_step >= 3 and (
+            fresh_window or (self._open_dialog_ok and answered)
         ):
-            # A search answer alone is not proof: the server answers
-            # c_blist even when no bazaar window is open (live 2026-11-23
-            # it answered while Carve Runes was open). Only a wopen 32
-            # opened after the burst means the bazaar UI exists; without it
-            # the server ignores c_reg.
+            # A fresh wopen 32 is the normal proof. When the bazaar window
+            # was opened before this host attached, the server sends no
+            # wopen again (live 2026-11-23, the reported "already open"
+            # case); the verified Bibi dialog id plus the listing answer
+            # prove the window exists, so continue the scan.
+            if not fresh_window:
+                state.window_open = True
             state.open = True
-            self._log("NosBazar window is open")
+            self._log(
+                "NosBazar window is open"
+                + ("" if fresh_window else " (already open)")
+            )
             if self.mode == "open":
                 self.mode = None
                 self.phase = "idle"
@@ -1306,6 +1330,31 @@ class BazarController:
             self.phase = "waiting"
             self._wait_until = now + self.config.refresh
             return
+        if self._open_step == 1 and not self._open_dialog_ok:
+            # The npc_req reply identifies the NPC before any option is
+            # clicked: Bibi opens dialog 460, Carve Runes opened 11009
+            # (live 2026-11-23). Never click another NPC's option.
+            if state.dialog_npc_id != self._open_npc:
+                return
+            expected = state.bazaar_dialog_id
+            if expected is not None and state.dialog_id != expected:
+                state.open = False
+                self.last_error = (
+                    f"NPC {self._open_npc} opened dialog "
+                    f"{state.dialog_id}, not the bazaar ({expected}); move "
+                    "next to Bibi Basar"
+                )
+                self._log(self.last_error)
+                if self.mode == "open":
+                    self.mode = None
+                    self.phase = "idle"
+                    self.version += 1
+                    return
+                self.phase = "waiting"
+                self._wait_until = now + self.config.refresh
+                return
+            self._open_dialog_ok = True
+            self.version += 1
         if now < self._open_next:
             return
 

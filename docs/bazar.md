@@ -124,9 +124,14 @@ update both tables and never clear the other view.
   Start cannot open the wrong dialog. No search spam.
 - **Opening** — a visible Bibi: replay `npc_req`, then `n_run`, then the
   initial `c_blist`/`c_slist`. Without one: use the NosBazar medal
-  (`u_i 1 <charId> <bag> <slot> 0 0`). Success is a **fresh `wopen 32`**
-  (the NosBazar window) plus an `rc_blist` on the NPC path; the medal path
-  only needs the window. A search answer alone is not enough: the
+  (`u_i 1 <charId> <bag> <slot> 0 0`). The `npc_req` reply names the dialog
+  (`npc_req 2 <id> 460` for Bibi); a different dialog (Carve Runes opened
+  11009, live 2026-11-23) aborts **before** its option is clicked. Success
+  on the NPC path is a **fresh `wopen 32`** or, when the bazaar was already
+  open before the host attached, the verified Bibi dialog plus the `rc_blist`
+  answer — the server sends no new `wopen` in that case, and the scan
+  continues. The medal path only needs the window. A search answer alone is
+  not enough when the dialog is unverified: the
   server answers `c_blist` even with no bazaar window open (live
   2026-11-23 it answered while Carve Runes was open) while `c_reg` is
   ignored without the window. Timeout → waiting.
