@@ -192,7 +192,7 @@ def start_fake_client(scene) -> int:
             connection.sendall(b"RECV|npc_req 2 9584 439\n")
             return
         if text.startswith("SEND|n_run 60 0 2 9584"):
-            connection.sendall(b"RECV|wopen  28 0 9584 0\n")
+            connection.sendall(b"RECV|wopen 32 2 642\n")
             return
         if not text.startswith("SEND|c_blist "):
             return

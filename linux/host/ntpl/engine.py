@@ -18,7 +18,7 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .bazar import BazarState
+from .bazar import BAZAR_WINDOW_TYPE, BazarState
 from .protocol import Kind, Packet
 
 
@@ -362,6 +362,12 @@ def _learn_bazar_open(world: WorldState, packet: Packet) -> None:
     state = world.bazar
     if state.npc_req_id is None:
         return
+    # Never learn a non-bazaar dialog: the id is per entity instance and a
+    # stale one on another map is a different NPC (live 2026-11-23: Carve
+    # Runes). The entity list is authoritative.
+    entity = world.entities.get(state.npc_req_id)
+    if entity is not None and getattr(entity, "vnum", 0) != BIBI_VNUM:
+        return
     if packet.timestamp - state.npc_req_at > 15.0:
         return
     state.npc_id = state.npc_req_id
@@ -397,6 +403,23 @@ def _on_bazar_register_ack(world: WorldState, packet: Packet) -> None:
     state.register_count += 1
     state.register_value = values[0] if values else 1
     state.register_at = time.monotonic()
+
+
+def _on_window_open(world: WorldState, packet: Packet) -> None:
+    # wopen <type> <page> ...: a server window opened. Type 32 is NosBazar;
+    # rc_blist alone is no proof because searches are answered even when the
+    # window is not open.
+    if packet.direction is not Kind.RECV:
+        return
+    values = packet.ints(1)
+    if not values:
+        return
+    state = world.bazar
+    state.window_type = values[0]
+    state.window_at = time.monotonic()
+    if values[0] == BAZAR_WINDOW_TYPE:
+        state.window_open = True
+        state.window_count += 1
 
 
 def _on_npc_req(world: WorldState, packet: Packet) -> None:
@@ -466,6 +489,9 @@ def _reset_bazar_map_state(world: WorldState) -> None:
     """The bazaar window belongs to a map instance: NPC ids are map-specific."""
     state = world.bazar
     state.open = False
+    state.window_open = False
+    state.window_type = None
+    state.window_at = 0.0
     state.npc_id = None
     state.dialog_npc_id = None
     state.npc_req_id = None
@@ -977,6 +1003,7 @@ class Engine:
                 "gold": _on_gold,       # RECV: own gold
                 "rc_blist": _on_bazar_response,  # RECV: bazaar search answer
                 "rc_reg": _on_bazar_register_ack,  # RECV: c_reg accepted
+                "wopen": _on_window_open,  # RECV: a server window opened
                 "npc_req": _on_npc_req,  # SEND/RECV: NPC dialog
                 "n_run": _on_npc_run,   # SEND: NPC dialog option
                 "c_blist": _on_bazar_client_open,  # SEND: bazaar listing

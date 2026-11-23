@@ -31,11 +31,19 @@ constant: Nostale-NB hardcodes `10188`, while the live 2026-11-19 session used
 `10284`. The packet client learns the id and option from the user's own
 opening (`npc_req` + `n_run` + `c_blist`/`c_slist`) and replays them.
 
-`wopen` is **not** proof of the bazaar: a warehouse opens with
-`wopen 28 0 1322 0`. Wait for `rc_blist`.
+`wopen <type>` names the window that opened: **type 32 is the NosBazar**
+(`wopen 32 2 642`), a warehouse is 28, Carve Runes is 83. `rc_blist` alone
+is **not** proof: the server answers `c_blist` searches over the packet
+socket even when no bazaar window is open, but it **ignores `c_reg`** without
+it (live 2026-11-23: searches were answered while Carve Runes was open and
+every registration went unanswered; the same bubble registered fine once
+the bazaar window was open). The host therefore requires a fresh `wopen 32`
+after the open burst and checks it again before each `c_reg`.
 
 A GUI that attaches after login can recover the id/option from the client's
-DLL log (`spawnlog.load_bazaar_open`).
+DLL log (`spawnlog.load_bazaar_open`). Entity ids are per map instance: the
+learned id is only replayed while the current map's entity list knows it as
+Bibi Basar (vnum 793), never when the same id is a different NPC.
 
 ## Searching
 
@@ -133,7 +141,7 @@ c_reg 0 <invTab> <slot> <unk1> <unk2> <durability> 0 <amount> <price> <tax> <med
 | `0` | Packet type |
 | `invTab` | `0` Equip, `1` Main, `2` Etc |
 | `slot` | Slot index inside that bag (from `inv`/`ivn`) |
-| `unk1`, `unk2` | Per-item constants. Main/Etc: `8 + INDEX[0]` and `4` (see below); equipment keeps its own values. Nostale-NB's `10 3` pair is silently rejected on FrosTale. |
+| `unk1`, `unk2` | Per-item constants. Main/Etc: `unk1 = 8 + INDEX[0]`; `unk2` is item-specific (3, 4 and 5 all seen on accepted packets). |
 | `durability` | Default `1` |
 | `isPackage` | Always `0` here |
 | `amount` | Pieces per listing (default 5) |
@@ -154,15 +162,19 @@ item's `min_price` floor, and the port refuses to relist when no floor is set.
 
 **`rc_reg <value>` is the acknowledgement** (RECV, ~0.3-0.6 s after an
 accepted c_reg; value 1 in every live capture on FrosTale). A c_reg the
-server ignores gets no packet at all — that is how a wrong item-constant
-pair is detected. Live 2026-11-23: `c_reg 0 2 44 10 3 1 0 5 11496 28 2`
-was ignored three times, while the same item with `10 4` was accepted.
+server ignores gets no packet at all. Live 2026-11-23: every registration
+for a Speech Bubble was ignored — both the configured pair and a `10 4`
+variant — because the bazaar window was not open (Carve Runes was, type
+83); the server also answers searches in that state, so `rc_blist` is not
+proof. With `wopen 32` open, the same item family registers normally.
 
-The four item constants are derived from Item.dat for Main/Etc items:
-`unk1 = 8 + INDEX[0]`, `unk2 = 4` (equipment carries its own values). The
-client's own packets confirm it: `5370` INDEX[0] 1 → `9 4 1 0`; the
-Etc stackables (INDEX[0] 2) → `10 4 4 0`. A stale `unk2` (e.g. the
-Nostale-NB default 3) makes the server drop the packet silently.
+The **first** constant follows Item.dat for Main/Etc items: `unk1 = 8 +
+INDEX[0]` (5370 INDEX[0] 1 → 9; the Etc stackables INDEX[0] 2 → 10). The
+remaining constants are item-specific, not derivable: the client's own
+packets show `2072` (Bell of Sweet Home) → `10 3 1 0`, `2077` (Pet Food) →
+`10 5 1 0`, `1363` → `9 2 1 0`, `5370` → `9 4 1 0`. Do not force `unk2`;
+copy it from a client relist of the same item if a registration is ignored
+with the window open.
 
 ## Inventory needed for relisting
 

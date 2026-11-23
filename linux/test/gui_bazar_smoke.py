@@ -89,7 +89,9 @@ class BazarServer:
             self._send("RECV|npc_req 2 9584 439\n")
             return
         if text.startswith("SEND|n_run 60 0 2 9584"):
-            self._send("RECV|wopen  28 0 9584 0\n")
+            # Type 32 is the NosBazar window (a warehouse is 28; the live
+            # server ignores c_reg without this window).
+            self._send("RECV|wopen 32 2 642\n")
             return
         if text.startswith("SEND|c_reg "):
             # The live server acknowledges an accepted c_reg with rc_reg 1.

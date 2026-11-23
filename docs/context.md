@@ -7,7 +7,7 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
-- **Linux host**: 341 unittest cases, 6 GTK4 smokes, 42 fake-server bot
+- **Linux host**: 344 unittest cases, 6 GTK4 smokes, 42 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
   linux all test-host`, tests above. The host is **0.7.1**: the MCP now
   seeds `world.entities` from the attached client's log
@@ -60,7 +60,9 @@ the data layer in [database.md](database.md).
   No game restart.
 - **NosBazar tab** (fourth GUI page): monitor + floor-protected relist ported
   from `TaraJura/Nostale-NB`. It learns the Bibi Basar entity id/option from
-  the client's own `npc_req`/`n_run` or DLL log, searches `c_blist` at 2.5 s
+  the client's own `npc_req`/`n_run` or DLL log (refusing an id this map's
+  entity list knows as another NPC — ids are per map; a stale one opened
+  Carve Runes), searches `c_blist` at 2.5 s
   pacing, parses the real 15-field `rc_blist` (minimum visible price,
   truncation-aware), keeps old rows across refresh cycles, sorts by profit
   and has an **Only priced** filter. Relist is gated by the relist set (a
@@ -69,8 +71,8 @@ the data layer in [database.md](database.md).
   **Group actions…** (select/unselect all, relist/stop all shown or
   selected); the live checkbox, a character name, a positive floor and an
   inventory slot, reports **register accepted (rc_reg)** or **register
-  ignored (no rc_reg)** (the c_reg item constants are repaired from Item.dat
-  before a pass), and **Relist Start**
+  ignored (no rc_reg)** (a c_reg needs the bazaar window — `wopen 32` — and
+  `unk1` is repaired from Item.dat before a pass; `unk2` is item-specific), and **Relist Start**
   searches only the relist set while Monitor searches every enabled item.
   The page has a second-level navbar (**Inventory**,
   **Relist**, **Monitor**, **Items**, **Configuration**); **Monitor** has a

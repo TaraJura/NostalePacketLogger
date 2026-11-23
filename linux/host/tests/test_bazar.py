@@ -372,6 +372,7 @@ class ControllerTests(unittest.TestCase):
         controller.tick(engine.world)
         clock.advance(0.31)
         controller.tick(engine.world)
+        engine.feed_text("RECV", "wopen 32 2 642")
         engine.feed(
             Packet(Kind.RECV, _response(1000), clock.now)
         )
@@ -392,6 +393,7 @@ class ControllerTests(unittest.TestCase):
             "c_blist 0 0 0 0 0 0 0 0 0",
             "c_slist 0 0 0",
         ])
+        engine.feed_text("RECV", "wopen 32 2 642")
         engine.feed(Packet(Kind.RECV, _response(1000), clock.now))
         controller.tick(engine.world)
         controller.tick(engine.world)
@@ -402,6 +404,68 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual((quote.status, quote.price, quote.seller), (
             "ok", 13798, "Seller"
         ))
+
+    def test_open_requires_the_bazaar_window(self) -> None:
+        # rc_blist is answered even without the bazaar window (live
+        # 2026-11-23: it answered while Carve Runes was open), so only a
+        # wopen 32 after the burst may count as the bazaar.
+        item = BazarItem("bubbl", build_search_packet([2174]))
+        controller, engine, clock, sent = self._controller([item])
+        controller.start_monitor(engine.world)
+        controller.tick(engine.world)
+        clock.advance(0.31)
+        controller.tick(engine.world)
+        clock.advance(0.31)
+        controller.tick(engine.world)
+        engine.feed_text("RECV", "wopen  83 0 0 0")
+        engine.feed(Packet(Kind.RECV, _response(1000), clock.now))
+        controller.tick(engine.world)
+        self.assertEqual(controller.phase, "open")
+        self.assertEqual(
+            [
+                packet
+                for packet in sent
+                if packet.startswith("c_blist 0 0 0 0 0 0 0 0 1 ")
+            ],
+            [],
+        )
+
+    def test_register_requires_an_open_bazaar_window(self) -> None:
+        item = BazarItem(
+            "bubbl",
+            build_search_packet([2174]),
+            vnum=2174,
+            inv_tab=2,
+            amount=5,
+            min_price=1,
+        )
+        controller, engine, clock, sent = self._controller(
+            [item], character="root1"
+        )
+        engine.feed_text("RECV", "inv 2 7.2174.5")
+        engine.world.bazar.window_open = False
+        quote = BazarQuote(item=item, price=44000, seller="Other")
+        controller._maybe_relist(engine.world, item, quote, clock.now)
+        self.assertEqual(quote.status, "no-window")
+        self.assertEqual(
+            [packet for packet in sent if packet.startswith("c_reg ")], []
+        )
+
+    def test_known_non_bibi_npc_id_is_never_opened(self) -> None:
+        # Entity ids are per map: the learned id now points at Carve Runes
+        # (live 2026-11-23). Pressing Start must wait, not open that dialog.
+        item = BazarItem("bubbl", build_search_packet([2174]))
+        controller, engine, clock, sent = self._controller([item])
+        controller.config.npc_id = 54483
+        engine.world.bazar.npc_id = 54483
+        engine.world.entities[54483] = Entity(
+            54483, 2, vnum=9999, x=10, y=10
+        )
+        controller.start_monitor(engine.world)
+        self.assertTrue(controller.running)
+        self.assertEqual(controller.phase, "waiting")
+        self.assertIn("not visible", controller.last_error)
+        self.assertEqual(sent, [])
 
     def test_search_pacing(self) -> None:
         first = BazarItem("a", build_search_packet([1]))
@@ -758,8 +822,10 @@ class ControllerTests(unittest.TestCase):
             item_label=lambda candidate: "Speech Bubble",
         )
         controller.set_items([item], character="root1", refresh=30)
+        engine = Engine()
+        engine.world.bazar.window_open = True
         controller._maybe_relist(
-            Engine().world, item, BazarQuote(item=item), clock.now
+            engine.world, item, BazarQuote(item=item), clock.now
         )
         self.assertEqual(
             logs,
@@ -775,6 +841,7 @@ class ControllerTests(unittest.TestCase):
         controller.tick(engine.world)
         clock.advance(0.31)
         controller.tick(engine.world)
+        engine.feed_text("RECV", "wopen 32 2 642")
         engine.feed(Packet(Kind.RECV, "rc_blist 0", clock.now))
         controller.tick(engine.world)
         self.assertEqual(controller.mode, None)
@@ -849,6 +916,7 @@ class ControllerTests(unittest.TestCase):
         controller.start_monitor(engine.world)
         controller.tick(engine.world)
         self.assertEqual(controller.phase, "waiting")
+        engine.feed_text("RECV", "wopen 32 2 642")
         engine.feed(Packet(Kind.RECV, "rc_blist 0", clock.now))
         controller.tick(engine.world)
         self.assertEqual(controller.phase, "pass")

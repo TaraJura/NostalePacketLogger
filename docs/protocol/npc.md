@@ -12,9 +12,11 @@ Other live dialogs used `n_run 16 1 2 3095` and `n_run 5002 0 2 9583`, so the
 option id is NPC-specific and the second field is a page/modifier. The third
 field is the entity type (2 = NPC) and the fourth the entity id.
 
-A server `wopen` follows some dialog choices (a warehouse used
-`wopen 28 0 1322 0`; NosBazar used `wopen 32 2 717`). `wopen` is not unique to
-one window; the NosBazar is confirmed by `rc_blist` instead
+A server `wopen` follows some dialog choices and its **type** names the
+window: NosBazar is `wopen 32 2 642`, a warehouse `wopen 28 0 1322 0`,
+Carve Runes `wopen 83 0 0 0`. `rc_blist` alone does not prove the bazaar
+window is open — searches are answered without it while `c_reg` is ignored
+— so the host requires the `wopen 32` and checks the Bibi vnum
 ([bazaar.md](bazaar.md)).
 
 ## `npc_req` (SEND/RECV)

@@ -256,10 +256,22 @@ def main() -> int:
                 app.bazar_relist_list.get_selected_rows()
             )
             result["group_button"] = app.bazar_relist_group_button is not None
-            # The c_reg item constants are repaired from Item.dat before a
-            # relist pass: INDEX[0] 2 -> UNK1 10, and the server expects
-            # UNK2 4 (the stale 10/3 pair is what broke live relisting).
-            bubble.unk1 = 10
+            # A repeated click on the only selected row unselects it.
+            toggle_row = _row_for(app.bazar_relist_list, feather.name)
+            app.bazar_relist_list.unselect_all()
+            app.bazar_relist_list.select_row(toggle_row)
+            app._relist_press_row = toggle_row
+            app._relist_press_only = True
+            app._bazar_relist_row_activated(
+                app.bazar_relist_list, toggle_row
+            )
+            result["toggle_unselect"] = len(
+                app.bazar_relist_list.get_selected_rows()
+            )
+            # The first c_reg constant is repaired from Item.dat before a
+            # relist pass: INDEX[0] 2 -> UNK1 10. UNK2 is item-specific and
+            # must be left exactly as configured.
+            bubble.unk1 = 9
             bubble.unk2 = 3
             result["repaired"] = app._bazar_repair_relist_fields()
             result["fixed_fields"] = (bubble.unk1, bubble.unk2)
@@ -298,10 +310,11 @@ def main() -> int:
                 and result["bulk_stop"] == 0
                 and result["bulk_all"] == 7
                 and result["unselected"] == 0
+                and result["toggle_unselect"] == 0
                 and result["group_button"] is True
                 and result["repaired"] == 1
-                and result["fixed_fields"] == (10, 4)
-                and result["saved_fields"] == (10, 4)
+                and result["fixed_fields"] == (10, 3)
+                and result["saved_fields"] == (10, 3)
                 and by_name[bubble.name].relist is False
                 and by_name[bubble.name].min_price == 1000
                 and by_name[feather.name].relist is True

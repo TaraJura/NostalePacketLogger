@@ -58,6 +58,10 @@ if TYPE_CHECKING:  # pragma: no cover - only for type hints
 
 #: The Bibi Basar NPC template vnum (``in 2 793 <entityId> ...``).
 BIBI_VNUM = 793
+#: ``wopen`` type of the NosBazar window (``wopen 32 2 <page>``). A search
+#: answer (``rc_blist``) is no proof that the window is open: the server
+#: answers searches regardless, while it ignores a ``c_reg`` without it.
+BAZAR_WINDOW_TYPE = 32
 
 #: The client drops faster searches; Nostale-NB uses 2.5 s, the relist loop 2 s.
 SEARCH_INTERVAL_S = 2.5
@@ -100,6 +104,7 @@ STATUS_TEXT = {
     "register-sent": "register accepted (rc_reg)",
     "register-no-ack": "register ignored (no rc_reg)",
     "register-unknown": "register sent (ack unknown)",
+    "no-window": "bazaar window not open",
     "quantity": "not enough in inventory",
     "no-slot": "not in inventory",
     "no-vnum": "no item vnum",
@@ -692,6 +697,12 @@ class BazarState:
     register_count: int = 0
     register_value: int = 0
     register_at: float = 0.0
+    #: ``wopen <type> ...``: the last window the server opened. Type 32 is
+    #: the NosBazar window. ``open`` only says a search was answered.
+    window_type: int | None = None
+    window_count: int = 0
+    window_at: float = 0.0
+    window_open: bool = False
     #: The Bibi Basar entity id and the dialog option/page that opened it,
     #: learned from the client's own packets when the user opens the bazaar.
     npc_id: int | None = None
@@ -911,6 +922,7 @@ class BazarController:
         self._pass_started = 0.0
         self._open_npc: int | None = None
         self._open_seen = 0
+        self._open_window_seen = 0
         self._open_step = 0
         self._open_next = 0.0
         self._open_deadline = 0.0
@@ -1093,6 +1105,7 @@ class BazarController:
         elif self.phase == "waiting":
             if (
                 world.bazar.open
+                and world.bazar.window_open
                 and moment - world.bazar.last_response_at <= OPEN_FRESH_S
             ):
                 # The user opened the bazaar by hand while we were waiting.
@@ -1129,22 +1142,38 @@ class BazarController:
         if nearest is not None:
             candidates.append(nearest[1])
         state = world.bazar
+        # Only an id that is currently a Bibi Basar entity may be used. A
+        # learned or configured id belongs to an entity instance; on another
+        # map the same id is a different NPC (live 2026-11-23: a stale id
+        # opened Carve Runes instead of the bazaar).
         for value in (state.npc_id, self.config.npc_id):
-            if value is not None and value not in candidates:
-                candidates.append(value)
+            if value is None or value in candidates:
+                continue
+            entity = world.entities.get(value)
+            if entity is not None and getattr(entity, "vnum", 0) != BIBI_VNUM:
+                # A known non-Bibi entity: never talk to it. An id missing
+                # from the entity list is still allowed, because an NPC that
+                # spawned before the host attached may not be seeded.
+                continue
+            candidates.append(value)
         return candidates
 
     def _begin_open(self, world: "WorldState", now: float) -> None:
         state = world.bazar
-        if state.open and now - state.last_response_at <= OPEN_FRESH_S:
+        if (
+            state.open
+            and state.window_open
+            and now - state.last_response_at <= OPEN_FRESH_S
+        ):
             self._begin_pass(world, now)
             return
 
         candidates = self._bibi_candidates(world)
         if not candidates:
             self.last_error = (
-                "Bibi Basar (NosBazar NPC) is unknown; walk to one and open "
-                "the bazaar once so the client id can be learned"
+                "Bibi Basar is not visible on this map; walk next to one, "
+                "then start again (a stale id from another map is never "
+                "used, it would open the wrong NPC)"
             )
             self._log(self.last_error)
             if self.mode == "open":
@@ -1158,6 +1187,7 @@ class BazarController:
 
         self._open_npc = candidates[0]
         self._open_seen = state.response_count
+        self._open_window_seen = state.window_count
         self._open_step = 0
         self._open_next = now
         self._open_deadline = now + OPEN_TIMEOUT_S
@@ -1165,9 +1195,15 @@ class BazarController:
 
     def _open_tick(self, world: "WorldState", now: float) -> None:
         state = world.bazar
-        if state.response_count > self._open_seen:
-            # The server answered the initial listing request: the window is
-            # open and price searches are allowed.
+        if (
+            state.response_count > self._open_seen
+            and state.window_count > self._open_window_seen
+        ):
+            # A search answer alone is not proof: the server answers
+            # c_blist even when no bazaar window is open (live 2026-11-23
+            # it answered while Carve Runes was open). Only a wopen 32
+            # opened after the burst means the bazaar UI exists; without it
+            # the server ignores c_reg.
             state.open = True
             self._log("NosBazar window is open")
             if self.mode == "open":
@@ -1465,6 +1501,16 @@ class BazarController:
             self._log(
                 f"{self._item_label(item)}: not relisted "
                 "(previous c_reg still pending)"
+            )
+            return
+        if not world.bazar.window_open:
+            # The server ignores c_reg without the NosBazar window; a search
+            # answer does not prove it is open (live 2026-11-23).
+            quote.status = "no-window"
+            quote.detail = "the NosBazar window is not open"
+            self._log(
+                f"{self._item_label(item)}: not relisted "
+                "(the NosBazar window is not open)"
             )
             return
         if item.vnum is None or item.vnum <= 0:

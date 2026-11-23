@@ -66,7 +66,8 @@ navbar**: **NosMall** (ND-cost items, gold per ND) and **NPC resale**
   all shown**, **Unselect all**, **Relist all shown**, **Stop relisting all
   shown**, **Relist selected** and **Stop relisting selected**. A single tick
   updates its row in place and renders keep the scroll position, so a long
-  list no longer jumps to the top. Select an item, set its **Item vnum**, **Tab**, **Amount** and a
+  list no longer jumps to the top; clicking the only selected row again
+  unselects it. Select an item, set its **Item vnum**, **Tab**, **Amount** and a
   positive **Min price**; the badge reads **ready** / **needs floor** /
   **needs vnum/tab** / **not relisting**. Fill
   **Character** with your own name, tick **Allow live re-listing**, then
@@ -74,13 +75,18 @@ navbar**: **NosMall** (ND-cost items, gold per ND) and **NPC resale**
   cheapest other listing by one gold, never below the floor; the status
   reports **register accepted (rc_reg)** when the server answers, or
   **register ignored (no rc_reg)** when it silently drops the packet (the
-  c_reg item constants are repaired from Item.dat before each pass).
+  bazaar window must be open — `wopen 32`, a search answer alone is not
+  proof — and `unk1` is repaired from Item.dat before each pass; `unk2` is
+  item-specific).
   The **Items** editor carries the same two tracking switches, **Monitor**
   and **Relist**.
 - **Monitor** — starts/stops searches, opens the Bibi Basar dialog through
   the client's own send path, learns the map/session NPC id and dialog option
   from your own opening (or the DLL log), and searches at the required 2.5 s
-  pacing. One **Monitor Start** searches both third-level views; each has its
+  pacing. A learned id that this map's entity list knows as another NPC is
+  refused (ids are per map instance; it once opened Carve Runes), so walk
+  next to a Bibi on the current map before starting. One **Monitor Start**
+  searches both third-level views; each has its
   own **Only priced** filter and row count. The **NosMall** view shows ND
   items with the profit in gold per ND; **NPC resale** shows items bought at
   an NPC, e.g. Pet Food or Bell of Sweet Home, with the **Markup** column
@@ -148,7 +154,7 @@ two more wolves that joined the fight.
 ```bash
 sudo apt install g++-mingw-w64-i686          # once
 make -C linux all test-host                  # DLL + injector + test fixtures
-make -C linux host-test                      # 341 Python unit tests
+make -C linux host-test                      # 344 Python unit tests
 make -C linux speed-test                     # DLL speed-boost parsing and walk clamp
 make -C linux key-test                       # DLL KEY| name parsing
 make -C linux gui-test                       # six headless GTK4 smokes (xvfb)
@@ -225,7 +231,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-The Linux port builds, its 341 unit tests pass, the six GTK4 window smokes
+The Linux port builds, its 344 unit tests pass, the six GTK4 window smokes
 and 41 bot smoke tests pass, and the real injector has been run against
 the **live NosTale client** under Wine 11:
 

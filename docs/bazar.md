@@ -37,6 +37,11 @@ full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
    client learns the map-specific NPC entity id and dialog option from your
    own `npc_req`/`n_run` packets (or from this client's DLL log if the GUI
    attached later). The id appears under **Configuration → Bibi id**.
+   Entity ids are **per map**: a learned id is only used while this map's
+   entity list still shows it as Bibi Basar (vnum 793). If the same id is a
+   different NPC — live 2026-11-23: it opened **Carve Runes** — it is
+   refused and the controller waits, so changing map needs another manual
+   bazaar opening (or walking next to a Bibi so her `in` packet is seen).
 3. Open the **Inventory** section. It lists every slot you own automatically
    from the live `inv`/`ivn` stream (backfilled from the DLL log after a late
    attach): the real item name (local DB first, then Item.dat), bag/slot,
@@ -106,10 +111,17 @@ update both tables and never clear the other view.
 `ntpl.bazar.BazarController` is a tick-driven state machine; the GUI calls
 `tick()` every 100 ms and feeds it the engine's `WorldState`.
 
-- **Waiting** — no NPC id known: report “walk to Bibi Basar and open the
-  bazaar once”, retry after the refresh interval. No search spam.
+- **Waiting** — no usable NPC id: report “Bibi Basar is not visible on this
+  map; walk next to one”, retry after the refresh interval. A learned id
+  that this map's entity list knows as another NPC (same id, different
+  entity instance) is never used, so Start cannot open the wrong dialog. No
+  search spam.
 - **Opening** — replay `npc_req`, then `n_run`, then the initial
-  `c_blist`/`c_slist`; success is an `rc_blist`. Timeout → waiting.
+  `c_blist`/`c_slist`; success is a **fresh `wopen 32`** (the NosBazar
+  window) plus an `rc_blist`. A search answer alone is not enough: the
+  server answers `c_blist` even with no bazaar window open (live
+  2026-11-23 it answered while Carve Runes was open) while `c_reg` is
+  ignored without the window. Timeout → waiting.
 - **Pass** — one search in flight, 2.5 s between searches, 5 s per answer.
   `ok` / `empty` / `bad` are recorded; `timeout` items are retried once after
   the pass.
@@ -130,11 +142,11 @@ update both tables and never clear the other view.
   ignores gets no packet, and after 3 s the row reads **register ignored
   (no rc_reg)** rather than claiming the listing succeeded.
 - **c_reg item constants** — the four numbers after the slot (`unk1 unk2
-  durability 0`) must match the item. Relist Start repairs them for Main/Etc
-  items from Item.dat before the pass: `unk1 = 8 + INDEX[0]`, `unk2 = 4`;
-  equipment keeps its configured values. Live 2026-11-23: a stale `10 3`
-  pair made the server drop every Speech Bubble c_reg silently, while the
-  repaired `10 4` pair was accepted.
+  durability 0`) are item-specific. Relist Start repairs `unk1` for Main/Etc
+  items from Item.dat (`8 + INDEX[0]`); `unk2` and durability are left as
+  configured. A wrong tuple makes the server drop the packet silently (the
+  `rc_reg` timeout reports it). **The bazaar window must be open**; a c_reg
+  without `wopen 32` is ignored regardless of the constants.
 - **Two tracking switches** — `enabled` puts an item in every Monitor pass;
   `relist` puts it in the relist set. A relist pass searches only
   `BazarController.relist_items()` (enabled, relist, search packet), so an
@@ -233,9 +245,10 @@ the **Items** list — shows the real name instead:
 The **Relist** section is the setup and control surface. The list shows every
 configured item with a **Relist** tick: ticked rows are the *relist set* that
 **Relist Start** searches and may reprice, while unticked rows stay
-configured and monitored but are never touched. A tick writes the config
-immediately; unticking keeps the item, its floor and its Monitor state, so
-re-ticking restores the previous setup. **Add from Items** uses the
+configured and monitored but are never touched. **Clicking the only selected
+row again unselects it** (no Ctrl needed); Ctrl+click builds a group. A tick
+writes the config immediately; unticking keeps the item, its floor and its
+Monitor state, so re-ticking restores the previous setup. **Add from Items** uses the
 selection in the Items section, **Add from Inventory** uses the rows ticked
 in the Inventory section (filling vnum, tab and stack amount from the slot),
 **Remove from relisting** clears the selected row, and **Only relisting**
@@ -287,8 +300,10 @@ c_reg 0 <tab> <slot> 9 4 1 0 <amount> <cheapest-1> <tax> 2
 - An accepted `c_reg` is answered with `rc_reg <n>` within about a second;
   the status reads **register accepted (rc_reg)**. No answer within 3 s means
   the server ignored the packet: the status reads **register ignored (no
-  rc_reg)** and the log points at the c_reg item constants (fixed from
-  Item.dat on the next Relist Start). Verify the listing in the game too.
+  rc_reg)**. Check that the bazaar window is open (the status
+  **bazaar window not open** covers the known case) and the item constants
+  (`unk1` is repaired from Item.dat on the next Relist Start). Verify the
+  listing in the game too.
 - The listing fee/tax is charged. `Relist Stop` ends the mode and unchecks
   the live gate; editing items while running stops the controller
   (`items changed`).

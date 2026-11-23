@@ -28,6 +28,7 @@ from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango
 from . import __version__
 from .bazar import (
     MONITOR_SOURCES,
+    BIBI_VNUM,
     BazarController,
     BazarError,
     BazarItem,
@@ -691,6 +692,11 @@ class Application(Gtk.Application):
         self.bazar_relist_save_button = None
         self.bazar_relist_open_button = None
         self.bazar_relist_selected: str | None = None
+        # A second click on the only selected row unselects it; the press
+        # handler records whether it was the sole selection before the
+        # ListBox updates it.
+        self._relist_press_row = None
+        self._relist_press_only = False
         # Relist tracking controls: the "Only relisting" filter and the
         # cross-section buttons that add or remove an item from the set.
         self.bazar_relist_filter = None
@@ -1442,13 +1448,12 @@ class Application(Gtk.Application):
         self._bazar_update_info()
 
     def _bazar_repair_relist_fields(self) -> int:
-        """Align the ``c_reg`` item constants with Item.dat before a pass.
+        """Align the first ``c_reg`` item constant with Item.dat.
 
-        The server silently ignores a ``c_reg`` whose constant pair does not
-        match the item (live 2026-11-23: a Speech Bubble with UNK2 3 never
-        got ``rc_reg``, while every accepted packet used UNK2 4). For Main
-        and Etc items the client's UNK1 is ``8 + Item.dat INDEX[0]``;
-        equipment is left alone because its other fields carry durability.
+        ``unk1`` is ``8 + Item.dat INDEX[0]`` for every accepted packet
+        observed (live 2026-11-23); the other constants are item-specific
+        and are left exactly as configured. A wrong tuple makes the server
+        ignore the c_reg silently, which the rc_reg timeout reports.
         """
         repaired = 0
         for item in self.bazar.config.items:
@@ -1460,14 +1465,13 @@ class Application(Gtk.Application):
             if info is None or info.index0 <= 0:
                 continue
             unk1 = min(1000, 8 + info.index0)
-            if item.unk1 != unk1 or item.unk2 != 4:
+            if item.unk1 != unk1:
                 item.unk1 = unk1
-                item.unk2 = 4
                 repaired += 1
         if repaired:
             self._bazar_save_config(quiet=True)
             self._bazar_log(
-                f"relist: fixed c_reg item constants for {repaired} item(s) "
+                f"relist: fixed the c_reg UNK1 for {repaired} item(s) "
                 "from Item.dat"
             )
         return repaired
@@ -2829,6 +2833,36 @@ class Application(Gtk.Application):
             )
         return f"ready · floor {item.min_price:,} per unit"
 
+    def _bazar_relist_pressed(
+        self, _gesture, _n_press: int, _x: float, y: float
+    ) -> None:
+        if self.bazar_relist_list is None:
+            return
+        row = self.bazar_relist_list.get_row_at_y(int(y))
+        selected = self.bazar_relist_list.get_selected_rows()
+        self._relist_press_row = row
+        self._relist_press_only = bool(
+            row is not None
+            and row.is_selected()
+            and len(selected) == 1
+            and selected[0] is row
+        )
+
+    def _bazar_relist_row_activated(
+        self, listbox: Gtk.ListBox, row: Gtk.ListBoxRow
+    ) -> None:
+        # A repeated click on the only selected row clears it; clicking an
+        # unselected row (or one of several) selects normally.
+        if (
+            row is self._relist_press_row
+            and self._relist_press_only
+            and row.is_selected()
+            and len(listbox.get_selected_rows()) == 1
+        ):
+            listbox.unselect_all()
+        self._relist_press_row = None
+        self._relist_press_only = False
+
     def _bazar_relist_item_selected(
         self, listbox: Gtk.ListBox, row: Gtk.ListBoxRow | None
     ) -> None:
@@ -3789,6 +3823,16 @@ class Application(Gtk.Application):
         world = self.engine.world
         npc_id, option, page = load_bazaar_open(path)
         if npc_id is not None:
+            # The log can hold a dialog with another NPC (entity ids are per
+            # map); only seed an id this map's entity list knows as Bibi.
+            known = world.entities.get(npc_id)
+            if known is not None and getattr(known, "vnum", 0) != BIBI_VNUM:
+                self._bazar_log(
+                    f"bazaar: ignored stale NPC id {npc_id} from the log "
+                    "(not Bibi Basar on this map)"
+                )
+                npc_id = None
+        if npc_id is not None:
             state = world.bazar
             state.npc_id = npc_id
             state.open_option = option if option is not None else state.open_option
@@ -4148,6 +4192,16 @@ class Application(Gtk.Application):
         self.bazar_relist_list.connect(
             "row-selected", self._bazar_relist_item_selected
         )
+        self.bazar_relist_list.connect(
+            "row-activated", self._bazar_relist_row_activated
+        )
+        # A capture-phase press runs before the ListBox selection handler,
+        # so we know whether the click landed on the sole selected row.
+        press = Gtk.GestureClick()
+        press.set_button(1)
+        press.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        press.connect("pressed", self._bazar_relist_pressed)
+        self.bazar_relist_list.add_controller(press)
         list_scroll = Gtk.ScrolledWindow()
         list_scroll.set_child(self.bazar_relist_list)
         list_scroll.set_policy(
