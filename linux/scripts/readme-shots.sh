@@ -4,7 +4,8 @@
 #   ./linux/scripts/readme-shots.sh [output-dir] [mode]
 #
 # With no mode, all screenshots are regenerated. A single mode
-# (map|packets|picker|spells|bazar|inventory|relist) regenerates just that image.
+# (map|packets|picker|spells|botlog|family|malicious|minigame|stats|bazar|
+# resale|inventory|relist|items|config) regenerates just that image.
 # Needs Xvfb, xdotool and ffmpeg. The window runs against a fake packet
 # source with real map/monster data, so no game client or account is shown.
 set -euo pipefail
@@ -66,5 +67,31 @@ fi
 if should relist; then
     # A demo item is selected in the Relist section with a floor.
     capture relist "$OUT/gui-relist.png" "NosTale Packet Logger" 14
+fi
+if should botlog; then
+    capture botlog "$OUT/gui-botlog.png" "NosTale Packet Logger"
+fi
+if should family; then
+    capture family "$OUT/gui-family.png" "NosTale Packet Logger" 12
+fi
+if should malicious; then
+    capture malicious "$OUT/gui-malicious.png" "NosTale Packet Logger" 10
+fi
+if should minigame; then
+    capture minigame "$OUT/gui-minigame.png" "NosTale Packet Logger" 10
+fi
+if should stats; then
+    # The demo hits arrive ~4 s in, so the default 10 s window shows them.
+    capture stats "$OUT/gui-stats.png" "NosTale Packet Logger" 12
+fi
+if should resale; then
+    # The NPC-resale Monitor view needs the Bibi open and one priced pass.
+    capture resale "$OUT/gui-bazar-resale.png" "NosTale Packet Logger" 14
+fi
+if should items; then
+    capture items "$OUT/gui-bazar-items.png" "NosTale Packet Logger" 12
+fi
+if should config; then
+    capture config "$OUT/gui-bazar-config.png" "NosTale Packet Logger" 12
 fi
 echo "screenshots written to $OUT"

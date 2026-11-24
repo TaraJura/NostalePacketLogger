@@ -5,8 +5,13 @@ opens the real GTK4 window against a real map from NStcData, draws a route,
 spawns a few monsters with their real names, and leaves the window on screen
 for ``linux/scripts/readme-shots.sh`` to capture with ffmpeg/Xvfb.
 
-    NTPL_SHOT_MODE=map|packets|picker|spells|bazar|inventory|relist \
+    NTPL_SHOT_MODE=map|packets|picker|spells|botlog|family|malicious|
+        minigame|stats|bazar|resale|inventory|relist|items|config \
         PYTHONPATH=linux/host python3 linux/test/gui_readme_shots.py
+
+``map``, ``packets`` and ``spells`` show the Map/Bot tab, ``bazar`` and
+``resale`` the two Monitor views, and the rest one section each, so every
+tab and sub-tab of the app has a picture.
 """
 
 from __future__ import annotations
@@ -32,6 +37,15 @@ from ntpl.gui import Application
 from ntpl.mapdata import astar, load_nstc
 
 MODE = os.environ.get("NTPL_SHOT_MODE", "map")
+#: Every mode that needs the bazaar tab, its demo catalog and a fake Bibi.
+BAZAR_MODES = (
+    "bazar",
+    "resale",
+    "inventory",
+    "relist",
+    "items",
+    "config",
+)
 CHAR_ID = 14881134
 HP, HP_MAX = 2950, 3209
 MP, MP_MAX = 3600, 3727
@@ -66,6 +80,65 @@ BAZAR_ITEMS = (
         "Trader",
     ),
 )
+
+
+#: NPC-resale demo catalog: items bought at an NPC and sold in the bazaar.
+#: (name, vnum, listing amount, NPC gold price, cheapest listing, seller)
+RESALE_ITEMS = (
+    ("Pet Food", 2077, 5, 1500, 1900, "Trader"),
+    ("Bell of Sweet Home", 2072, 5, 1200, 2500, "Merchant"),
+    ("Fairy Booster", 1296, 1, 5000, 8200, "ShopMule"),
+    ("Medicine Bottle", 1765, 5, 900, 1400, "Dealer"),
+)
+
+#: Realistic action lines for the Bot log screenshot (the tab mirrors the
+#: status bar and the per-client file).
+DEMO_LOG_LINES = (
+    "NosTale [#1] · PID 1512 · connected to 127.0.0.1:47821",
+    "ntpl 0.3.0 | hooks recv=ACTIVE send=ACTIVE skill=ACTIVE",
+    "loaded map 2628 (170x150) · 19 NosBazar item(s)",
+    "path ready · 23 cells · 3 waypoints",
+    "auto-attack on · retaliate on · pickup on · recover 50/30",
+    "TARGET|5001 (Mountain Turtle) · u_s 0 3 5001",
+    "su 5001 · 1,817 damage · walking to (26,131)",
+    "kill 5001 · pickup 4001 · back to the loop",
+    "auto-recover: HP 32% below 50% · sitting",
+    "auto-recover: HP 78% · standing, resuming the loop",
+    "bazaar: NosBazar window is open (client shortcut)",
+    "Speech Bubble: c_reg sent for 9,499 · waiting for rc_reg",
+)
+
+
+def demo_items():
+    """The NosMall demo catalog as :class:`BazarItem` objects."""
+    return [
+        BazarItem(
+            name=name,
+            search_packet=build_search_packet(list(vnums)),
+            vnum=vnums[0],
+            amount=5,
+            min_price=0,
+            nos_cost=cost,
+            enabled=True,
+        )
+        for name, vnums, cost, _price, _seller in BAZAR_ITEMS
+    ]
+
+
+def resale_items():
+    """The NPC-resale demo catalog as :class:`BazarItem` objects."""
+    return [
+        BazarItem(
+            name=name,
+            search_packet=build_search_packet([vnum]),
+            vnum=vnum,
+            amount=amount,
+            min_price=0,
+            npc_cost=npc,
+            enabled=True,
+        )
+        for name, vnum, amount, npc, _price, _seller in RESALE_ITEMS
+    ]
 
 
 def pick_scene():
@@ -124,7 +197,7 @@ def start_fake_client(scene) -> int:
     port = listener.getsockname()[1]
     first, middle, last = path[len(path) // 4], path[len(path) // 2], path[-1]
     player = path[len(path) // 3]
-    bazar_mode = MODE in ("bazar", "inventory", "relist")
+    bazar_mode = MODE in BAZAR_MODES
     lines = [
         "STATUS|ready",
         "RECV|walk 1 2 3 4",
@@ -175,12 +248,60 @@ def start_fake_client(scene) -> int:
                     "RECV|inv 2 0.2115.5",
                 ]
             )
+    if MODE == "family":
+        # Invite candidates: two with no family (one with a fairy), one with
+        # a family (not actionable) and one whose family is still unknown.
+        lines.extend(
+            [
+                f"RECV|in 1 Kael - 901 {start[0] + 2} {start[1]} 2 0 0 0",
+                f"RECV|in 1 Tova - 902 {start[0] - 2} {start[1]} 2 0 0 0",
+                f"RECV|in 1 Bram - 903 {start[0]} {start[1] + 2} 2 0 0 0",
+                "RECV|gidx 1 900 -1 -",
+                "RECV|gidx 1 901 -1 -",
+                "RECV|gidx 1 902 -1 -",
+                "RECV|gidx 1 903 14.917 Koblizci",
+                "RECV|pairy 1 900 0 2",
+                "RECV|pairy 1 901 0 0",
+            ]
+        )
+    late_lines: list[str] = []
+    if MODE == "stats":
+        # Two more players spawn with the scene; their hits arrive a few
+        # seconds later so the default 10 s window still shows them at
+        # capture time. Live `su` layout: HP % at 11, damage at 12, target
+        # HP at 15/16.
+        lines.extend(
+            [
+                f"RECV|in 1 BotMule - {CHAR_ID} {start[0]} {start[1]} 2 0 0 0",
+                f"RECV|in 1 DpsDude - 1102 {start[0] + 2} {start[1]} 2 0 0 0",
+                f"RECV|in 1 Healerz - 1103 {start[0] - 2} {start[1]} 2 0 0 0",
+            ]
+        )
+        late_lines.extend(
+            [
+                "RECV|su 1 1102 3 5001 855 7 11 4001 0 0 1 62 41200 0 0 "
+                "78000 100000",
+                "RECV|su 1 1102 3 5001 855 7 11 4001 0 0 1 58 39800 0 0 "
+                "38200 100000",
+                "RECV|su 1 1103 3 5001 866 7 11 4001 0 0 1 66 17300 0 0 "
+                "20900 100000",
+                "RECV|su 1 1103 3 5001 866 7 11 4001 0 0 1 61 16900 0 0 "
+                "4000 100000",
+            ]
+        )
     payload = ("\n".join(lines) + "\n").encode("latin-1")
+    late_payload = ("\n".join(late_lines) + "\n").encode("latin-1")
     by_vnum = {
         vnum: (price, seller)
         for _name, vnums, _cost, price, seller in BAZAR_ITEMS
         for vnum in vnums
     }
+    by_vnum.update(
+        {
+            vnum: (price, seller)
+            for _name, vnum, _amount, _npc, price, seller in RESALE_ITEMS
+        }
+    )
 
     def bazar_response(text: str, connection: socket.socket) -> None:
         if text == "POS":
@@ -220,6 +341,9 @@ def start_fake_client(scene) -> int:
         try:
             connection.sendall(payload)
             if not bazar_mode:
+                if late_payload:
+                    time.sleep(4.0)
+                    connection.sendall(late_payload)
                 time.sleep(120)
                 return
             buffer = b""
@@ -263,7 +387,7 @@ def picker_discovery(port: int) -> Discovery:
 
 
 def main() -> int:
-    if MODE in ("bazar", "inventory", "relist"):
+    if MODE in BAZAR_MODES:
         # Never touch the developer's real bazar config or mirror bus.
         if not os.environ.get("NTPL_BAZAR_CONFIG"):
             handle = tempfile.NamedTemporaryFile(
@@ -296,8 +420,15 @@ def main() -> int:
     scheduled = {
         "late": False,
         "bazar": False,
+        "resale": False,
         "inventory": False,
         "relist": False,
+        "items": False,
+        "config": False,
+        "family": False,
+        "malicious": False,
+        "minigame": False,
+        "botlog": False,
     }
 
     def start_bazar() -> bool:
@@ -308,18 +439,7 @@ def main() -> int:
             for entity in app.engine.world.entities.values()
         ):
             return True
-        items = [
-            BazarItem(
-                name=name,
-                search_packet=build_search_packet(list(vnums)),
-                vnum=vnums[0],
-                amount=5,
-                min_price=0,
-                nos_cost=cost,
-                enabled=True,
-            )
-            for name, vnums, cost, _price, _seller in BAZAR_ITEMS
-        ]
+        items = demo_items()
         app._bazar_set_items(items)
         app.bazar_character_entry.set_text("BotMule")
         app.bazar_refresh_spin.set_value(30)
@@ -330,6 +450,107 @@ def main() -> int:
         app._set_status(
             f"NosBazar monitor · {len(items)} priced items · "
             "cheapest listing per item"
+        )
+        return False
+
+    def start_resale_shot() -> bool:
+        if app.window is None:
+            return True
+        if not any(
+            entity.vnum == 793
+            for entity in app.engine.world.entities.values()
+        ):
+            return True
+        items = resale_items()
+        app._bazar_set_items(items)
+        app.bazar_character_entry.set_text("BotMule")
+        app.bazar_refresh_spin.set_value(30)
+        if not app.bazar_npc_entry.get_text().strip():
+            app.bazar_npc_entry.set_text("9584")
+        app._bazar_show_section("monitor")
+        if app.bazar_monitor_notebook is not None:
+            app.bazar_monitor_notebook.set_current_page(1)
+        app._bazar_start_monitor()
+        app._set_status(
+            "NPC resale · gold markup over the NPC price per item"
+        )
+        return False
+
+    def start_items_shot() -> bool:
+        if app.window is None:
+            return True
+        app._bazar_set_items(demo_items())
+        app._bazar_show_section("items")
+        app._bazar_select_item("Wings of Friendship")
+        form = app.bazar_form
+        if form:
+            form["tab"].set_selected(3)  # Etc
+            form["amount"].set_value(5)
+            form["min"].set_value(10000)
+        app._set_status(
+            "items · Wings of Friendship · Etc · amount 5 · floor 10,000 · "
+            "Cost NosMall 0.5 ND"
+        )
+        return False
+
+    def start_config_shot() -> bool:
+        if app.window is None:
+            return True
+        app._bazar_set_items(demo_items())
+        app.bazar_character_entry.set_text("BotMule")
+        app.bazar_refresh_spin.set_value(30)
+        if not app.bazar_npc_entry.get_text().strip():
+            app.bazar_npc_entry.set_text("9584")
+        app._bazar_show_section("config")
+        app._set_status(
+            "configuration · Bibi id, refresh interval and the "
+            "per-client JSON file"
+        )
+        return False
+
+    def start_botlog_shot() -> bool:
+        if app.window is None:
+            return True
+        app._clear_bot_log()
+        for line in DEMO_LOG_LINES:
+            app._log_line(line)
+        app.status.set_text(
+            "bot log · every action with its timestamp, mirrored to "
+            "~/.config/ntpl/bot-<pid>.log"
+        )
+        return False
+
+    def start_family_shot() -> bool:
+        if app.window is None:
+            return True
+        app._family_remember("Mira")
+        app._family_render_players()
+        app._set_status(
+            "family · every player on the map with its family and fairy "
+            "state, invites, and the persisted invited list"
+        )
+        return False
+
+    def start_malicious_shot() -> bool:
+        if app.window is None:
+            return True
+        app.speed_boost_spin.set_value(3)
+        app.cast_boost_switch.set_active(True)
+        app._set_status(
+            "malicious · speed +3 applied · cast speed on (client-side)"
+        )
+        return False
+
+    def start_minigame_shot() -> bool:
+        if app.window is None:
+            return True
+        app.minigame_key_entry.set_text("y")
+        app.minigame_interval_spin.set_value(120)
+        app.minigame_focus_switch.set_active(True)
+        app.minigame_radius_spin.set_value(12)
+        app._set_status(
+            "minigame · Sheep Farm · key y every 120 ms · focus players "
+            "within 12 tiles"
         )
         return False
 
@@ -368,8 +589,9 @@ def main() -> int:
                 name=name,
                 search_packet=build_search_packet(list(vnums)),
                 vnum=vnums[0],
+                inv_tab=2,
                 amount=5,
-                min_price=0,
+                min_price=10000,
                 nos_cost=cost,
                 enabled=True,
             )
@@ -461,6 +683,77 @@ def main() -> int:
         return False
 
     def arrange() -> bool:
+        if MODE == "botlog":
+            if app.window is None:
+                return True
+            app.window.set_default_size(1440, 900)
+            app.notebook.set_current_page(2)
+            if not scheduled["botlog"]:
+                scheduled["botlog"] = True
+                GLib.timeout_add(2600, start_botlog_shot)
+            return False
+        if MODE == "stats":
+            app.notebook.set_current_page(7)
+            if app.window is not None:
+                app.window.set_default_size(1440, 900)
+            app._set_status(
+                "stats · player DPS meter · 5 s window · damage from su"
+            )
+            return False
+        if MODE == "family":
+            if app.window is None:
+                return True
+            app.window.set_default_size(1440, 900)
+            app.notebook.set_current_page(4)
+            if not scheduled["family"]:
+                scheduled["family"] = True
+                GLib.timeout_add(2000, start_family_shot)
+            return False
+        if MODE == "malicious":
+            if app.window is None:
+                return True
+            app.window.set_default_size(1440, 900)
+            app.notebook.set_current_page(5)
+            if not scheduled["malicious"]:
+                scheduled["malicious"] = True
+                GLib.timeout_add(1500, start_malicious_shot)
+            return False
+        if MODE == "minigame":
+            if app.window is None:
+                return True
+            app.window.set_default_size(1440, 900)
+            app.notebook.set_current_page(6)
+            if not scheduled["minigame"]:
+                scheduled["minigame"] = True
+                GLib.timeout_add(1500, start_minigame_shot)
+            return False
+        if MODE == "resale":
+            if app.window is None:
+                return True
+            app.window.set_default_size(1440, 900)
+            app.notebook.set_current_page(3)
+            if not scheduled["resale"]:
+                scheduled["resale"] = True
+                GLib.timeout_add(1500, start_resale_shot)
+            return False
+        if MODE == "items":
+            if app.window is None:
+                return True
+            app.window.set_default_size(1440, 900)
+            app.notebook.set_current_page(3)
+            if not scheduled["items"]:
+                scheduled["items"] = True
+                GLib.timeout_add(1500, start_items_shot)
+            return False
+        if MODE == "config":
+            if app.window is None:
+                return True
+            app.window.set_default_size(1440, 900)
+            app.notebook.set_current_page(3)
+            if not scheduled["config"]:
+                scheduled["config"] = True
+                GLib.timeout_add(1500, start_config_shot)
+            return False
         if MODE == "packets":
             app.notebook.set_current_page(0)
             if app.window is not None:
