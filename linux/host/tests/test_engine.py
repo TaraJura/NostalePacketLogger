@@ -612,6 +612,22 @@ class PortalLearningTests(unittest.TestCase):
         self.engine.feed(Packet(Kind.RECV, "wopen 32 2 626", 100.2))
         self.assertTrue(self.engine.world.bazar.open_skill)
 
+    def test_seller_list_tracks_own_listings(self):
+        world = self.engine.feed(
+            Packet(
+                Kind.RECV,
+                "rc_slist 0  1 60891|7001|5370|0|5|0|84449|1|1341|2|1|0|0|0|0|^0",
+                0.0,
+            )
+        )
+        self.assertEqual(world.bazar.seller_count, 1)
+        entry = world.bazar.seller_entries[0]
+        self.assertEqual(
+            (entry.listing_id, entry.owner_id, entry.sold, entry.price),
+            (60891, 7001, 0, 84449),
+        )
+        self.assertTrue(entry.changeable)
+
     def test_client_shortcut_needs_a_fresh_window(self):
         # A `c_skill` long before the window, or a non-bazaar window, is
         # not the bazaar opening.

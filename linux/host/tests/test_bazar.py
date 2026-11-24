@@ -13,6 +13,8 @@ from ntpl.bazar import (
     BazarError,
     BazarItem,
     BazarQuote,
+    SellerEntry,
+    build_change_packet,
     build_open_packets,
     build_register_packet,
     build_search_packet,
@@ -20,6 +22,7 @@ from ntpl.bazar import (
     load_config,
     normalize_search_packet,
     parse_rc_blist,
+    parse_rc_slist,
     monitor_source,
     save_config,
     search_vnums,
@@ -99,6 +102,49 @@ class RcBlistTests(unittest.TestCase):
     def test_not_a_response(self) -> None:
         with self.assertRaises(BazarError):
             parse_rc_blist("c_blist 0 0")
+
+
+class RcSlistTests(unittest.TestCase):
+    def test_parse_live_seller_list(self) -> None:
+        entries = parse_rc_slist(
+            "rc_slist 0  1 60891|7001|5370|0|5|0|84449|1|1341|2|1|0|0|0|0|^0 "
+            "60003|7001|2174|1|10|0|11494|1|1279|2|2|0|0|0|0|^0"
+        )
+        self.assertEqual(len(entries), 2)
+        first = entries[0]
+        self.assertEqual(
+            (
+                first.listing_id,
+                first.owner_id,
+                first.vnum,
+                first.sold,
+                first.amount,
+                first.price,
+            ),
+            (60891, 7001, 5370, 0, 5, 84449),
+        )
+        # Nothing sold → the in-game Change action is available.
+        self.assertTrue(first.changeable)
+        self.assertEqual(entries[1].sold, 1)
+        self.assertFalse(entries[1].changeable)
+
+    def test_truncated_and_bad_tokens_are_skipped(self) -> None:
+        entries = parse_rc_slist(
+            "rc_slist 0  0 60891|7001|5370|0|5|0|84449|1| 999|x|"
+        )
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].listing_id, 60891)
+        with self.assertRaises(BazarError):
+            parse_rc_slist("rc_blist 0")
+
+    def test_change_packet(self) -> None:
+        entry = SellerEntry(60891, 7001, 5370, 0, 5, 84449, 1)
+        self.assertEqual(
+            build_change_packet(entry, 84448),
+            "c_mod 0 1 60891 5370 5 84448",
+        )
+        with self.assertRaises(BazarError):
+            build_change_packet(entry, 0)
 
 
 class PacketBuilderTests(unittest.TestCase):
@@ -380,6 +426,10 @@ class ControllerTests(unittest.TestCase):
             Packet(Kind.RECV, _response(1000), clock.now)
         )
         controller.tick(engine.world)
+        if relist:
+            # A relist pass asks the seller tab for our own listings before
+            # its first search; answer it so the pass starts immediately.
+            engine.feed_text("RECV", "rc_slist 0  0")
 
     def test_open_sequence_and_one_search(self) -> None:
         item = BazarItem("bubbl", build_search_packet([2174]))
@@ -678,6 +728,83 @@ class ControllerTests(unittest.TestCase):
             controller.results["bubbl"].status, "register-sent"
         )
         self.assertIn("rc_reg 1", controller.results["bubbl"].detail)
+
+    def test_relist_changes_an_unsold_listing_instead_of_adding(self) -> None:
+        # The seller tab shows our 2174 listing (id 73411) with nothing sold:
+        # the in-game Change action exists, so repricing uses c_mod and no new
+        # listing is added — even with none of the item left in the bag.
+        item = BazarItem(
+            "bubbl",
+            build_search_packet([2174]),
+            vnum=2174,
+            inv_tab=2,
+            amount=5,
+            min_price=10000,
+        )
+        controller, engine, clock, sent = self._controller(
+            [item], character="root1"
+        )
+        engine.world.self_id = 7001
+        self._open(controller, engine, clock, relist=True)
+        engine.feed_text(
+            "RECV",
+            "rc_slist 0  0 73411|7001|2174|0|5|0|11496|1|1435|2|2|0",
+        )
+        controller.tick(engine.world)  # ends the seller-list wait
+        engine.feed(
+            Packet(Kind.RECV, _response(11000, "Other"), clock.now)
+        )
+        controller.tick(engine.world)
+        self.assertEqual(
+            [p for p in sent if p.startswith("c_mod ")],
+            ["c_mod 0 1 73411 2174 5 10999"],
+        )
+        self.assertEqual(
+            [p for p in sent if p.startswith("c_reg ")], []
+        )
+        self.assertEqual(
+            controller.results["bubbl"].status, "change-pending"
+        )
+        # The server answers a c_mod with a refreshed seller list.
+        engine.feed_text(
+            "RECV",
+            "rc_slist 0  0 73411|7001|2174|0|5|0|10999|1|1435|2|2|0",
+        )
+        controller.tick(engine.world)
+        self.assertEqual(controller.results["bubbl"].status, "changed")
+        self.assertIn("c_mod", controller.results["bubbl"].detail)
+
+    def test_relist_adds_when_the_listing_has_sold(self) -> None:
+        # Something from our listing sold: the Change action is gone, so a
+        # new c_reg is the only way to bring the price to the market.
+        item = BazarItem(
+            "bubbl",
+            build_search_packet([2174]),
+            vnum=2174,
+            inv_tab=2,
+            amount=5,
+            min_price=10000,
+        )
+        controller, engine, clock, sent = self._controller(
+            [item], character="root1"
+        )
+        engine.world.self_id = 7001
+        engine.feed_text("RECV", "inv 2 7.2174.5")
+        self._open(controller, engine, clock, relist=True)
+        engine.feed_text(
+            "RECV",
+            "rc_slist 0  0 73411|7001|2174|2|5|0|11496|1|1435|2|2|0",
+        )
+        controller.tick(engine.world)
+        engine.feed(
+            Packet(Kind.RECV, _response(11000, "Other"), clock.now)
+        )
+        controller.tick(engine.world)
+        self.assertEqual([p for p in sent if p.startswith("c_mod ")], [])
+        self.assertEqual(
+            [p for p in sent if p.startswith("c_reg ")],
+            ["c_reg 0 2 7 9 4 1 0 5 10999 50 2 0"],
+        )
 
     def test_missing_rc_reg_marks_the_registration_ignored(self) -> None:
         item = BazarItem(

@@ -89,8 +89,12 @@ reads `ready` / `needs floor` / `needs vnum/tab`. With **Allow live
 re-listing** and your **Character** name, **Relist Start** opens the bazaar
 itself (Bibi Basar, the portable NosBazar medal, or the client's own
 shortcut), undercuts the cheapest other listing by one gold — never below the
-floor — and charges the bazaar's 50-gold minimum listing fee. The status
-reads `register accepted (rc_reg)` or `register ignored (no rc_reg)`.
+floor — and charges the bazaar's 50-gold minimum listing fee. If you already
+have a listing of the item with **nothing sold**, it reprices that listing
+with the in-game **Change** action (`c_mod`) instead of adding another; only
+when something from your listing has sold does it add a new one. The status
+reads `price changed (c_mod)`, `register accepted (rc_reg)` or `register
+ignored (no rc_reg)`.
 
 #### Monitor
 
@@ -186,8 +190,8 @@ DLL version.
 
 ```bash
 sudo apt install g++-mingw-w64-i686 xvfb          # once
-make -C linux all test-host                       # DLL + injector + 357 unit tests
-make -C linux gui-test bot-test                   # 6 GTK4 smokes, 43 fake-server smokes
+make -C linux all test-host                       # DLL + injector + 363 unit tests
+make -C linux gui-test bot-test                   # 6 GTK4 smokes, 44 fake-server smokes
 
 linux/scripts/inject.sh        # optional: the GUI picker can inject too
 linux/scripts/gui.sh           # one window per client; run again for another
@@ -225,7 +229,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-Host **0.7.3** (Linux): 357 unit tests, 6 GTK4 window smokes and 43
+Host **0.7.4** (Linux): 363 unit tests, 6 GTK4 window smokes and 44
 fake-server bot smokes pass, and the real injector has been run against the
 live NosTale client under Wine 11 — both hooks `ACTIVE`, movement through the
 client's own MoveTo, auto-attack confirmed by the server's `su`, and the

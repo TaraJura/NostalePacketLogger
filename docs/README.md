@@ -35,7 +35,7 @@ the host differ, the game's packets do not.
 - **Windows tree (`windows/`)** — the original working implementation. Injector
   + DLL + WinForms GUI, named pipes.
 - **Linux tree (`linux/`)** — MinGW DLL + TCP loopback + Python CLI + GTK4 GUI
-  + state engine. Builds cleanly, **357 host tests pass**, the GTK4 window
+  + state engine. Builds cleanly, **363 host tests pass**, the GTK4 window
   passes six headless smokes (packet window, client picker, multi-client
   locks, Family, Family auto-invite, Minigame), and the DLL has
   been verified against the **live NosTale client** under Wine 11: both hooks
@@ -68,7 +68,7 @@ the host differ, the game's packets do not.
   third-level **NosMall** and **NPC resale** views and can relist with a
   floor, ported from Nostale-NB. The seventh **Minigame** tab
   spams a key and keeps the nearest other player selected for the Sheep Farm
-  raid. `make gui-test` and `make bot-test` pass (43 bot smokes, including the
+  raid. `make gui-test` and `make bot-test` pass (44 bot smokes, including the
   spell rotation, HP/MP recovery, finish-kill-before-recovery, loot approach,
   the NosBazar monitor and relist, the speed-boost control, and cross-client
   Follow packet mirroring). See [map.md](map.md),

@@ -21,7 +21,9 @@ from dataclasses import dataclass, field
 from .bazar import (
     BAZAR_SKILL_WINDOW_S,
     BAZAR_WINDOW_TYPE,
+    BazarError,
     BazarState,
+    parse_rc_slist,
 )
 from .protocol import Kind, Packet
 
@@ -405,6 +407,23 @@ def _on_bazar_response(world: WorldState, packet: Packet) -> None:
     # Controllers run on time.monotonic(); packet timestamps are wall time.
     state.last_response_at = time.monotonic()
     state.responses.append((state.response_count, packet.text))
+
+
+def _on_bazar_sellers(world: WorldState, packet: Packet) -> None:
+    # rc_slist <page> <filter> <entry> …: the seller tab, always only our own
+    # listings. The sold amount in each entry decides whether the in-game
+    # Change (repricing) action exists; the relist uses it for c_mod.
+    if packet.direction is not Kind.RECV:
+        return
+    try:
+        entries = parse_rc_slist(packet.text)
+    except BazarError:
+        return
+    state = world.bazar
+    state.seller_entries = entries
+    state.seller_count += 1
+    state.seller_at = time.monotonic()
+    state.seller_text = packet.text
 
 
 def _on_bazar_register_ack(world: WorldState, packet: Packet) -> None:
@@ -1047,6 +1066,7 @@ class Engine:
                 "gold": _on_gold,       # RECV: own gold
                 "rc_blist": _on_bazar_response,  # RECV: bazaar search answer
                 "rc_reg": _on_bazar_register_ack,  # RECV: c_reg accepted
+                "rc_slist": _on_bazar_sellers,  # RECV: our seller listings
                 "wopen": _on_window_open,  # RECV: a server window opened
                 "npc_req": _on_npc_req,  # SEND/RECV: NPC dialog
                 "n_run": _on_npc_run,   # SEND: NPC dialog option

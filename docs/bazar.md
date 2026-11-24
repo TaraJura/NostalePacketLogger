@@ -156,12 +156,19 @@ update both tables and never clear the other view.
   character cannot be flagged for search spam.
 - **Relist** — only in relist mode, only for items in the relist set
   (`BazarItem.relist`), and only with a character name, a positive
-  `min_price`, an inventory slot for `(tab, vnum)`, and a cheapest **other**
-  seller. Sends one `c_reg` per item per pass. The server acknowledges an
-  accepted registration with **`rc_reg <n>`** (1 in every live capture);
-  the row then reads **register accepted (rc_reg)**. A c_reg the server
-  ignores gets no packet, and after 3 s the row reads **register ignored
-  (no rc_reg)** rather than claiming the listing succeeded.
+  `min_price` and a cheapest **other** seller. Each relist pass first asks
+  the seller tab (`c_slist 0 0 0` → **`rc_slist`**) for our own listings.
+  **If we already have a listing of the item with nothing sold, the pass
+  reprices it with the in-game Change action (`c_mod`) instead of adding a
+  new listing.** It needs no inventory slot — the listing already holds the
+  item — and the row shows **price changed (c_mod)** once the refreshed
+  seller list carries the new price. Only when every own listing has some
+  amount sold (the Change action is gone) does it add a new listing with
+  `c_reg`, which needs an inventory slot and stock. The server acknowledges
+  a c_reg with **`rc_reg <n>`** (1 in every live capture); the row then
+  reads **register accepted (rc_reg)**. A c_reg the server ignores gets no
+  packet, and after 3 s the row reads **register ignored (no rc_reg)**
+  rather than claiming the listing succeeded.
 - **c_reg item constants** — the four numbers after the slot (`unk1 unk2
   durability 0`) are item-specific. Relist Start repairs `unk1` for Main/Etc
   items from Item.dat (`8 + INDEX[0]`); `unk2` and durability are left as
@@ -309,13 +316,26 @@ To run it:
    own listing).
 3. Click **Relist Start**.
 
-The controller opens the bazaar if needed, searches only the relist set at
-the 2.5 s pacing, and for each relist-ready item sends one `c_reg` per pass:
+The controller opens the bazaar if needed, asks the seller tab for our own
+listings (`c_slist 0 0 0`), searches only the relist set at the 2.5 s
+pacing, and for each relist-ready item either **reprices our existing
+listing** or **adds a new one**:
 
 ```
+c_mod 0 1 <listingId> <vnum> <amount> <cheapest-1>
 c_reg 0 <tab> <slot> 9 4 1 0 <amount> <cheapest-1> <tax> 2 0
 ```
 
+- **Change first.** If the seller list shows our own listing of the item
+  with `sold 0`, the pass uses the in-game Change action (`c_mod`) on that
+  listing: same vnum, the listing's amount and the new price. No inventory
+  slot is needed, and the confirmation is the refreshed seller list showing
+  the new price (**price changed (c_mod)**). This is what keeps a relisted
+  item from piling up as a second listing.
+- **Add only when Change is unavailable.** When something from our listing
+  already sold — the game removes the Change action — the pass adds a new
+  listing with `c_reg` (needs the item in the bag). With no own listing it
+  also adds.
 - `<tax>` is the listing fee the server checks:
   `max(50, int(price × amount × 0.0005))`. A c_reg below the 50-gold
   minimum is **dropped silently** — the live 2026-11-23 failures were
@@ -324,8 +344,11 @@ c_reg 0 <tab> <slot> 9 4 1 0 <amount> <cheapest-1> <tax> 2 0
 - The price is the cheapest listing − 1 gold, never below **Min price**.
 - If the cheapest listing is already yours, that item is skipped (`own`).
 - If the cheapest listing is at/below the floor, it is skipped (`floor`).
-- Missing slot / insufficient stack → `no-slot` / `quantity`.
-- An accepted `c_reg` is answered with `rc_reg <n>` within about a second;
+- Missing slot / insufficient stack → `no-slot` / `quantity` (the add path
+  only; a change needs no inventory slot).
+- An accepted `c_mod` is confirmed by the refreshed seller list; no answer
+  within 3 s reads **price change not confirmed**. An accepted `c_reg` is
+  answered with `rc_reg <n>` within about a second;
   the status reads **register accepted (rc_reg)**. No answer within 3 s means
   the server ignored the packet: the status reads **register ignored (no
   rc_reg)**. Check that the bazaar window is open (the status

@@ -158,14 +158,59 @@ malformed tail and marks the answer `truncated`; the true cheapest listing may
 be in the cut part. The GUI shows `ok: truncated answer` and still uses the
 minimum of the visible entries.
 
-## `rc_slist` (RECV)
+## `rc_slist` (RECV) — our own listings
+
+The seller tab, requested with `c_slist 0 0 0`; it always lists **only our
+own** listings:
 
 ```
-rc_slist <page> <entries…>
+rc_slist <page> <filter> <entry> <entry> …
 ```
 
-Captured: `rc_slist 0  0`. The bot ignores it; `rc_blist` is the open
-confirmation.
+Live 2026-11-23:
+
+```
+rc_slist 0  1 60891|7001|5370|0|5|0|84449|1|1341|2|1|0|0|0|0|^0
+            60003|7001|2174|1|10|0|11494|1|1279|2|2|0|0|0|0|^0
+```
+
+| Index | Meaning |
+|---|---|
+| 0 | Listing/auction id |
+| 1 | Owner char id |
+| 2 | **Item vnum** |
+| 3 | **Sold amount** — 0 while the in-game Change action exists |
+| 4 | **Amount / stack size** |
+| 5 | Is package |
+| 6 | **Price per unit** |
+| 7 | Status (1 = on sale) |
+| 8 | Minutes left |
+| 9 | NosMerchant medal |
+| 10+ | Unknown / item data (`^`-separated chunk) |
+
+`rc_blist` remains the open confirmation; the seller list is for repricing.
+
+## Changing a price (`c_mod`, SEND)
+
+An existing listing can be repriced with the in-game **Change** action while
+**nothing from it has sold**. The client sends:
+
+```
+c_mod 0 1 <listingId> <vnum> <amount> <price>
+```
+
+Live 2026-11-23 (the client's own packet, accepted):
+
+```
+[SEND] c_mod 0 1 60891 5370 5 84449
+[RECV] sayi 1 7001 10 2369 4 84449 0 0 0
+[RECV] rc_slist 0  1 60891|7001|5370|0|5|0|84449|1|1341|2|1|0|0|0|0|^0 …
+```
+
+There is no `rc_reg`; the confirmation is the refreshed seller list that
+carries the new price. The listing id, vnum and amount come from `rc_slist`.
+After a sale the Change action is gone and the item has to be listed again
+with `c_reg`.
 
 ## Registering / relisting (`c_reg`, SEND)
 

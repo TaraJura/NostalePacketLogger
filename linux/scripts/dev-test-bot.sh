@@ -80,6 +80,7 @@ run gui_resume_smoke.py
 run gui_hold_smoke.py
 run gui_bazar_smoke.py
 run gui_bazar_relist_smoke.py
+run gui_bazar_change_smoke.py
 run gui_bazar_copy_smoke.py
 run gui_nosmall_import_smoke.py
 run gui_inventory_scan_smoke.py

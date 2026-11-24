@@ -112,6 +112,11 @@ OPEN_FRESH_S = 90.0
 #: A c_reg the server accepts is answered with ``rc_reg`` within about half
 #: a second; a registration it ignores gets no packet at all.
 REGISTER_ACK_TIMEOUT_S = 3.0
+#: The client's seller-tab request; the answer (``rc_slist``) lists only our
+#: own listings. A relist pass asks once so it can change an existing price
+#: instead of adding a listing. No answer in time → the pass uses c_reg.
+SELLER_PACKET = "c_slist 0 0 0"
+SELLER_TIMEOUT_S = 5.0
 
 CONFIG_VERSION = 1
 MAX_ITEMS = 5000
@@ -130,6 +135,10 @@ STATUS_TEXT = {
     "register-sent": "register accepted (rc_reg)",
     "register-no-ack": "register ignored (no rc_reg)",
     "register-unknown": "register sent (ack unknown)",
+    "change-pending": "price change sent, waiting for the seller list",
+    "changed": "price changed (c_mod)",
+    "change-no-ack": "price change not confirmed",
+    "change-unknown": "price change sent (ack unknown)",
     "no-window": "bazaar window not open",
     "quantity": "not enough in inventory",
     "no-slot": "not in inventory",
@@ -272,6 +281,92 @@ def parse_rc_blist(text: str) -> BazarResponse:
         )
     return BazarResponse(
         "ok", tuple(listings), text=text, page=page, truncated=truncated
+    )
+
+
+@dataclass(frozen=True)
+class SellerEntry:
+    """One entry of the seller list (``rc_slist``): one of our listings."""
+
+    listing_id: int
+    owner_id: int
+    vnum: int
+    #: Units already sold. The in-game **Change** action is only offered
+    #: while this is 0; after a sale the item has to be listed again.
+    sold: int
+    amount: int
+    price: int
+    status: int = 0
+
+    @property
+    def changeable(self) -> bool:
+        return self.sold <= 0
+
+
+def parse_rc_slist(text: str) -> list[SellerEntry]:
+    """Parse one ``rc_slist`` answer into the seller's own listings.
+
+    Live 2026-11-23 (the client's seller tab):
+
+    ``rc_slist 0  1 60891|7001|5370|0|5|0|84449|1|1341|2|1|0|0|0|0|^0 …``
+
+    Fields: listing id, owner char id, vnum, **sold amount**, amount,
+    is-package, price, status, minutes left, medal, … Entries are spaces,
+    fields pipes; the leading page/filter numbers carry no pipe and are
+    skipped, and a truncated tail is dropped.
+    """
+    if not text.startswith("rc_slist"):
+        raise BazarError(f"not an rc_slist packet: {text[:40]!r}")
+    entries: list[SellerEntry] = []
+    for token in text.split():
+        if "|" not in token:
+            continue
+        fields = token.split("|")
+        if len(fields) < 7:
+            continue
+        try:
+            listing_id = int(fields[0])
+            owner_id = int(fields[1])
+            vnum = int(fields[2])
+            sold = int(fields[3])
+            amount = int(fields[4])
+            price = int(fields[6])
+        except ValueError:
+            continue
+        status = 0
+        if len(fields) > 7:
+            try:
+                status = int(fields[7])
+            except ValueError:
+                pass
+        entries.append(
+            SellerEntry(
+                listing_id=listing_id,
+                owner_id=owner_id,
+                vnum=vnum,
+                sold=sold,
+                amount=amount,
+                price=price,
+                status=status,
+            )
+        )
+    return entries
+
+
+def build_change_packet(entry: "SellerEntry", price: int) -> str:
+    """The client's own **Change** action for an existing listing.
+
+    The client sent ``c_mod 0 1 <listingId> <vnum> <amount> <price>`` (live
+    2026-11-23, accepted: a fresh ``rc_slist`` came back with the new price
+    and a ``sayi`` notice). Unlike ``c_reg`` it needs no inventory slot —
+    the listing already holds the item — so an item that is fully listed can
+    still be repriced.
+    """
+    if price <= 0:
+        raise BazarError("price must be positive")
+    return (
+        f"c_mod 0 1 {entry.listing_id} {entry.vnum} "
+        f"{entry.amount} {int(price)}"
     )
 
 
@@ -732,6 +827,14 @@ class BazarState:
     register_count: int = 0
     register_value: int = 0
     register_at: float = 0.0
+    #: ``rc_slist``: the seller's own listings (the trade tab), so a relist
+    #: can change an existing price with ``c_mod`` instead of adding a new
+    #: listing. ``seller_count`` is monotonic so a controller can wait for
+    #: the answer to its own request.
+    seller_count: int = 0
+    seller_entries: list[SellerEntry] = field(default_factory=list)
+    seller_at: float = 0.0
+    seller_text: str = ""
     #: ``wopen <type> ...``: the last window the server opened. Type 32 is
     #: the NosBazar window. ``open`` only says a search was answered.
     window_type: int | None = None
@@ -988,6 +1091,14 @@ class BazarController:
         #: The c_reg waiting for ``rc_reg``: item, quote, the ack counter at
         #: send time, the price and the deadline.
         self._pending_registration: dict[str, Any] | None = None
+        #: The c_mod (price change) waiting for a refreshed seller list that
+        #: shows the new price.
+        self._pending_change: dict[str, Any] | None = None
+        #: Seller-list refresh for the current relist pass: the count at the
+        #: request time, whether it was sent and when to stop waiting.
+        self._seller_seen = 0
+        self._seller_requested = False
+        self._seller_deadline = 0.0
 
     # -- configuration --------------------------------------------------
 
@@ -1107,6 +1218,11 @@ class BazarController:
             quote.status = "register-unknown"
             quote.detail = "stopped before rc_reg"
             self._pending_registration = None
+        change = self._pending_change
+        if change is not None:
+            change["quote"].status = "change-unknown"
+            change["quote"].detail = "stopped before confirmation"
+            self._pending_change = None
         self.version += 1
         if was_running:
             self._log(f"NosBazar stopped{f': {reason}' if reason else ''}")
@@ -1144,16 +1260,66 @@ class BazarController:
             self._pending_registration = None
             self.version += 1
 
+    def _change_tick(
+        self, world: "WorldState", now: float
+    ) -> None:
+        """Resolve the in-flight c_mod from a refreshed seller list."""
+        pending = self._pending_change
+        if pending is None:
+            return
+        state = world.bazar
+        entry: SellerEntry = pending["entry"]
+        if state.seller_count > pending["seen"]:
+            updated = next(
+                (
+                    item
+                    for item in state.seller_entries
+                    if item.listing_id == entry.listing_id
+                ),
+                None,
+            )
+            if updated is not None and updated.price == pending["price"]:
+                quote: BazarQuote = pending["quote"]
+                quote.status = "changed"
+                quote.detail = f"c_mod · {pending['price']:,}"
+                self._log(
+                    f"{self._item_label(pending['item'])}: listing "
+                    f"{entry.listing_id} repriced to {pending['price']:,} "
+                    "(c_mod)"
+                )
+                self._pending_change = None
+                self.version += 1
+                return
+            # Another answer (the client's own refresh): keep waiting for
+            # the one that carries the new price.
+            pending["seen"] = state.seller_count
+        if now >= pending["deadline"]:
+            quote = pending["quote"]
+            quote.status = "change-no-ack"
+            quote.detail = f"{pending['price']:,} change not confirmed"
+            self._log(
+                f"{self._item_label(pending['item'])}: c_mod sent but the "
+                "seller list did not show the new price"
+            )
+            self._pending_change = None
+            self.version += 1
+
     # -- tick -----------------------------------------------------------
 
     def tick(self, world: "WorldState", now: float | None = None) -> bool:
         """Advance the state machine; return True when the display changed."""
-        if self.mode is None and self._pending_registration is None:
+        if (
+            self.mode is None
+            and self._pending_registration is None
+            and self._pending_change is None
+        ):
             return False
         moment = self._clock() if now is None else now
         before = (self.phase, self.version)
-        # A c_reg answer can arrive in any phase, including the cooldown.
+        # A c_reg answer can arrive in any phase, including the cooldown; a
+        # c_mod answer is a refreshed seller list, handled the same way.
         self._registration_tick(world, moment)
+        self._change_tick(world, moment)
         if self.mode is None:
             return (self.phase, self.version) != before
         if self.phase == "open":
@@ -1486,6 +1652,12 @@ class BazarController:
         self._retry_done = False
         self._pass_number += 1
         self._pass_started = now
+        if self.mode == "relist":
+            # Ask for the seller tab once per pass: it tells us which of our
+            # listings can still use the in-game Change action (sold == 0).
+            self._seller_seen = world.bazar.seller_count
+            self._seller_requested = False
+            self._seller_deadline = now + SELLER_TIMEOUT_S
         # Do not clear the table at the start of a cycle: the previous prices
         # remain visible and each row is replaced when its answer arrives.
         self._sync_results()
@@ -1504,6 +1676,13 @@ class BazarController:
     def _pass_tick(self, world: "WorldState", now: float) -> None:
         if self._pending is not None:
             self._pending_tick(world, now)
+            return
+        if self.mode == "relist" and not self._seller_ready(world, now):
+            # Decide "change or add" with fresh own-listing data, not with a
+            # seller list the user fetched minutes ago.
+            if not self._seller_requested:
+                self._seller_requested = True
+                self._send(SELLER_PACKET)
             return
         if not self._queue:
             # The last answer already arrived; do not wait out the pacing
@@ -1534,6 +1713,26 @@ class BazarController:
             "deadline": now + RESPONSE_TIMEOUT_S,
         }
         self._next_send = now + SEARCH_INTERVAL_S
+
+    def _changeable_listings(
+        self, world: "WorldState", vnum: int | None
+    ) -> list[SellerEntry]:
+        """Our listings of ``vnum`` that still offer the in-game Change."""
+        if vnum is None or world.self_id is None:
+            return []
+        return [
+            entry
+            for entry in world.bazar.seller_entries
+            if entry.owner_id == world.self_id
+            and entry.vnum == vnum
+            and entry.changeable
+        ]
+
+    def _seller_ready(self, world: "WorldState", now: float) -> bool:
+        """True once the pass's seller-list request was answered (or timed out)."""
+        if world.bazar.seller_count > self._seller_seen:
+            return True
+        return now >= self._seller_deadline
 
     def _pending_tick(self, world: "WorldState", now: float) -> None:
         pending = self._pending
@@ -1707,15 +1906,24 @@ class BazarController:
                 "(not in the relist list)"
             )
             return
-        # Resolve a previous registration first; never chain a second c_reg
-        # while the server's answer to the first one is still unknown.
+        # Resolve a previous registration or price change first; never chain
+        # a second one while the answer to the first is still unknown.
         self._registration_tick(world, now)
+        self._change_tick(world, now)
         if self._pending_registration is not None:
             quote.status = "error"
             quote.detail = "previous c_reg still pending"
             self._log(
                 f"{self._item_label(item)}: not relisted "
                 "(previous c_reg still pending)"
+            )
+            return
+        if self._pending_change is not None:
+            quote.status = "error"
+            quote.detail = "previous c_mod still pending"
+            self._log(
+                f"{self._item_label(item)}: not relisted "
+                "(previous price change still pending)"
             )
             return
         if not world.bazar.window_open:
@@ -1788,6 +1996,58 @@ class BazarController:
             )
             return
 
+        new_price = quote.price - 1
+        if new_price < item.min_price:
+            quote.status = "floor"
+            self._log(
+                f"{self._item_label(item)}: {new_price:,} would be below the "
+                f"{item.min_price:,} floor"
+            )
+            return
+
+        # The in-game **Change** action reprices one of our own listings and
+        # is offered only while nothing from it has sold. Prefer it over a
+        # new c_reg: relisting should update the price, not pile up listings.
+        # It needs no inventory slot — the listing already holds the item.
+        changeable = self._changeable_listings(world, item.vnum)
+        if changeable:
+            entry = min(
+                changeable, key=lambda value: (value.price, value.listing_id)
+            )
+            try:
+                packet = build_change_packet(entry, new_price)
+            except BazarError as exc:
+                quote.status = "error"
+                quote.detail = str(exc)
+                self._log(f"{self._item_label(item)}: not relisted ({exc})")
+                return
+            if not self._send(packet):
+                quote.status = "error"
+                quote.detail = "change send failed"
+                self._log(
+                    f"{self._item_label(item)}: price change send failed"
+                )
+                return
+            quote.status = "change-pending"
+            quote.detail = (
+                f"{new_price:,} (was {entry.price:,}) · "
+                f"listing {entry.listing_id}"
+            )
+            self._pending_change = {
+                "item": item,
+                "quote": quote,
+                "entry": entry,
+                "price": new_price,
+                "seen": world.bazar.seller_count,
+                "deadline": now + REGISTER_ACK_TIMEOUT_S,
+            }
+            self._log(
+                f"{self._item_label(item)}: c_mod sent to change listing "
+                f"{entry.listing_id} from {entry.price:,} to {new_price:,} "
+                f"(cheapest was {quote.price:,} by {quote.seller})"
+            )
+            return
+
         slot = world.find_inventory(item.inv_tab, item.vnum)
         if slot is None:
             quote.status = "no-slot"
@@ -1805,14 +2065,6 @@ class BazarController:
             self._log(f"{self._item_label(item)}: not relisted ({quote.detail})")
             return
 
-        new_price = quote.price - 1
-        if new_price < item.min_price:
-            quote.status = "floor"
-            self._log(
-                f"{self._item_label(item)}: {new_price:,} would be below the "
-                f"{item.min_price:,} floor"
-            )
-            return
         try:
             packet = build_register_packet(item, slot.index, new_price)
         except BazarError as exc:

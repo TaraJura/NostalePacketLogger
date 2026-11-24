@@ -42,6 +42,8 @@ class BazarServer:
         self.listener.listen(1)
         self.port = self.listener.getsockname()[1]
         self.received: list[str] = []
+        #: Own seller-tab entries (``rc_slist``) the fake server reports.
+        self.seller_entries: list[str] = []
         self.connection = None
         self.stop = threading.Event()
         threading.Thread(target=self._run, daemon=True).start()
@@ -96,6 +98,37 @@ class BazarServer:
         if text.startswith("SEND|c_reg "):
             # The live server acknowledges an accepted c_reg with rc_reg 1.
             self._send("RECV|rc_reg 1\n")
+            return
+        if text.startswith("SEND|c_slist "):
+            # The seller tab: own listings, as the smoke configured them.
+            body = " ".join(self.seller_entries)
+            self._send(f"RECV|rc_slist 0  0 {body}\n".rstrip() + "\n")
+            return
+        if text.startswith("SEND|c_mod "):
+            # The Change action: answer with a refreshed seller list that
+            # carries the new price, like the live server (2026-11-23).
+            parts = text.split()
+            if len(parts) >= 7:
+                listing, vnum, amount, price = (
+                    parts[3],
+                    parts[4],
+                    parts[5],
+                    parts[6],
+                )
+                self.seller_entries = [
+                    entry
+                    for entry in self.seller_entries
+                    if not entry.startswith(f"{listing}|")
+                ]
+                self.seller_entries.append(
+                    f"{listing}|14881134|{vnum}|0|{amount}|0|{price}|1|"
+                    "600|2|2|0"
+                )
+                self._send(
+                    "RECV|rc_slist 0  0 "
+                    + " ".join(self.seller_entries)
+                    + "\n"
+                )
             return
         if text.startswith("SEND|c_blist "):
             parts = text.split()

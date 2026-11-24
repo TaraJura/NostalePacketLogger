@@ -3819,7 +3819,7 @@ class Application(Gtk.Application):
                     elif column == 5:
                         label.set_max_width_chars(26)
                 if column == 5:
-                    if quote.status in ("ok", "register-sent"):
+                    if quote.status in ("ok", "register-sent", "changed"):
                         label.add_css_class("bazar-ok")
                     elif quote.status in (
                         "timeout",
@@ -3827,6 +3827,7 @@ class Application(Gtk.Application):
                         "error",
                         "quantity",
                         "register-no-ack",
+                        "change-no-ack",
                         "no-window",
                     ):
                         label.add_css_class("bazar-bad")
@@ -3837,6 +3838,8 @@ class Application(Gtk.Application):
                         "no-vnum",
                         "register-pending",
                         "register-unknown",
+                        "change-pending",
+                        "change-unknown",
                     ):
                         label.add_css_class("bazar-warn")
                     else:
@@ -4334,7 +4337,12 @@ class Application(Gtk.Application):
                     "name so the host never undercuts you. Relist Start "
                     "searches only the relist set and sends one c_reg per "
                     "eligible item per pass at cheapest minus one gold, "
-                    "but never below the floor. The server answers an "
+                    "but never below the floor. If you already have a "
+                    "listing of that item with nothing sold, the pass "
+                    "changes its price with the in-game Change action "
+                    "(c_mod) instead of adding another; once anything from "
+                    "a listing has sold the Change action is gone and a new "
+                    "listing is added (c_reg). The server answers an "
                     "accepted c_reg with rc_reg, so the status reads "
                     "register accepted (rc_reg); no answer within 3 s means "
                     "the packet was ignored (register ignored (no rc_reg)), "
