@@ -9,7 +9,7 @@ the data layer in [database.md](database.md).
 
 - **Linux host**: 363 unittest cases, 6 GTK4 smokes, 44 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
-  linux all test-host`, tests above. The host is **0.7.4**: it opens the
+  linux all test-host`, tests above. The host is **0.7.5**: it opens the
   bazaar with the client's own shortcut (`c_skill` → `wopen 32`, FrosTale)
   when no Bibi or medal is available, and charges the bazaar's **50-gold
   minimum listing fee** in `c_reg` (the server silently drops a registration
@@ -90,7 +90,7 @@ the data layer in [database.md](database.md).
   per-row tick, **Add from Items** / **Add from Inventory**, **Remove from
   relisting**), an **Only relisting** filter, Ctrl+click multi-selection and
   **Group actions…** (select/unselect all, relist/stop all shown or
-  selected); the live checkbox, a character name and a positive floor.
+  selected); a character name and a positive floor (Relist Start is the only switch).
   Each pass asks the seller tab (`c_slist` → **`rc_slist`**) for our own
   listings: one with **nothing sold** is repriced with the in-game Change
   action (`c_mod`, no inventory slot needed, confirmed by the refreshed

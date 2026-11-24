@@ -85,8 +85,8 @@ The relist set. Tick a row to add it, untick to keep watching without
 changing its listing; **Add from Items** / **Add from Inventory** / **Remove
 from relisting**, **Only relisting**, Ctrl+click and **Group actions…**. Set
 the exact **Item vnum / Tab / Amount** and a positive **Min price**; the badge
-reads `ready` / `needs floor` / `needs vnum/tab`. With **Allow live
-re-listing** and your **Character** name, **Relist Start** opens the bazaar
+reads `ready` / `needs floor` / `needs vnum/tab`. With your **Character**
+name filled, **Relist Start** opens the bazaar
 itself (Bibi Basar, the portable NosBazar medal, or the client's own
 shortcut), undercuts the cheapest other listing by one gold — never below the
 floor — and charges the bazaar's 50-gold minimum listing fee. If you already
@@ -229,7 +229,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-Host **0.7.4** (Linux): 363 unit tests, 6 GTK4 window smokes and 44
+Host **0.7.5** (Linux): 363 unit tests, 6 GTK4 window smokes and 44
 fake-server bot smokes pass, and the real injector has been run against the
 live NosTale client under Wine 11 — both hooks `ACTIVE`, movement through the
 client's own MoveTo, auto-attack confirmed by the server's `su`, and the

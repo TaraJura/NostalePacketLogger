@@ -97,8 +97,9 @@ full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
    shows the real item name too. **Import NosMall…** adds whole catalog
    groups with a ready `c_blist` packet; **New** and **Delete** edit the
    list.
-7. To relist, tick **Allow live re-listing (changes your listings)** in the
-   **Relist** section and click **Relist Start**. **Relist Stop** stops it.
+7. To relist, click **Relist Start** in the **Relist** section. **Relist
+   Stop** stops it. (Relist Start is the only switch; there is no extra
+   "allow live re-listing" checkbox.)
 
 ## Monitor views
 
@@ -237,8 +238,7 @@ ivn 0 30.885.0.0.0.0.0                     # one equipment slot
   has one; otherwise a positive Item.dat NPC price becomes **NPC gold** cost,
   so the profit column still works. Both can be cleared in the editor.
 - **Price all** adds every distinct inventory item and starts **Monitor**
-  (search only). It does not change listings even when live re-listing is
-  armed; use **Relist Start** for that.
+  (search only). It never changes listings; use **Relist Start** for that.
 
 ## Item names
 
@@ -311,10 +311,9 @@ row by itself: tick **Relist** (or use Set up relist… / Add from…) to put
 the item in the set.
 
 To run it:
-1. Tick **Allow live re-listing (changes your listings)**.
-2. Fill **Character** with your exact character name (used to recognise your
+1. Fill **Character** with your exact character name (used to recognise your
    own listing).
-3. Click **Relist Start**.
+2. Click **Relist Start** — it is the only gate, nothing else to tick.
 
 The controller opens the bazaar if needed, asks the seller tab for our own
 listings (`c_slist 0 0 0`), searches only the relist set at the 2.5 s
@@ -375,9 +374,8 @@ temporary file). Before a client is attached the tab starts empty; when a
 client attaches and has no per-client file, `~/.config/ntpl/bazar.json` is
 loaded as a seed and saved per-client on the next change. The **Configuration**
 section holds the Bibi id, refresh interval, this file and **Reload names**
-(re-read item names after rebuilding the database); the Character name and
-live-relisting gate live in the **Relist** section because they only apply to
-relisting.
+(re-read item names after rebuilding the database); the Character name lives
+in the **Relist** section because it only applies to relisting.
 
 Example:
 
@@ -510,9 +508,10 @@ Items list and the Relist list from the shortcut to the real name without
 overwriting unsaved editor values, that the row copy label and the Delete
 message (even while a pass stops) use the real name, that **Reload names**
 drops the one-shot name cache, and that no `c_reg` was sent.
-`gui_bazar_relist_smoke.py` checks that the live-relist gate blocks the first
-attempt and then asserts the exact `c_reg` packet and the `register-sent`
-status. `gui_inventory_scan_smoke.py` feeds the live inventory shapes
+`gui_bazar_relist_smoke.py` starts the relist with a plain **Relist Start**
+(no extra checkbox) and asserts the exact `c_reg` packet and the
+`register-sent` status; `gui_bazar_change_smoke.py` asserts the `c_mod`
+change path instead. `gui_inventory_scan_smoke.py` feeds the live inventory shapes
 (3/5/7-field tokens, quantity 0, negative vnums), asserts the Inventory
 section rows/names/fields, adds one item and then prices the whole inventory
 without duplicates, checks **Set up relist…** switches to the Relist section

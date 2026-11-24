@@ -60,7 +60,6 @@ def main() -> int:
             )
             app.bazar.set_items([item], character="root1", refresh=30)
             app.bazar_character_entry.set_text("root1")
-            app.bazar_live_relist.set_active(True)
             app._bazar_start_relist()
             GLib.timeout_add(5000, check)
         except Exception as exc:  # noqa: BLE001

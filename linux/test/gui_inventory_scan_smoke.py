@@ -320,7 +320,6 @@ def main() -> int:
                 None if relist_item is None else relist_item.amount
             )
             app.bazar_character_entry.set_text("root1")
-            app.bazar_live_relist.set_active(True)
             app._bazar_start_relist()
             result["relist_mode"] = app.bazar.mode
             # A list rebuilt from later updates alone must be marked partial

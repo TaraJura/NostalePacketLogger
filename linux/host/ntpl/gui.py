@@ -694,7 +694,6 @@ class Application(Gtk.Application):
         # Two-step confirmation for the destructive cleanup button.
         self._nosmall_prune_armed_at = 0.0
         self._nosmall_prune_count = 0
-        self.bazar_live_relist = None
         self.bazar_refresh_spin = None
         self.bazar_npc_entry = None
         self.bazar_character_entry = None
@@ -1447,9 +1446,6 @@ class Application(Gtk.Application):
             self.bazar_timer = None
         if self.bazar.running:
             self.bazar.stop(reason)
-        # Never leave the live-relist gate armed after a stop.
-        if self.bazar_live_relist is not None:
-            self.bazar_live_relist.set_active(False)
         self._bazar_update_info()
         self._bazar_update_relist_info()
 
@@ -1514,11 +1510,6 @@ class Application(Gtk.Application):
         return repaired
 
     def _bazar_start_relist(self) -> None:
-        if self.bazar_live_relist is None or not self.bazar_live_relist.get_active():
-            self._bazar_log(
-                "relisting is disabled; tick 'Allow live re-listing' first"
-            )
-            return
         if self.client is None or not self.client.connected:
             self._bazar_log("not connected")
             return
@@ -4223,15 +4214,6 @@ class Application(Gtk.Application):
         page.set_margin_end(6)
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
 
-        self.bazar_live_relist = Gtk.CheckButton(
-            label="Allow live re-listing (changes your listings)"
-        )
-        self.bazar_live_relist.set_active(False)
-        self.bazar_live_relist.set_tooltip_text(
-            "Required for Relist Start; changes your prices and spends the fee."
-        )
-        content.append(self.bazar_live_relist)
-
         self.bazar_character_entry = Gtk.Entry()
         self.bazar_character_entry.set_placeholder_text("your character")
         self.bazar_character_entry.set_max_length(40)
@@ -4332,9 +4314,9 @@ class Application(Gtk.Application):
                     "selected), plus Select all shown and Unselect all. "
                     "Select an item, set the "
                     "exact Item vnum, the inventory Tab and the Amount, "
-                    "then a positive Min price (the per-unit floor). Tick "
-                    "Allow live re-listing and fill Character with your own "
-                    "name so the host never undercuts you. Relist Start "
+                    "then a positive Min price (the per-unit floor), and "
+                    "fill Character with your own name so the host never "
+                    "undercuts you. Relist Start needs nothing else: it "
                     "searches only the relist set and sends one c_reg per "
                     "eligible item per pass at cheapest minus one gold, "
                     "but never below the floor. If you already have a "

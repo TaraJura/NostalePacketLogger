@@ -1,8 +1,8 @@
 """Headless NosBazar relist smoke test.
 
-Exercises the risky half of the feature: the live-relist gate must do nothing
-until the checkbox is ticked, then the controller must undercut the fake
-cheapest listing by one gold and send the exact ``c_reg`` packet.
+Exercises the risky half of the feature: **Relist Start** is the only gate,
+then the controller must undercut the fake cheapest listing by one gold and
+send the exact ``c_reg`` packet.
 """
 
 from __future__ import annotations
@@ -57,14 +57,9 @@ def main() -> int:
             )
             app.bazar.set_items([item], character="root1", refresh=30)
             app.bazar_character_entry.set_text("root1")
-            # First attempt with the safety gate off: nothing must go out.
+            # Relist Start is the only gate; no extra checkbox to tick.
             app._bazar_start_relist()
-            gate_text = app.bazar_status.get_text() or ""
-            result["gate"] = (
-                not app.bazar.running and "disabled" in gate_text
-            )
-            app.bazar_live_relist.set_active(True)
-            app._bazar_start_relist()
+            result["gate"] = app.bazar.running
             GLib.timeout_add(5000, check)
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"start exception: {exc!r}"
