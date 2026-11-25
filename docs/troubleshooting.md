@@ -30,7 +30,7 @@
 | `MOVE` sent, but the character does not move | character is sitting, or the target is blocked | `POS` reports the rest flag (1 sitting) and the DLL answers `MOVE: character is sitting (stand up first)`; the GUI now trusts that answer, cancels the refused leg and stands at once. For the CLI send `rest 1 1 <charId>` once; then try another adjacent tile |
 | Character teleports instead of walking | a raw `walk` packet was injected; the client did not animate it | use `MOVE` / `ntpl walk`, which calls the client's own MoveTo |
 | `MOVE` returns `client build mismatch` | the client build moved the MoveTo function | re-derive the address (see `docs/protocol/movement.md`); raw packets still work |
-| `POS` returns "not readable" | the client build moved the player object | re-derive the player global (2026-11-18: `0x007954B4`, chain `[[0x007954B4]]`) and the +4/+6/+0x24 layout |
+| `POS` returns "not readable" | the client build moved the player object | re-derive the player global (2026-11-25: `0x007964BC`, chain `[[0x007964BC]]`; 2026-11-18 was `0x007954B4`) and the +4/+6/+0x24 layout. A Gameforge maintenance update replaces the client exe, so this repeats after a build change |
 | `cast` sent, but no `su` | character sitting, target out of range, or the `u_s` field order is wrong | stand, move into range, and use `--packet "u_s …"` with a layout captured from the live client |
 | `rest` toggles twice | two identical packets were sent | send `rest 1 1 <charId>` once per state change |
 | Client looks stuck after many injected walks | injected walks can desync the client | use `MOVE`; if already desynced, relog/restart the client |

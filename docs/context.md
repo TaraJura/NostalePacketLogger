@@ -7,6 +7,13 @@ the data layer in [database.md](database.md).
 
 ## Current state
 
+- **Client build**: 2026-11-25 Gameforge maintenance updated NosTale to
+  **0.9.3.3262 (build 6124)**; 0.3.0's hardcoded player global/MoveTo
+  addresses no longer matched and `POS` returned "player object not
+  readable". **DLL 0.3.1** re-derives them (player global `0x007964BC`,
+  MoveTo `0x0056620C`, speed table `0x0078B3C8`) and needs a **game-client
+  restart/re-inject**. The host also logs a repeated POS read error only
+  once instead of every poll.
 - **Linux host**: 363 unittest cases, 6 GTK4 smokes, 44 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
   linux all test-host`, tests above. The host is **0.7.5**: it opens the

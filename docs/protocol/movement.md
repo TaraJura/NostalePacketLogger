@@ -46,8 +46,9 @@ walk 20 139 0 10    (20 + 139 = 159; 159 % 3 == 0 -> checksum 0)
 
 ### Client-side walking (what the bot uses)
 
-The client's own pathfinding entry point is at VA `0x00576920` in the
-2026-11-18 build (`0x565E88` in 2026-11-03):
+The client's own pathfinding entry point is at VA `0x0056620C` in the
+2026-11-25 build (0.9.3.3262; `0x00576920` in 0.9.3.3261, `0x565E88` in
+2026-11-03):
 
 ```
 __fastcall bool MoveTo(PlayerObject *this /*EAX*/,
@@ -56,15 +57,19 @@ __fastcall bool MoveTo(PlayerObject *this /*EAX*/,
                        int run /*stack*/)
 ```
 
-`packedXY` is `x | (y << 16)`. The player object is `[[0x007954B4]]` in the
-2026-11-18 build (`[[0x792468]]` before); its int16
+`packedXY` is `x | (y << 16)`. The player object is `[[0x007964BC]]` in the
+2026-11-25 build (0.9.3.3262; `[[0x007954B4]]` in 0.9.3.3261, `[[0x792468]]`
+before); its int16
 x is at +4, y at +6, and char id at +0x24. `MOVE|x y` in the DLL calls this
 function, so the client computes a path, animates the movement and sends its
 own `walk` packet with the correct checksum. `POS` reads the local position.
 This is what makes the character actually walk instead of teleporting.
 
-The DLL validates the function prologue before calling it; a client patch
-returns `MOVE: client build mismatch` instead of crashing.
+The timing table used by the speed setter is `0x0078B3C8` in 0.9.3.3262
+(`0x0078A3C8` in 0.9.3.3261); its references use the indexed
+`opcode modrm sib disp32` form. The DLL re-derives MOVE from its prologue and
+validates the function prologue before calling it; a client patch returns
+`MOVE: client build mismatch` instead of crashing.
 
 **Live verification (2026-11-06, Wine, charId 14881134):**
 

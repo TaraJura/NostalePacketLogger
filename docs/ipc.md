@@ -77,14 +77,16 @@ build reported, so a host can parse it or just display it:
 ### Movement commands
 
 `MOVE|<x> <y>` calls the client's own pathfinding/MoveTo function
-(`0x00576920` in the 2026-11-18 build; `0x565E88` in 2026-11-03) with
+(`0x0056620C` in the 2026-11-25 build / 0.9.3.3262; `0x00576920` in
+0.9.3.3261; `0x565E88` in 2026-11-03) with
 `x | (y << 16)`; the client computes a
 path, animates it and sends its own `walk` packets. This is deliberately not a
 packet injection: an injected `walk` moves only the server and the client
 teleports when the correction arrives.
 
-`POS` reads the local player object (`[[0x007954B4]]` in the 2026-11-18 build;
-`[[0x792468]]` before): int16 x at +4, int16 y
+`POS` reads the local player object (`[[0x007964BC]]` in the 2026-11-25 build /
+0.9.3.3262; `[[0x007954B4]]` in 0.9.3.3261; `[[0x792468]]` before): int16 x at
++4, int16 y
 at +6, uint32 char id at +0x24, rest state at +0xA9 (1 sitting, 0 standing).
 The reply is `STATUS|POS <x> <y> <charId> <resting>`; `<resting>` is 1 sitting,
 0 standing, -1 when the client cannot be read. A host that attaches after the

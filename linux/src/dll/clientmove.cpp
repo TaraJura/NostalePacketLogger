@@ -23,15 +23,18 @@ extern "C" void ntpl_client_speed(void* entity, int speed,
 
 namespace {
 
-// Client build 2026-11-18 (the FrosTale-patched client). The previous build's
-// values were 0x00792468 / 0x00565E88; the prologue signature below still
-// matches, so MOVE can be re-found after a patch by scanning it.
-constexpr std::uintptr_t kPlayerGlobal = 0x007954B4;
-constexpr std::uintptr_t kMoveFunction = 0x00576920;
+// Client build 2026-11-25 (0.9.3.3262, the Gameforge maintenance update).
+// The previous build's values were 0x007954B4 / 0x00576920 (0.9.3.3261,
+// 2026-11-18).  Wine maps the PE at its usual 0x00400000 base, so these are
+// stable virtual addresses; the prologue signatures below are still used to
+// re-find MOVE after a patch by scanning the code range.
+constexpr std::uintptr_t kPlayerGlobal = 0x007964BC;
+constexpr std::uintptr_t kMoveFunction = 0x0056620C;
 
 // The entity speed setter the client's `cond` handler calls. It writes the
 // speed byte at entity +0xAA (and recomputes the walking timer). The walk
 // packet builder reads that same byte, so setting it moves the player.
+// This function did not move in the 2026-11-25 build.
 constexpr std::uintptr_t kSpeedFunction = 0x00492938;
 
 // 55 8B EC 83 C4 EC 53 56 57 66 89 4D FA ...  (MoveTo prologue)
@@ -74,8 +77,9 @@ bool client_position(int& x, int& y, unsigned long& char_id, int& resting,
         return false;
     }
 
-    // The local player object this build: int16 x at +4, int16 y at +6,
-    // uint32 char id at +0x24, rest state at +0xA9 (1 sitting, 0 standing).
+    // The local player object (verified on 0.9.3.3262 too): int16 x at +4,
+    // int16 y at +6, uint32 char id at +0x24, rest state at +0xA9 (1 sitting,
+    // 0 standing).
     x = *reinterpret_cast<const std::int16_t*>(player + 4);
     y = *reinterpret_cast<const std::int16_t*>(player + 6);
     char_id = *reinterpret_cast<const std::uint32_t*>(player + 0x24);
@@ -140,7 +144,7 @@ bool client_move(int x, int y, std::string& error)
 namespace {
 
 // The local player entity whose speed byte the walk packet builder reads:
-// manager = [[0x7954B4]], entity = [manager + 0x20].
+// manager = [[0x7964BC]], entity = [manager + 0x20].
 bool player_entity(std::uintptr_t& entity, std::string& error)
 {
     if (!readable(kPlayerGlobal)) {
@@ -186,16 +190,20 @@ bool client_speed_get(int& speed, std::string& error)
 
 namespace {
 
-// The client's movement timing reads a 60-entry float table at 0x0078A3C8,
-// indexed by the entity's speed byte. Its setter refuses anything above 59
+// The client's movement timing reads a 60-entry float table, indexed by the
+// entity's speed byte. Its setter refuses anything above 59
 // (`cmp dl,0x3b / ja`). Both limits are lifted here for the local player:
 // the cap byte becomes 0xff and every code reference to the table is pointed
 // at a 256-entry copy. Entries 0..59 are the client's own values, so normal
 // play is unchanged; 60..255 continue the same linear timing and entry 255
 // can be scaled to emulate a speed above the byte maximum.
+//
+// 0.9.3.3262 (2026-11-25): the table moved 0x78A3C8 -> 0x78B3C8 and the
+// references use the indexed `opcode modrm sib disp32` form
+// (e.g. `D8 34 85 C8 B3 78 00`) as well as the old `opcode 85 disp32`.
 constexpr std::uintptr_t kCodeStart = 0x00401000;
 constexpr std::uintptr_t kCodeEnd = 0x00787DC4;
-constexpr std::uintptr_t kSpeedTable = 0x0078A3C8;
+constexpr std::uintptr_t kSpeedTable = 0x0078B3C8;
 constexpr int kSpeedTableEntries = 256;
 
 std::uintptr_t g_speed_table = 0;  // our extended table; 0 = not installed
@@ -272,15 +280,31 @@ bool extend_speed_table(std::string& error)
     const std::size_t code_size = kCodeEnd - kCodeStart;
     unsigned char* table_refs[32];
     int ref_count = 0;
-    for (std::size_t i = 2; i + 4 <= code_size; ++i) {
-        if (code[i] != 0xC8 || code[i + 1] != 0xA3 ||
-            code[i + 2] != 0x78 || code[i + 3] != 0x00) {
+    const unsigned char table_bytes[4] = {
+        static_cast<unsigned char>(kSpeedTable & 0xFF),
+        static_cast<unsigned char>((kSpeedTable >> 8) & 0xFF),
+        static_cast<unsigned char>((kSpeedTable >> 16) & 0xFF),
+        static_cast<unsigned char>((kSpeedTable >> 24) & 0xFF),
+    };
+    for (std::size_t i = 3; i + 4 <= code_size; ++i) {
+        if (std::memcmp(code + i, table_bytes, 4) != 0) {
             continue;
         }
-        const unsigned char opcode = code[i - 2];
-        const unsigned char sib = code[i - 1];
-        if (sib != 0x85 ||
-            (opcode != 0xD9 && opcode != 0xD8 && opcode != 0x8B)) {
+        // Two encodings reference the table:
+        //   opcode 85 <disp32>           (e.g. D9 85 C8 A3 78 00)
+        //   opcode modrm 85 <disp32>     (e.g. D8 34 85 C8 B3 78 00)
+        if (code[i - 1] != 0x85) {
+            continue;
+        }
+        bool matches = code[i - 2] == 0xD9 || code[i - 2] == 0xD8 ||
+                       code[i - 2] == 0x8B;
+        if (!matches) {
+            const unsigned char modrm = code[i - 2];
+            matches = (modrm & 0xC7) == 0x04 &&
+                      (code[i - 3] == 0xD9 || code[i - 3] == 0xD8 ||
+                       code[i - 3] == 0x8B);
+        }
+        if (!matches) {
             continue;
         }
         if (ref_count >=

@@ -462,11 +462,13 @@ never sees the `at` packet.
 - Leg size and pacing are constants in `gui.py` (three cells; `walk_confirm_
   delay = 0.45 s/cell`). A very long `MOVE` makes the client jump to the
   destination rather than animate, so keep legs short.
-- `MOVE` calls a client-build-specific function (`0x00576920` in the
-  2026-11-18 build; re-derive it from its prologue signature after a patch).
+- `MOVE` calls a client-build-specific function (`0x0056620C` in the
+  2026-11-25 build / 0.9.3.3262; `0x00576920` in 0.9.3.3261; re-derive it from
+  its prologue signature after a patch).
   The DLL validates its prologue and reports `MOVE: client build mismatch`
   after a client patch instead of crashing. `POS` reads the client's local
-  player object (`[[0x007954B4]]` in the 2026-11-18 build): int16 x at +4,
+  player object (`[[0x007964BC]]` in the 2026-11-25 build; `[[0x007954B4]]`
+  in 0.9.3.3261): int16 x at +4,
   y at +6, char id at +0x24.
 - Packet-only walking is still possible (`SEND|walk` with
   `walk_checksum(x, y)`), and the checksum is `1 if (x + y) % 3 == 1`; but the

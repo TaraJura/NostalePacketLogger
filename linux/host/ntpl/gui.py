@@ -585,6 +585,9 @@ class Application(Gtk.Application):
         # destination.
         self.pos_cell: tuple[int, int] | None = None
         self.pos_at = 0.0
+        # The last POS read error, so a build-mismatched DLL that polls twice
+        # a second logs it once instead of flooding the Bot log.
+        self._pos_error_text = ""
         # Click-to-walk: short client-MoveTo legs along the A* path, so a far
         # click does not become one long MOVE that the client jumps.
         self.travel_targets: list[tuple[int, int]] = []
@@ -10636,6 +10639,7 @@ class Application(Gtk.Application):
                                     self.engine.world.resting = bool(rest)
                             self.pos_cell = (x, y)
                             self.pos_at = time.monotonic()
+                            self._pos_error_text = ""
                             self._learn_char_id(char_id)
                             # The POS poll runs twice a second; do not flood
                             # the status bar (it hid action messages).
@@ -10891,6 +10895,21 @@ class Application(Gtk.Application):
                             "DLL is too old for target selection; "
                             "falling back to ncif (re-inject the new DLL)"
                         )
+                elif message.payload.startswith("POS:"):
+                    # The DLL's player-object reader is build-specific and
+                    # polls twice a second. When the client build moved the
+                    # object, every poll returns the same error; log it once
+                    # (a successful POS clears the latch) and keep the status
+                    # bar updated instead of filling the Bot log.
+                    if message.payload != self._pos_error_text:
+                        self._pos_error_text = message.payload
+                        self._log_line(
+                            message.payload
+                            + " (client build changed? rebuild and "
+                            "reinject the DLL)"
+                        )
+                    if self.status is not None:
+                        self.status.set_text(message.payload)
                 else:
                     self._set_status(message.payload)
             elif message.kind is Kind.QUIT:
