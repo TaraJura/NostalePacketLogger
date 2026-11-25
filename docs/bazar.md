@@ -90,7 +90,9 @@ full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
    full editor has **Name** (the shortcut label), **Search vnums**,
    **Raw packet**, **Item vnum**, **Tab**, **Amount**, **Min price**,
    **Cost**, the **Tracking** switches (**Monitor**, **Relist**) and the
-   advanced `c_reg` fields. The **Cost** type chooses the
+   advanced `c_reg` fields. **Search vnums** are aliases searched together;
+   the Monitor uses only those whose Item.dat name matches the row's **Item
+   vnum** (see the name-aware group note under caveats). The **Cost** type chooses the
    monitor: **NosMall ND** → the NosMall tab, **NPC gold** → the NPC resale
    tab, **No cost** → the NosMall tab as price discovery. For NPC gold, leave
    the **Cost** at 0 on save and the Item.dat NPC price fills in. The list

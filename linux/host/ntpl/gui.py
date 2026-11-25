@@ -4922,11 +4922,13 @@ class Application(Gtk.Application):
                 Gtk.Label(label="Name"), name_entry, copy_name
             )
         )
+        vnums_entry = entry("vnums", "e.g. 1261 2174", 18)
+        vnums_entry.set_tooltip_text(
+            "Alias vnums; the Monitor searches only those whose item name "
+            "matches this row's Item vnum."
+        )
         box.append(
-            self._field_row(
-                Gtk.Label(label="Search vnums"),
-                entry("vnums", "e.g. 1261 2174", 18),
-            )
+            self._field_row(Gtk.Label(label="Search vnums"), vnums_entry)
         )
         raw = entry("raw", "optional full c_blist …", 18)
         raw.set_tooltip_text(
