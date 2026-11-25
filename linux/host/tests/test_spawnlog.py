@@ -22,6 +22,7 @@ from ntpl.spawnlog import (
     load_player_metadata,
     load_player_spawns,
     load_portals,
+    load_self_name,
     load_skill_list,
     load_skill_slots,
     load_spawns,
@@ -59,6 +60,17 @@ class SpawnLogTests(unittest.TestCase):
         self.assertEqual(
             load_player_spawns(log), {4165102: ("Guder", 106, 24)}
         )
+
+    def test_load_self_name_reads_a_login_spawn_older_than_the_tail(self):
+        # The tail read stops before the login line; the one-shot full scan
+        # must still find it.  A later line with another char id is ignored.
+        log = self._write(
+            "17:00:00.000 [RECV] in 1 root1 - 7001 76 73 2 0 0 0\r\n"
+            + "x" * 20000 + "\n"
+            "17:10:00.000 [RECV] in 1 Other - 7002 1 2 2 0 0 0\r\n"
+        )
+        self.assertEqual(load_self_name(7001, log), "root1")
+        self.assertIsNone(load_self_name(9999, log))
 
     def test_player_name_does_not_swallow_later_dash_fields(self):
         # Live map-20 line: the stat/equipment tail contains spaces and -1

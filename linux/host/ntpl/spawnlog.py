@@ -227,6 +227,37 @@ def load_spawns(
     return vnums, names
 
 
+def load_self_name(
+    char_id: int, path: str | Path | None = None
+) -> str | None:
+    """The local character's name from an ``in 1`` line anywhere in the log.
+
+    :func:`load_spawns` reads only the recent tail; the self spawn is a
+    login event and can be older than that.  The DLL log is capped at
+    16 MB, so a one-shot full read at attach is cheap.  The newest matching
+    line wins.
+    """
+    if int(char_id) <= 0:
+        return None
+    source = Path(path) if path is not None else default_log_path()
+    if source is None:
+        return None
+    try:
+        data = source.read_bytes()
+    except OSError:
+        return None
+    name: str | None = None
+    for line in data.decode("latin1", "replace").splitlines():
+        marker = line.find(_IN_MARKER)
+        if marker < 0:
+            continue
+        record = line[marker + len(_IN_MARKER):].strip()
+        match = _PLAYER.match(record)
+        if match and int(match.group(2)) == int(char_id):
+            name = match.group(1).strip()
+    return name or None
+
+
 def load_player_spawns(
     path: str | Path | None = None,
 ) -> dict[int, tuple[str, int, int]]:

@@ -323,9 +323,10 @@ row by itself: tick **Relist** (or use Set up relist… / Add from…) to put
 the item in the set.
 
 To run it:
-1. **Character** is filled from the attached client automatically (its own
-   spawn or a party list names it); type it only when the client was
-   attached before the name was seen. It is used to recognise your own
+1. **Character** is filled from the attached client automatically: the
+   self `in 1` spawn (the whole DLL log is searched, not just its tail) or
+   the party/raid list (`rdlst`) names it. Type it only when the client was
+   attached before either packet was seen. It is used to recognise your own
    listing.
 2. Click **Relist Start** — it is the only gate, nothing else to tick.
 

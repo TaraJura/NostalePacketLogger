@@ -121,6 +121,22 @@ class EngineTests(unittest.TestCase):
         # This short synthetic packet has no family fields: do not guess.
         self.assertFalse(entity.family_known)
 
+    def test_party_list_learns_names_including_the_local_player(self):
+        # Live 2026-11-26: rdlst <a> <b> <c> <level>.<x>.<y>.<f>.<name>...
+        self.engine.feed(
+            packet(Kind.RECV, "at 7001 2628 76 73 2 0 115 1 -1 0 0")
+        )
+        world = self.engine.feed(
+            packet(
+                Kind.RECV,
+                "rdlst 85 99 17 99.18.2.0.SleepyIRL.1.22.69 "
+                "89.14.3.0.root1.0.7001.30 94.24.2.0.Oxygen.1.2035.53",
+            )
+        )
+        self.assertEqual(world.player_names[22], "SleepyIRL")
+        self.assertEqual(world.player_names[7001], "root1")
+        self.assertEqual(world.self_name, "root1")
+
     def test_player_spawn_reads_family(self):
         # Live map 20 line: family id 70.918 and family name at the end.
         world = self.engine.feed(

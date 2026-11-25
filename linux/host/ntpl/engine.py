@@ -737,6 +737,33 @@ def _on_spawn(world: WorldState, packet: Packet) -> None:
         entity.y = y
 
 
+def _on_party_list(world: WorldState, packet: Packet) -> None:
+    """Learn player names from the party/raid list.
+
+    Live shape (2026-11-26)::
+
+        rdlst <a> <b> <c> <level>.<x>.<y>.<flags>.<name>.<class>.<charId>.<hp> ...
+
+    The list includes the local player, so a host that attached after the
+    login spawn still learns its own name (and the relist never needs it
+    typed).  Player names carry no dots, so the dot fields are unambiguous.
+    """
+    parts = packet.text.split(None, 4)
+    if len(parts) < 5:
+        return
+    for token in parts[4].split():
+        fields = token.split(".")
+        if len(fields) < 7:
+            continue
+        name = fields[4].strip()
+        try:
+            char_id = int(fields[6])
+        except ValueError:
+            continue
+        if char_id > 0 and name and name != "-":
+            world.player_names[char_id] = name
+
+
 def _on_family_index(world: WorldState, packet: Packet) -> None:
     # gidx 1 <entityId> <familyId>.<rank> <familyName> ...
     # The server sends it for players already on the map and when membership
@@ -1075,6 +1102,7 @@ class Engine:
                 "c_skill": _on_client_skill,  # SEND: client shortcut (opens
                 #                                the bazaar on FrosTale)
                 "in": _on_spawn,        # RECV: entity spawned
+                "rdlst": _on_party_list,  # RECV: party/raid list (names)
                 "gidx": _on_family_index,  # RECV: player family id/name
                 "pairy": _on_fairy_info,  # RECV: player fairy element
                 "out": _on_despawn,     # RECV: entity despawned

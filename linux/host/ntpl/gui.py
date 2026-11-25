@@ -118,6 +118,7 @@ from .spawnlog import (
     load_portals as load_log_portals,
     load_skill_list,
     load_skill_slots,
+    load_self_name,
     load_spawns,
     load_timespaces,
     log_was_truncated,
@@ -729,6 +730,9 @@ class Application(Gtk.Application):
         self.bazar_relist_group_button = None
         self._bazar_render_version = -1
         self._bazar_character_autofilled = False
+        #: The self name was looked for in the whole DLL log once per attach
+        #: (the login spawn can be older than the log tail).
+        self._self_name_scanned = False
         self._bazar_npc_autofilled = False
         self._bazar_npc_autofill_value = ""
         self._bazar_config_loaded = False
@@ -2314,6 +2318,20 @@ class Application(Gtk.Application):
 
     def _bazar_sync_from_world(self) -> None:
         world = self.engine.world
+        # The login `in 1 <name> - <charId>` can be older than the DLL log
+        # tail read at attach. Once the self id is known, look through the
+        # whole (16 MB-capped) log for the name; the party/raid list also
+        # feeds WorldState.player_names live.
+        if (
+            not world.self_name
+            and world.self_id
+            and not self._self_name_scanned
+            and self.log_file
+        ):
+            self._self_name_scanned = True
+            name = load_self_name(world.self_id, self.log_file)
+            if name:
+                world.player_names[world.self_id] = name
         if (
             self.bazar_character_entry is not None
             and not self._bazar_character_autofilled
@@ -4075,6 +4093,7 @@ class Application(Gtk.Application):
             GLib.source_remove(self._inventory_cache_source)
             self._inventory_cache_source = None
         self._bazar_character_autofilled = False
+        self._self_name_scanned = False
         self._bazar_npc_autofilled = False
         self._bazar_npc_autofill_value = ""
         self.bazar_config_path = self._bazar_path_for(winpid)
