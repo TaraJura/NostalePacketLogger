@@ -560,6 +560,7 @@ class Application(Gtk.Application):
         self.player_targets: dict[int, tuple[int, float]] = {}
         self.attack_unknown_toggle = None
         self.recover_banner = None
+        self.char_name = None
         self.unknown_warn_at = 0.0
 
         self.waypoints: list[tuple[int, int]] = []
@@ -3145,11 +3146,13 @@ class Application(Gtk.Application):
         label = self.bazar_relist_info
         if label is None:
             return
-        character = ""
-        if self.bazar_character_entry is not None:
+        character = (
+            self.engine.world.self_name
+            or self.bazar.config.character
+            or ""
+        ).strip()
+        if not character and self.bazar_character_entry is not None:
             character = self.bazar_character_entry.get_text().strip()
-        if not character:
-            character = self.bazar.config.character.strip()
         npc = ""
         if self.bazar_npc_entry is not None:
             npc = self.bazar_npc_entry.get_text().strip()
@@ -3174,12 +3177,16 @@ class Application(Gtk.Application):
             for item in self.bazar.config.items
             if self._bazar_relist_ready(item)
         )
-        parts = [
-            f"character {character}" if character else "character missing",
-            f"Bibi {npc}" if npc else "Bibi id missing",
-            f"{tracked} relisting",
-            f"{ready} ready",
-        ]
+        parts = []
+        if character:
+            parts.append(f"character {character}")
+        parts.extend(
+            [
+                f"Bibi {npc}" if npc else "Bibi id missing",
+                f"{tracked} relisting",
+                f"{ready} ready",
+            ]
+        )
         label.set_text(" · ".join(parts))
 
     @staticmethod
@@ -4339,22 +4346,16 @@ class Application(Gtk.Application):
         page.set_margin_end(6)
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
 
+        # The character is detected from packets (self spawn, party list,
+        # seller-list owner id), so the Relist UI never asks for a name.  The
+        # entry stays as an internal fallback for the config/older callers
+        # and is deliberately not added to the layout.
         self.bazar_character_entry = Gtk.Entry()
         self.bazar_character_entry.set_placeholder_text("your character")
         self.bazar_character_entry.set_max_length(40)
         self.bazar_character_entry.set_width_chars(18)
-        self.bazar_character_entry.set_tooltip_text(
-            "Filled from the attached character automatically; used to "
-            "recognise your own listing."
-        )
         self.bazar_character_entry.connect(
             "changed", lambda *_: self._bazar_update_relist_info()
-        )
-        content.append(
-            self._field_row(
-                Gtk.Label(label="Character"),
-                self.bazar_character_entry,
-            )
         )
 
         self.bazar_relist_info = Gtk.Label(label="")
@@ -4441,10 +4442,10 @@ class Application(Gtk.Application):
                     "Select an item, set the "
                     "exact Item vnum, the inventory Tab and the Amount, "
                     "then a positive Min price (the per-unit floor). "
-                    "Character is filled from the attached client "
-                    "automatically (type it only when the client was "
-                    "attached before its name was seen) so the host never "
-                    "undercuts you. Relist Start needs nothing else: it "
+                    "Your own listings are recognised by character id (or "
+                    "the name from the client's spawn/party list), so there "
+                    "is no name field to fill. Relist Start needs nothing "
+                    "else: it "
                     "searches only the relist set and sends one c_reg per "
                     "eligible item per pass at cheapest minus one gold, "
                     "but never below the floor. If you already have a "
@@ -5334,8 +5335,15 @@ class Application(Gtk.Application):
         sidebar.set_margin_start(2)
         sidebar.set_margin_end(2)
 
-        # Character: live HP/MP bars and position.
+        # Character: the name above live HP/MP bars and the position.
         char_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.char_name = Gtk.Label()
+        self.char_name.set_xalign(0)
+        self.char_name.set_ellipsize(Pango.EllipsizeMode.END)
+        self.char_name.set_tooltip_text(
+            "The attached character's name, from its spawn or party list."
+        )
+        char_box.append(self.char_name)
         self.stats_area = Gtk.DrawingArea()
         self.stats_area.set_content_height(92)
         self.stats_area.set_draw_func(self._draw_stats)
@@ -8629,6 +8637,16 @@ class Application(Gtk.Application):
         if self.char_info is None:
             return
         world = self.engine.world
+        name = (
+            world.self_name or self.bazar.config.character or ""
+        ).strip()
+        if self.char_name is not None:
+            if name:
+                self.char_name.set_markup(
+                    f"<b>{GLib.markup_escape_text(name)}</b>"
+                )
+            else:
+                self.char_name.set_text("")
         parts = []
         if world.map_id is not None:
             parts.append(f"map {world.map_id}")

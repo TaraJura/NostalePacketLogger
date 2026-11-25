@@ -202,7 +202,8 @@ grouped by function:
   `nosapki.com/images/nt-images/ts-1.png`); if the asset is missing the
   marker falls back to an amber ring. A crossing is the fallback when a
   `gp` list was missed.
-- **Character** — live HP and MP bars with current/max/missing values, plus
+- **Character** — the character's name above live HP and MP bars with
+  current/max/missing values, plus
   map/position/char id. HP and MP are fed by the server's `stat` packets.
   While recovering, a red **RECOVERING** banner states the HP percentage and
   that attacks/movement are paused; all toggle buttons are green when active

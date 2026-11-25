@@ -180,10 +180,14 @@ class BazarListing:
     seller: str = ""
     vnum: int | None = None
     amount: int | None = None
+    #: The seller's character id (field 1). The relist compares it with our
+    #: own id so it recognises our listing without knowing our name.
+    owner_id: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "seller": self.seller,
+            "owner_id": self.owner_id,
             "price": self.price,
             "vnum": self.vnum,
             "amount": self.amount,
@@ -277,6 +281,11 @@ def parse_rc_blist(text: str) -> BazarResponse:
                 amount = int(fields[4])
             except ValueError:
                 pass
+        owner_id = None
+        try:
+            owner_id = int(fields[1])
+        except (IndexError, ValueError):
+            pass
         listings.append(
             BazarListing(
                 raw_fields=fields,
@@ -284,6 +293,7 @@ def parse_rc_blist(text: str) -> BazarResponse:
                 seller=fields[2],
                 vnum=vnum,
                 amount=amount,
+                owner_id=owner_id,
             )
         )
     return BazarResponse(
@@ -1259,13 +1269,13 @@ class BazarController:
     def start_relist(
         self, world: "WorldState", refresh: float | None = None
     ) -> bool:
-        if not self.config.character:
-            self.last_error = (
-                "relist needs your character name (to avoid undercutting "
-                "your own listing)"
-            )
-            self._log(self.last_error)
-            return False
+        """Start relisting; the character name is not required.
+
+        Our own listings are recognised by character id (the position
+        packet's id, or the owner id of the seller list this pass fetches),
+        so a fresh client never has to type a name.  The configured name
+        stays as a fallback when no id is known yet.
+        """
         return self._start(world, "relist", refresh)
 
     def _start(
@@ -1820,16 +1830,32 @@ class BazarController:
         }
         self._next_send = now + SEARCH_INTERVAL_S
 
+    def _own_id(self, world: "WorldState") -> int | None:
+        """Our character id, without needing the name.
+
+        ``WorldState.self_id`` comes from the position packet.  When a host
+        attached after login and never saw it, the seller tab (requested at
+        the start of every relist pass) lists only our own listings, so any
+        entry's owner id identifies us.
+        """
+        if world.self_id:
+            return int(world.self_id)
+        for entry in world.bazar.seller_entries:
+            if entry.owner_id > 0:
+                return int(entry.owner_id)
+        return None
+
     def _changeable_listings(
         self, world: "WorldState", vnum: int | None
     ) -> list[SellerEntry]:
         """Our listings of ``vnum`` that still offer the in-game Change."""
-        if vnum is None or world.self_id is None:
+        own_id = self._own_id(world)
+        if vnum is None or own_id is None:
             return []
         return [
             entry
             for entry in world.bazar.seller_entries
-            if entry.owner_id == world.self_id
+            if entry.owner_id == own_id
             and entry.vnum == vnum
             and entry.changeable
         ]
@@ -2129,15 +2155,25 @@ class BazarController:
             )
             self._log(f"{self._item_label(item)}: not relisted ({quote.detail})")
             return
+        own_id = self._own_id(world)
+        listing_owner = (
+            quote.listing.owner_id if quote.listing is not None else None
+        )
         own_name = (
             world.self_name or self.config.character or ""
         ).strip()
-        own_key = _name_key(own_name)
-        seller_key = _name_key(quote.seller)
-        if own_name and (
-            quote.seller.strip() == own_name
-            or (own_key and own_key == seller_key)
-        ):
+        if own_id is not None and listing_owner is not None:
+            is_own = int(listing_owner) == own_id
+        elif own_name:
+            own_key = _name_key(own_name)
+            seller_key = _name_key(quote.seller)
+            is_own = (
+                quote.seller.strip() == own_name
+                or bool(own_key and own_key == seller_key)
+            )
+        else:
+            is_own = False
+        if is_own:
             quote.status = "own"
             self._log(
                 f"{self._item_label(item)}: you are already the cheapest "

@@ -1140,11 +1140,35 @@ class ControllerTests(unittest.TestCase):
         # A new cycle keeps the previous row until the new answer arrives.
         self.assertEqual(controller.results["bubbl"].status, "floor")
 
-    def test_relist_requires_character(self) -> None:
+    def test_relist_starts_without_a_character_name(self) -> None:
+        # Own listings are matched by char id (position packet or seller
+        # list), so a fresh client never has to type its name.
         item = BazarItem("a", build_search_packet([1]))
         controller, engine, _clock, _sent = self._controller([item])
-        self.assertFalse(controller.start_relist(engine.world))
-        self.assertIn("character name", controller.last_error)
+        self.assertTrue(controller.start_relist(engine.world))
+        self.assertEqual(controller.last_error, "")
+
+    def test_relist_skips_own_listing_by_owner_id(self) -> None:
+        # No configured name; the listing owner id matches our self id.
+        item = BazarItem(
+            "bubbl",
+            build_search_packet([2174]),
+            vnum=2174,
+            inv_tab=2,
+            amount=5,
+            min_price=1,
+        )
+        controller, engine, clock, sent = self._controller([item])
+        engine.world.self_id = 5119  # the _response owner id
+        engine.feed_text("RECV", "inv 2 7.2174.5")
+        self._open(controller, engine, clock, relist=True)
+        controller.tick(engine.world)
+        engine.feed(
+            Packet(Kind.RECV, _response(44000, "SomeoneElse"), clock.now)
+        )
+        controller.tick(engine.world)
+        self.assertEqual(controller.results["bubbl"].status, "own")
+        self.assertFalse([p for p in sent if p.startswith("c_reg ")])
 
     def test_relist_logs_use_the_display_label(self) -> None:
         # The GUI passes the real Item.dat name; the configured shortcut stays

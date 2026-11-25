@@ -73,9 +73,9 @@ full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
    amount are filled from the slot), **Remove from relisting** clears the
    selected row and **Only relisting** hides the rest. Set the selected
    item's **Item vnum**, **Tab**, **Amount** and a positive **Min price**
-   (the per-unit floor), then **Save relist settings**. **Character** is
-   filled from the attached client automatically so the host recognises your
-   listing. The list marks
+   (the per-unit floor), then **Save relist settings**. There is no
+   character field: the host recognises your own listings by character id
+   (or the name from the client's spawn/party list). The list marks
    each item **ready**, **needs floor**, **needs vnum/tab**, **not
    relisting** or **disabled**.
 5. Open the **Monitor** section, click **Monitor Start** and watch the
@@ -163,7 +163,7 @@ hides; a search with no priced match says so instead of an empty table.
 - **All-timeout pass** — mark the bazaar closed, drop to waiting so the
   character cannot be flagged for search spam.
 - **Relist** — only in relist mode, only for items in the relist set
-  (`BazarItem.relist`), and only with a character name, a positive
+  (`BazarItem.relist`), and only with a positive
   `min_price` and a cheapest **other** seller. Each relist pass first asks
   the seller tab (`c_slist 0 0 0` → **`rc_slist`**) for our own listings.
   **If we already have a listing of the item with nothing sold, the pass
@@ -323,12 +323,10 @@ row by itself: tick **Relist** (or use Set up relist… / Add from…) to put
 the item in the set.
 
 To run it:
-1. **Character** is filled from the attached client automatically: the
-   self `in 1` spawn (the whole DLL log is searched, not just its tail) or
-   the party/raid list (`rdlst`) names it. Type it only when the client was
-   attached before either packet was seen. It is used to recognise your own
-   listing.
-2. Click **Relist Start** — it is the only gate, nothing else to tick.
+- Click **Relist Start** — it is the only gate, nothing else to tick or
+  fill. Your own listings are recognised by character id: the position
+  packet's id, the seller list fetched at the start of each pass, or the
+  name from the client's self spawn / party list as a fallback.
 
 The controller opens the bazaar if needed, asks the seller tab for our own
 listings (`c_slist 0 0 0`), searches only the relist set at the 2.5 s
@@ -389,8 +387,9 @@ temporary file). Before a client is attached the tab starts empty; when a
 client attaches and has no per-client file, `~/.config/ntpl/bazar.json` is
 loaded as a seed and saved per-client on the next change. The **Configuration**
 section holds the Bibi id, refresh interval, this file and **Reload names**
-(re-read item names after rebuilding the database); the Character name lives
-in the **Relist** section because it only applies to relisting.
+(re-read item names after rebuilding the database); the character name is
+detected from the client and stored in the config (`character`), with no
+field to fill in the Relist section.
 
 Example:
 
@@ -438,11 +437,11 @@ Example:
 
 ## Safety and limits
 
-- **Relist is gated**: the row's **Relist** tick (the relist set), the live
-  checkbox, a character name, a positive `min_price`, a slot in the chosen
+- **Relist is gated**: the row's **Relist** tick (the relist set), a
+  positive `min_price`, a slot in the chosen
   inventory bag with at least the configured amount, and a cheapest listing
   whose vnum is inside the searched group. It never undercuts your own
-  listing.
+  listing (matched by character id, or by name when only the name is known).
 - **Monitor never sends `c_reg`.** The smoke asserts this; **Price all** also
   starts Monitor, so pricing an inventory cannot change a listing.
 - **Pacing**: do not lower the 2.5 s search interval; the game silently drops
