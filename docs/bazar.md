@@ -117,7 +117,11 @@ full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
 
 One **Monitor Start** searches every enabled configured item, both views
 included. Each view has its own **Only priced** filter and row count; cycles
-update both tables and never clear the other view.
+update both tables and never clear the other view. The **search box** above
+the tabs filters both views at once by item name (the real Item.dat name) or
+by vnum; with hundreds of scanned inventory items this is how to find one
+row. The info line counts the matches and how many the Only priced filter
+hides; a search with no priced match says so instead of an empty table.
 
 ## What the controller does
 
@@ -523,9 +527,10 @@ shortcut in the tooltip), that a late name load updates the Monitor, the
 Items list and the Relist list from the shortcut to the real name without
 overwriting unsaved editor values, that every Monitor row has the one-click
 Copy button and the controller is wired to the vnum→name resolver, that the
-row copy label and the Delete message (even while a pass stops) use the real
-name, that **Reload names** drops the one-shot name cache, and that no
-`c_reg` was sent.
+Monitor search filters both tabs by item name and by vnum and clears back to
+the full table, that the row copy label and the Delete message (even while a
+pass stops) use the real name, that **Reload names** drops the one-shot name
+cache, and that no `c_reg` was sent.
 `gui_bazar_relist_smoke.py` starts the relist with a plain **Relist Start**
 (no extra checkbox) and asserts the exact `c_reg` packet and the
 `register-sent` status; `gui_bazar_change_smoke.py` asserts the `c_mod`

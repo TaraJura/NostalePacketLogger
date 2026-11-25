@@ -678,6 +678,7 @@ class Application(Gtk.Application):
         self.bazar_results_infos: dict[str, Gtk.Label] = {}
         self.bazar_only_priced_checks: dict[str, Gtk.CheckButton] = {}
         self.bazar_monitor_notebook = None
+        self.bazar_monitor_search = None
         self._bazar_monitor_sources = MONITOR_SOURCES
         self.bazar_items_list = None
         self.bazar_items_info = None
@@ -3740,14 +3741,29 @@ class Application(Gtk.Application):
             for quote in quotes
             if monitor_source(quote.item) == source
         ]
+        needle = ""
+        if self.bazar_monitor_search is not None:
+            needle = self.bazar_monitor_search.get_text().strip().casefold()
+        if needle:
+            items = [
+                quote
+                for quote in items
+                if needle in self._bazar_item_label(quote.item).casefold()
+                or needle in str(quote.item.vnum or "")
+                or any(needle in str(vnum) for vnum in quote.item.vnums)
+            ]
         if not items:
             if info is not None:
-                info.set_text("No items")
+                info.set_text("No items" if not needle else "No match")
             empty = Gtk.Label(
                 label=(
-                    "No NPC-resale items yet."
-                    if source == "npc"
-                    else "No NosMall items yet."
+                    f'No item matches "{needle}".'
+                    if needle
+                    else (
+                        "No NPC-resale items yet."
+                        if source == "npc"
+                        else "No NosMall items yet."
+                    )
                 )
             )
             empty.set_xalign(0)
@@ -3763,7 +3779,10 @@ class Application(Gtk.Application):
             visible = list(items)
         hidden = len(items) - len(visible)
         if info is not None:
-            text = "Most profitable first"
+            text = (
+                f"{len(items)} match(es)" if needle
+                else "Most profitable first"
+            )
             if only_priced:
                 text += f" · {len(visible)} priced"
             if hidden:
@@ -3771,7 +3790,13 @@ class Application(Gtk.Application):
             info.set_text(text)
 
         if not visible:
-            empty = Gtk.Label(label="No priced items yet.")
+            empty = Gtk.Label(
+                label=(
+                    f'No priced match for "{needle}".'
+                    if needle
+                    else "No priced items yet."
+                )
+            )
             empty.set_xalign(0)
             empty.add_css_class("dim-label")
             box.append(empty)
@@ -4600,6 +4625,20 @@ class Application(Gtk.Application):
         monitor_stop = Gtk.Button(label="Monitor Stop")
         monitor_stop.connect("clicked", lambda *_: self._bazar_stop())
         tools.append(monitor_stop)
+        # One search shared by both Monitor tabs. With a few hundred
+        # scanned inventory items the table is long; typing a name or vnum
+        # narrows both views at once.
+        search = Gtk.SearchEntry()
+        search.set_placeholder_text("search item name or vnum")
+        search.set_hexpand(True)
+        search.set_tooltip_text(
+            "Filter both Monitor tabs by item name or vnum."
+        )
+        search.connect(
+            "search-changed", lambda *_: self._bazar_render_results()
+        )
+        self.bazar_monitor_search = search
+        tools.append(search)
         content.append(tools)
 
         # Third-level navbar: one shared search pass, two dashboards split by
@@ -4666,7 +4705,8 @@ class Application(Gtk.Application):
                 "the gold markup (listing price ÷ NPC price); Cost is the "
                 "NPC purchase price. Add one in Items with Cost = NPC gold; "
                 "leaving the cost at 0 fills the Item.dat price on save. "
-                "One Monitor Start searches this list together with NosMall."
+                "One Monitor Start searches this list together with NosMall. "
+                "The search box above filters both tabs by item name or vnum."
             )
         else:
             help_title = "NosMall monitor"
@@ -4675,7 +4715,8 @@ class Application(Gtk.Application):
                 "is still unknown (price discovery). Profit is the listing "
                 "price in gold per ND spent. Import catalog groups with "
                 "Import NosMall… in Items and set their ND cost. One Monitor "
-                "Start searches this list together with NPC resale."
+                "Start searches this list together with NPC resale. The "
+                "search box above filters both tabs by item name or vnum."
             )
         tools.append(self._help_button(help_title, help_text))
         view.append(tools)

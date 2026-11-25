@@ -371,6 +371,35 @@ def main() -> int:
                 and active_npc_name.get_text() == "Pet Food"
             )
 
+            # The Monitor search narrows both tabs by item name or vnum.
+            search = app.bazar_monitor_search
+            search_ok = False
+            if search is not None:
+                search.set_text("speech")
+                app._bazar_render_results()
+                nosmall_info = app.bazar_results_infos["nosmall"].get_text()
+                npc_info = app.bazar_results_infos["npc"].get_text()
+                matched_row = first_item_cell()
+                search.set_text("2174")
+                app._bazar_render_results()
+                vnum_info = app.bazar_results_infos["nosmall"].get_text()
+                search.set_text("no such item")
+                app._bazar_render_results()
+                miss_info = app.bazar_results_infos["nosmall"].get_text()
+                search.set_text("")
+                app._bazar_render_results()
+                reset_info = app.bazar_results_infos["nosmall"].get_text()
+                search_ok = (
+                    "1 match(es)" in nosmall_info
+                    and "1 priced" in nosmall_info
+                    and npc_info == "No match"
+                    and matched_row is not None
+                    and matched_row.get_text() == "Speech Bubble"
+                    and "1 match(es)" in vnum_info
+                    and miss_info == "No match"
+                    and reset_info.startswith("Most profitable first")
+                )
+
             # The editor auto-fills an NPC gold cost from Item.dat, so
             # adding Bell of Sweet Home needs only the vnum.
             app.bazar_form["name"].set_text("bell")
@@ -480,6 +509,7 @@ def main() -> int:
                 and forms_ok
                 and copy_label_ok
                 and copy_ok
+                and search_ok
                 and reload_ok
                 and app.bazar.mode == "monitor"
             )
@@ -495,7 +525,7 @@ def main() -> int:
                 f"lists={items_before!r}/{relist_before!r}->"
                 f"{items_after!r}/{relist_after!r} "
                 f"forms_kept={forms_ok} copy={copy_label_ok} "
-                f"copy_button={copy_ok} "
+                f"copy_button={copy_ok} search={search_ok} "
                 f"reload={reload_ok} "
                 f"saved={saved} separators={separators} "
                 f"mode={app.bazar.mode} phase={app.bazar.phase} "
