@@ -394,7 +394,12 @@ class Clock:
 
 
 class ControllerTests(unittest.TestCase):
-    def _controller(self, items: list[BazarItem], character: str = "") -> tuple[
+    def _controller(
+        self,
+        items: list[BazarItem],
+        character: str = "",
+        vnum_name=None,
+    ) -> tuple[
         BazarController, Engine, Clock, list[str]
     ]:
         sent: list[str] = []
@@ -404,7 +409,9 @@ class ControllerTests(unittest.TestCase):
             return True
 
         clock = Clock()
-        controller = BazarController(send, clock=clock)
+        controller = BazarController(
+            send, clock=clock, vnum_name=vnum_name
+        )
         controller.set_items(items, character=character, refresh=30)
         engine = Engine()
         engine.world.bazar.npc_id = 9584
@@ -629,6 +636,149 @@ class ControllerTests(unittest.TestCase):
         )
         controller.tick(engine.world)
         self.assertEqual(controller.results["a"].price, 222)
+
+    #: Item.dat names of the four partner skill ticket vnums. The game's
+    #: NosMall data merges the single and all variants under one base vnum,
+    #: so a Nostale-NB style config searches all four in one group while the
+    #: row is named after the first one.
+    TICKET_NAMES = {
+        5931: "Partner Skill Ticket (Single)",
+        5932: "Partner Skill Ticket (All)",
+        9109: "Partner Skill Ticket (Single)",
+        9110: "Partner Skill Ticket (All)",
+    }
+
+    def test_monitor_narrows_the_search_to_the_rows_item_name(self) -> None:
+        item = BazarItem(
+            "ner skill ticket",
+            build_search_packet([5931, 5932, 9109, 9110]),
+            vnum=5931,
+        )
+        controller, engine, clock, sent = self._controller(
+            [item], vnum_name=self.TICKET_NAMES.get
+        )
+        self._open(controller, engine, clock)
+        controller.tick(engine.world)  # send the search
+        self.assertEqual(
+            sent[-1], "c_blist 0 0 0 0 0 0 0 0 2 5931 9109"
+        )
+
+    def test_monitor_ignores_a_cheaper_group_sibling(self) -> None:
+        # The (All) ticket is cheaper, but this row is the (Single) ticket.
+        item = BazarItem(
+            "ner skill ticket",
+            build_search_packet([5931, 5932, 9109, 9110]),
+            vnum=5931,
+        )
+        controller, engine, clock, _sent = self._controller(
+            [item], vnum_name=self.TICKET_NAMES.get
+        )
+        self._open(controller, engine, clock)
+        controller.tick(engine.world)  # send the narrowed search
+        engine.feed(
+            Packet(
+                Kind.RECV,
+                "rc_blist 0 "
+                "1|1|AllSeller|5932|5|0|50000|0 "
+                "2|2|SingleSeller|9109|5|0|70000|0",
+                clock.now,
+            )
+        )
+        controller.tick(engine.world)
+        quote = controller.results["ner skill ticket"]
+        self.assertEqual(
+            (quote.status, quote.price, quote.seller),
+            ("ok", 70000, "SingleSeller"),
+        )
+        assert quote.listing is not None
+        self.assertEqual(quote.listing.vnum, 9109)
+
+    def test_monitor_keeps_same_name_aliases_competing(self) -> None:
+        # 5931 and 9109 are the same item; the cheaper listing wins.
+        item = BazarItem(
+            "ner skill ticket",
+            build_search_packet([5931, 9109]),
+            vnum=5931,
+        )
+        controller, engine, clock, sent = self._controller(
+            [item], vnum_name=self.TICKET_NAMES.get
+        )
+        self._open(controller, engine, clock)
+        controller.tick(engine.world)
+        self.assertEqual(
+            sent[-1], "c_blist 0 0 0 0 0 0 0 0 2 5931 9109"
+        )
+        engine.feed(
+            Packet(
+                Kind.RECV,
+                "rc_blist 0 "
+                "1|1|A|5931|5|0|70000|0 "
+                "2|2|B|9109|5|0|60000|0",
+                clock.now,
+            )
+        )
+        controller.tick(engine.world)
+        quote = controller.results["ner skill ticket"]
+        self.assertEqual((quote.status, quote.price), ("ok", 60000))
+
+    def test_monitor_answer_with_only_another_items_listing_is_empty(
+        self,
+    ) -> None:
+        # Item names load asynchronously. The search went out with the whole
+        # saved group; the answer carries only the (All) ticket, so the
+        # (Single) row must show "no listings", not the (All) price.
+        names: dict[int, str] = {}
+        item = BazarItem(
+            "ner skill ticket",
+            build_search_packet([5931, 5932]),
+            vnum=5931,
+        )
+        controller, engine, clock, sent = self._controller(
+            [item], vnum_name=names.get
+        )
+        self._open(controller, engine, clock)
+        controller.tick(engine.world)
+        self.assertEqual(
+            sent[-1], "c_blist 0 0 0 0 0 0 0 0 2 5931 5932"
+        )
+        names.update(self.TICKET_NAMES)
+        engine.feed(
+            Packet(
+                Kind.RECV,
+                "rc_blist 0 1|1|AllSeller|5932|5|0|50000|0",
+                clock.now,
+            )
+        )
+        controller.tick(engine.world)
+        quote = controller.results["ner skill ticket"]
+        self.assertEqual((quote.status, quote.price), ("empty", None))
+
+    def test_group_minimum_is_kept_without_a_name_resolver(self) -> None:
+        # Headless callers without an item-name lookup keep the documented
+        # group minimum (the GUI always supplies the resolver).
+        item = BazarItem(
+            "ner skill ticket",
+            build_search_packet([5931, 5932]),
+            vnum=5931,
+        )
+        controller, engine, clock, sent = self._controller([item])
+        self._open(controller, engine, clock)
+        controller.tick(engine.world)
+        self.assertEqual(
+            sent[-1], "c_blist 0 0 0 0 0 0 0 0 2 5931 5932"
+        )
+        engine.feed(
+            Packet(
+                Kind.RECV,
+                "rc_blist 0 "
+                "1|1|SingleSeller|5931|5|0|70000|0 "
+                "2|2|AllSeller|5932|5|0|50000|0",
+                clock.now,
+            )
+        )
+        controller.tick(engine.world)
+        quote = controller.results["ner skill ticket"]
+        self.assertEqual((quote.status, quote.price), ("ok", 50000))
 
     def test_total_timeout_drops_to_waiting(self) -> None:
         item = BazarItem("a", build_search_packet([1]))

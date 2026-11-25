@@ -661,6 +661,7 @@ class Application(Gtk.Application):
             self._bazar_send,
             self._bazar_log,
             item_label=self._bazar_item_label,
+            vnum_name=self._bazar_vnum_name,
         )
         self.bazar_timer = None
         self.bazar_page = None
@@ -1823,6 +1824,23 @@ class Application(Gtk.Application):
             return info.name
         return f"item {abs(vnum)}"
 
+    def _bazar_vnum_name(self, vnum: int) -> str | None:
+        """The real Item.dat name of one vnum, or None while unresolved.
+
+        The controller uses this to keep a row's price on the item the row
+        displays: search groups saved by older configs can mix different
+        items that share a NosMall base vnum.  A placeholder name (``item
+        2174``) counts as unknown, so it never becomes a match key.
+        """
+        value = abs(int(vnum))
+        info = getattr(self, "item_info", {}).get(value)
+        if info is None or not info.name:
+            return None
+        name = info.name.strip()
+        if not name or name == f"item {value}":
+            return None
+        return name
+
     def _bazar_item_label(self, item: BazarItem) -> str:
         """The real item name for a configured bazaar item.
 
@@ -2474,6 +2492,20 @@ class Application(Gtk.Application):
             name.set_wrap(True)
             name.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
             name.set_max_width_chars(36)
+            right = Gtk.GestureClick()
+            right.set_button(3)
+
+            def on_right(
+                _gesture, _n_press, _x, _y, label=name, key=item.name
+            ) -> None:
+                # Resolve at click time, like the Items list: a late name
+                # load updates the row in place.
+                self._bazar_copy_menu(
+                    label, self._bazar_copy_label_for(key)
+                )
+
+            right.connect("pressed", on_right)
+            name.add_controller(right)
             detail = Gtk.Label(label=self._bazar_relist_detail(item))
             detail.set_xalign(0)
             detail.add_css_class("dim-label")
@@ -2514,6 +2546,18 @@ class Application(Gtk.Application):
             content.set_margin_end(10)
             content.append(track)
             content.append(box)
+            # The name to paste into the in-game bazaar search when listing.
+            copy = Gtk.Button(label="Copy")
+            copy.add_css_class("flat")
+            copy.set_valign(Gtk.Align.START)
+            copy.set_tooltip_text("Copy the item name")
+            copy.connect(
+                "clicked",
+                lambda _button, key=item.name: self._copy_text(
+                    self._bazar_copy_label_for(key)
+                ),
+            )
+            content.append(copy)
             content.append(badge)
             row.set_child(content)
             self.bazar_relist_list.append(row)
@@ -3745,11 +3789,12 @@ class Application(Gtk.Application):
             "Markup" if source == "npc" else "Profit",
             "Seller",
             "Status",
+            "",
         )
-        aligns = (0.0, 0.0, 1.0, 1.0, 0.0, 0.0)
+        aligns = (0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0)
         for column, (title, align) in enumerate(zip(headers, aligns)):
             label = Gtk.Label()
-            label.set_markup(f"<b>{title}</b>")
+            label.set_markup(f"<b>{title}</b>" if title else "")
             label.set_xalign(align)
             grid.attach(label, column, 0, 1, 1)
 
@@ -3793,6 +3838,9 @@ class Application(Gtk.Application):
                     label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
                     label.set_max_width_chars(30)
                     label.set_hexpand(True)
+                    # Standard text selection + Ctrl+C, like any label; the
+                    # Copy button and the right-click menu do it in one click.
+                    label.set_selectable(True)
                     right = Gtk.GestureClick()
                     right.set_button(3)
 
@@ -3847,6 +3895,18 @@ class Application(Gtk.Application):
                 if tooltip:
                     label.set_tooltip_text("\n".join(tooltip))
                 grid.attach(label, column, grid_row, 1, 1)
+            # One-click copy of the real item name (the text a reseller
+            # pastes into the in-game bazaar search). Selectable text and
+            # the right-click menu stay available as well.
+            copy = Gtk.Button(label="Copy")
+            copy.add_css_class("flat")
+            copy.set_valign(Gtk.Align.START)
+            copy.set_tooltip_text(f"Copy the item name: {cells[0]}")
+            copy.connect(
+                "clicked",
+                lambda _button, name=cells[0]: self._copy_text(name),
+            )
+            grid.attach(copy, columns - 1, grid_row, 1, 1)
             if row_index < len(visible) - 1:
                 separator(grid_row + 1)
         box.append(grid)

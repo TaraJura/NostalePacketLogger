@@ -265,8 +265,13 @@ the **Items** list — shows the real name instead:
   `PYTHONPATH=linux/host python3 -m ntpl db build` and click
   **Configuration → Reload names**; no GUI restart is needed either way.
 - the editor's **Name** field is the shortcut label; renaming it does not
-  change what the Monitor shows. **Copy** next to it copies the label;
-  right-clicking a result's Item cell or an item row copies the real name.
+  change what the Monitor shows. **Copy** next to it copies the label.
+- the real name is one click away wherever a row appears: every Monitor row
+  has a flat **Copy** button, and the Item cell is selectable text (drag and
+  Ctrl+C) with a right-click **Copy item name** menu. The Items, Relist and
+  Inventory rows expose the same right-click menu; the Relist rows add a
+  **Copy** button so the name can be pasted straight into the in-game bazaar
+  search.
 
 ## Relisting
 
@@ -459,14 +464,20 @@ Example:
   relisted because `find_inventory` matches positive template vnums.
 - **Truncated answers**: the DLL copies at most 2048 bytes per packet, so a
   long `rc_blist` is cut mid-entry. The parser keeps every intact entry, uses
-  the minimum visible price and marks the answer `truncated`.
+  the minimum visible price of the row's own item and marks the answer
+  `truncated`.
 - **Name encoding**: the host decodes UTF-8, falling back to Windows-1252 and
   Latin-1 for the game's ANSI text, so seller names no longer show a `�`
   replacement glyph. The self-listing check also compares an ASCII-normalized
   name for accented characters.
-- **Group searches**: one answer covers all vnums, grouped in search order.
-  The tab uses the minimum visible entry; a truncated answer can hide the true
-  minimum, so configure one vnum per item when the exact price matters.
+- **Group searches are name-aware**: one answer covers every searched vnum.
+  Saved groups can mix different items that share a NosMall base vnum (the
+  game groups `Partner Skill Ticket (Single)` and `(All)` together), so the
+  Monitor searches only the vnums whose Item.dat name matches the name the
+  row displays, and takes the minimum visible price of that same item. A
+  namesake alias (another vnum with the same name) still competes; a cheaper
+  listing of a different name never appears under the row. Rows whose names
+  are not resolved yet fall back to the full group.
 - **Inventory after a late attach**: `inv` is sent at login. The tab replays
   the client's DLL log (`spawnlog.load_inventory`); if no dump is in the log,
   relist reports “not in inventory” until the character relogs or the bag is
@@ -488,8 +499,11 @@ make -C linux bot-test     # includes gui_bazar_smoke.py
 `test_bazar.py` covers the real 15-field `rc_blist` shape (including a
 truncated tail and double spaces), the open sequence, pacing, retry/waiting
 behaviour, response cross-talk, the relist floor/own/slot/vnum checks and the
-equipment amount-0 rule, the NosMall/NPC monitor classification, and that
-relist log lines use the display label passed by the GUI. `test_bazar_inventory.py` covers the inventory
+equipment amount-0 rule, the NosMall/NPC monitor classification, the
+name-aware group handling (a single-ticket row never reports the all-ticket
+price; namesake aliases still compete; a name lookup that finishes mid-pass
+still attributes the answer), and that relist log lines use the display label
+passed by the GUI. `test_bazar_inventory.py` covers the inventory
 planner: duplicate collapse, negative/absolute vnums, bag preference,
 tracked-skip, unique names, cost precedence and the amount clamp.
 `test_inventory_cache.py` covers the per-character snapshot round-trip,
@@ -505,9 +519,11 @@ price when the NPC gold cost is 0, that the Item cell shows the real Item.dat
 name for a configured shortcut (`bubbl` → **Speech Bubble**, with the
 shortcut in the tooltip), that a late name load updates the Monitor, the
 Items list and the Relist list from the shortcut to the real name without
-overwriting unsaved editor values, that the row copy label and the Delete
-message (even while a pass stops) use the real name, that **Reload names**
-drops the one-shot name cache, and that no `c_reg` was sent.
+overwriting unsaved editor values, that every Monitor row has the one-click
+Copy button and the controller is wired to the vnum→name resolver, that the
+row copy label and the Delete message (even while a pass stops) use the real
+name, that **Reload names** drops the one-shot name cache, and that no
+`c_reg` was sent.
 `gui_bazar_relist_smoke.py` starts the relist with a plain **Relist Start**
 (no extra checkbox) and asserts the exact `c_reg` packet and the
 `register-sent` status; `gui_bazar_change_smoke.py` asserts the `c_mod`

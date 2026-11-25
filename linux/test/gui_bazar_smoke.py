@@ -295,6 +295,28 @@ def main() -> int:
                 label = grid.get_child_at(column, row)
                 return label if isinstance(label, Gtk.Label) else None
 
+            def child_at(source: str, column: int, row: int = 2):
+                target = app.bazar_results_boxes.get(source)
+                grid = (
+                    target.get_first_child()
+                    if target is not None
+                    else None
+                )
+                if not isinstance(grid, Gtk.Grid):
+                    return None
+                return grid.get_child_at(column, row)
+
+            # Every Monitor row carries a one-click Copy button for the real
+            # item name, and the controller got the vnum->name resolver so a
+            # mixed search group cannot report another item's price.
+            copy_cell = child_at("nosmall", 6)
+            copy_ok = (
+                isinstance(copy_cell, Gtk.Button)
+                and copy_cell.get_label() == "Copy"
+                and app.bazar._vnum_name is not None
+                and app.bazar._vnum_name(2174) == "Speech Bubble"
+            )
+
             npc_quote = app.bazar.results.get("petfood")
             npc_price = None if npc_quote is None else npc_quote.price
             npc_profit = (
@@ -457,6 +479,7 @@ def main() -> int:
                 and late_ok
                 and forms_ok
                 and copy_label_ok
+                and copy_ok
                 and reload_ok
                 and app.bazar.mode == "monitor"
             )
@@ -472,6 +495,7 @@ def main() -> int:
                 f"lists={items_before!r}/{relist_before!r}->"
                 f"{items_after!r}/{relist_after!r} "
                 f"forms_kept={forms_ok} copy={copy_label_ok} "
+                f"copy_button={copy_ok} "
                 f"reload={reload_ok} "
                 f"saved={saved} separators={separators} "
                 f"mode={app.bazar.mode} phase={app.bazar.phase} "

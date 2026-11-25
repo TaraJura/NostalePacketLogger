@@ -27,8 +27,15 @@ Packet shapes come from the live client and from ``Nostale-NB``:
 The server answers a search with ``rc_blist``.  Live entries have 15
 ``|``-separated fields: seller/owner name at 2, item vnum at 3, amount at 4
 and per-unit price at 6.  Answers are grouped by the searched vnum order, so
-this module uses the minimum visible price (and marks an answer truncated when
-the DLL's 2048-byte slot cut it).
+this module uses the minimum visible price of the row's own item (and marks
+an answer truncated when the DLL's 2048-byte slot cut it).
+
+A Nostale-NB style search group can mix several items that share a NosMall
+base vnum (``Partner Skill Ticket (Single)`` and ``(All)``), while the row is
+named after one of them.  When a vnum->name resolver is supplied, a row
+searches and reports only the vnums whose Item.dat name matches the name it
+displays, so the cheapest listing of a different item is never shown under
+its row.
 
 Rate limit: the game silently drops ``c_blist`` packets sent less than about
 two seconds apart.  Searches are therefore paced at :data:`SEARCH_INTERVAL_S`
@@ -423,6 +430,11 @@ def _name_key(text: str) -> str:
     return "".join(
         char for char in text if char.isascii() and char.isalnum()
     ).casefold()
+
+
+def _item_name_key(text: str) -> str:
+    """Comparison key for Item.dat names (case/whitespace tolerant)."""
+    return " ".join(text.split()).casefold()
 
 
 def calculate_tax(price: int, amount: int = 5) -> int:
@@ -1046,6 +1058,7 @@ class BazarController:
         log: Callable[[str], None] | None = None,
         clock: Callable[[], float] | None = None,
         item_label: Callable[[BazarItem], str] | None = None,
+        vnum_name: Callable[[int], str | None] | None = None,
     ) -> None:
         self._send = send
         self._log = log or (lambda _text: None)
@@ -1054,6 +1067,12 @@ class BazarController:
         #: name from the item's vnums; ``BazarItem.name`` stays the config
         #: key, result-dict key and editor label.
         self._item_label = item_label or (lambda item: item.name)
+        #: Resolve an item vnum to its real Item.dat name.  With a resolver,
+        #: a row searches and reports only the vnums of the item it displays:
+        #: a Nostale-NB style group can mix different items that share one
+        #: NosMall base vnum (Partner Skill Ticket (Single)/(All)), and the
+        #: cheapest of the whole group would land under the wrong row.
+        self._vnum_name = vnum_name
 
         self.config = BazarConfig()
         self.results: dict[str, BazarQuote] = {}
@@ -1698,7 +1717,14 @@ class BazarController:
             self.version += 1
             self._next_send = now
             return
-        if not self._send(item.search_packet):
+        identity = self._item_identity_name(item)
+        searched = self._search_vnums(item, identity)
+        packet = item.search_packet
+        if searched != [int(vnum) for vnum in item.vnums]:
+            # Search only the vnums of the item this row displays. The
+            # configured packet keeps the full alias group for reference.
+            packet = build_search_packet(searched)
+        if not self._send(packet):
             self._record(
                 item,
                 self._failure_quote(item, "error", "send failed", now),
@@ -1711,6 +1737,7 @@ class BazarController:
             "item": item,
             "seen": world.bazar.response_count,
             "deadline": now + RESPONSE_TIMEOUT_S,
+            "wanted": set(searched),
         }
         self._next_send = now + SEARCH_INTERVAL_S
 
@@ -1734,6 +1761,83 @@ class BazarController:
             return True
         return now >= self._seller_deadline
 
+    def _item_identity_name(self, item: BazarItem) -> str | None:
+        """The real item name a configured row stands for, if known.
+
+        The exact item vnum wins over the search group, exactly like the
+        name the GUI shows for the row; a group then falls back through its
+        vnums until one resolves.  ``None`` keeps the pre-name behaviour.
+        """
+        if self._vnum_name is None:
+            return None
+        candidates: list[int] = []
+        if item.vnum:
+            candidates.append(abs(int(item.vnum)))
+        for vnum in item.vnums:
+            value = abs(int(vnum))
+            if value and value not in candidates:
+                candidates.append(value)
+        for vnum in candidates:
+            name = self._vnum_name(vnum)
+            if name and name.strip():
+                return name.strip()
+        return None
+
+    def _search_vnums(
+        self, item: BazarItem, identity: str | None
+    ) -> list[int]:
+        """The search vnums of the row's own item name.
+
+        A group saved by an older config or exported from Nostale-NB can mix
+        different items (the NosMall base vnum merges the single and all
+        partner skill tickets), so searching the whole group can answer with
+        the wrong item.  Without a known identity every vnum stays.
+        """
+        vnums = [int(vnum) for vnum in item.vnums]
+        if self._vnum_name is None or not identity:
+            return vnums
+        key = _item_name_key(identity)
+        same: list[int] = []
+        for vnum in vnums:
+            name = self._vnum_name(vnum)
+            if name and _item_name_key(name) == key:
+                same.append(vnum)
+        if same:
+            return same
+        # The row names an item none of its search vnums resolves to: track
+        # the item itself rather than an unrelated group.
+        if item.vnum is not None and item.vnum > 0:
+            return [int(item.vnum)]
+        return vnums
+
+    def _cheapest_listing(
+        self,
+        response: BazarResponse,
+        wanted: set[int],
+        identity: str | None,
+    ) -> BazarListing | None:
+        """Cheapest listing that belongs to the row's own item name.
+
+        Same-name aliases (different vnums, same Item.dat name) still
+        compete, so the row shows the true cheapest of that item.  Without a
+        name resolver the historical group minimum is kept.
+        """
+        if identity is None or self._vnum_name is None:
+            return response.cheapest
+        key = _item_name_key(identity)
+        matching: list[BazarListing] = []
+        for listing in response.listings:
+            if listing.price is None or listing.vnum is None:
+                continue
+            if wanted and listing.vnum not in wanted:
+                continue
+            name = self._vnum_name(int(listing.vnum))
+            if name and _item_name_key(name) == key:
+                matching.append(listing)
+        if not matching:
+            return None
+        return min(matching, key=lambda listing: listing.price)
+
     def _pending_tick(self, world: "WorldState", now: float) -> None:
         pending = self._pending
         if pending is None:  # pragma: no cover - defensive
@@ -1741,7 +1845,11 @@ class BazarController:
         item: BazarItem = pending["item"]
         events = world.bazar.responses_since(pending["seen"])
         if events:
-            wanted = set(item.vnums)
+            wanted = pending.get("wanted") or set(item.vnums)
+            # Resolve the row's item name at answer time: item names load
+            # asynchronously in the GUI, and a pass that started before the
+            # lookup finished must still not report a group sibling's price.
+            identity = self._item_identity_name(item)
             for count, raw in events:
                 response = parse_rc_blist(raw)
                 seen_vnums = {
@@ -1754,8 +1862,10 @@ class BazarController:
                     # stale answer). Keep looking at the other events.
                     continue
                 pending["seen"] = count
-                if response.status == "ok" and response.cheapest is not None:
-                    listing = response.cheapest
+                listing = self._cheapest_listing(
+                    response, wanted, identity
+                )
+                if response.status == "ok" and listing is not None:
                     quote = BazarQuote(
                         item=item,
                         price=listing.price,
@@ -1773,9 +1883,15 @@ class BazarController:
                         now,
                     )
                 else:
+                    # "empty", or an answer whose listings are all a
+                    # different item that shares the search group.
+                    status = (
+                        "empty" if response.status == "ok"
+                        else response.status
+                    )
                     quote = BazarQuote(
                         item=item,
-                        status=response.status,
+                        status=status,
                         detail=(
                             "truncated answer" if response.truncated else ""
                         ),
