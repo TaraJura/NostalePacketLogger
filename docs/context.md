@@ -1,6 +1,7 @@
-# Project context — 2026-11-22
+# Project context — 2026-11-26
 
 Quick map for the next session. The detailed history is in
+[handoff-2026-11-26.md](handoff-2026-11-26.md) and
 [handoff-2026-11-19.md](handoff-2026-11-19.md); packet formats in
 [protocol/](protocol/README.md); the market feature in [bazar.md](bazar.md);
 the data layer in [database.md](database.md).
@@ -13,8 +14,21 @@ the data layer in [database.md](database.md).
   readable". **DLL 0.3.1** re-derives them (player global `0x007964BC`,
   MoveTo `0x0056620C`, speed table `0x0078B3C8`) and needs a **game-client
   restart/re-inject**. The host also logs a repeated POS read error only
-  once instead of every poll.
-- **Linux host**: 363 unittest cases, 6 GTK4 smokes, 44 fake-server bot
+  once instead of every poll. The speed extension for 3262 is derived but
+  not live-verified above 59.
+- **NosBazar** (2026-11-26): rows report only the listings of the item name
+  they display (mixed Nostale-NB groups such as the single/all partner skill
+  tickets no longer leak a sibling's price); the Monitor has a search box
+  filtering both tabs by name/config label/vnum, and every row has a Copy
+  button (Item text is selectable; Relist/Items/Inventory keep right-click
+  copy). The inventory scan uses the same name-aware coverage. The Relist
+  section has no Character field: own listings are matched by character id
+  (`rc_blist` owner id, `self_id`, or the seller-list owner id) and the name
+  is learned from the self `in 1` spawn (whole DLL log) or `rdlst`; standalone
+  **Select all** / **Unselect all** buttons feed the selection group actions.
+  The Character frame shows the detected name above HP/MP. The active user
+  config is a 25-item relist list for char `root1` (see the handoff).
+- **Linux host**: 374 unittest cases, 6 GTK4 smokes, 44 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
   linux all test-host`, tests above. The host is **0.7.5**: it opens the
   bazaar with the client's own shortcut (`c_skill` → `wopen 32`, FrosTale)

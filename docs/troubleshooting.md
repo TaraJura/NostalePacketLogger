@@ -63,7 +63,7 @@
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| **Start** turns itself off, status says this DLL has no `KEY` command | the game client still runs a DLL older than 0.3.0; updating the build or restarting only the GUI does not replace the mapped module | restart the game client, inject again with the picker/injector, and check the window title/status shows `DLL 0.3.0`. The `KEY|` command needs 0.3.0 |
+| **Start** turns itself off, status says this DLL has no `KEY` command | the game client still runs a DLL older than 0.3.0; updating the build or restarting only the GUI does not replace the mapped module | restart the game client, inject again with the picker/injector, and check the window title/status shows `DLL 0.3.0` or newer (current `0.3.1`). The `KEY\|` command needs 0.3.0 |
 | Keys are sent but the game does nothing | the game window is not focused and the client ignores posted keys, or the key is not bound | click the game window once (the DLL then uses real `SendInput`), check the Bot log for `minigame keyboard ready`; on a QWERTZ layout the secondary attack is `z`, not `y` |
 | `y` does nothing but `z` works (or the reverse) | QWERTY vs QWERTZ keyboard layout | put the other letter in **Key**. The tab accepts `y` and `z` |
 | `Focus refused for player N` | the client would not select that player (dead, out of the client's targetable range, or not targetable) | the tab skips that player for 5 s and tries the next one; the key loop keeps running. Move closer or let the raid respawn them |

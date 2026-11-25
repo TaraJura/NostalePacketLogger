@@ -83,10 +83,12 @@ relist…** for one item.
 
 The relist set. Tick a row to add it, untick to keep watching without
 changing its listing; **Add from Items** / **Add from Inventory** / **Remove
-from relisting**, **Only relisting**, Ctrl+click and **Group actions…**. Set
+from relisting**, **Select all** / **Unselect all** (for the selection-based
+group actions), **Only relisting**, Ctrl+click and **Group actions…**. Set
 the exact **Item vnum / Tab / Amount** and a positive **Min price**; the badge
 reads `ready` / `needs floor` / `needs vnum/tab`. The character name is
-detected automatically (no field to fill), **Relist Start** opens the bazaar
+detected automatically (no field to fill) and own listings are matched by
+character id, **Relist Start** opens the bazaar
 itself (Bibi Basar, the portable NosBazar medal, or the client's own
 shortcut), undercuts the cheapest other listing by one gold — never below the
 floor — and charges the bazaar's 50-gold minimum listing fee. If you already
@@ -106,7 +108,16 @@ One search pass at the required 2.5 s pacing over every enabled item, cheapest
 listing per item, sorted most profitable first; **Only priced** hides empty
 rows and timed-out items get one retry. The **NosMall** view shows gold per
 ND; **NPC resale** shows the gold markup over the NPC price for items bought
-at an NPC (Pet Food, Bell of Sweet Home, …).
+at an NPC (Pet Food, Bell of Sweet Home, …). A **search box** above the tabs
+filters both views by item name, configured label or vnum. A row only reports
+the listings of the item it displays: saved search groups that mix different
+items (the partner skill tickets are one NosMall base vnum group) no longer
+show a sibling's price. Every row has a **Copy** button for the real item
+name (also selectable text / right-click), and the Relist and Inventory rows
+have the same right-click copy.
+
+The Map/Bot **Character** frame shows the detected character name in bold
+above the HP/MP bars.
 
 #### Items
 
