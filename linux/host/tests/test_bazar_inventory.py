@@ -31,6 +31,31 @@ class TrackedVnumsTests(unittest.TestCase):
         ]
         self.assertEqual(tracked_vnums(items), {1, 2, 3, 4})
 
+    def test_name_aware_group_covers_only_the_rows_own_item(self) -> None:
+        # The game's NosMall data puts the single and all partner skill
+        # tickets in one base-vnum group. A row named after the single
+        # ticket only searches its own name, so the all ticket must not
+        # count as covered.
+        item = BazarItem(
+            "ticket",
+            build_search_packet([5931, 5932, 9109, 9110]),
+            vnum=5931,
+        )
+        names = {
+            5931: "Partner Skill Ticket (Single)",
+            5932: "Partner Skill Ticket (All)",
+            9109: "Partner Skill Ticket (Single)",
+            9110: "Partner Skill Ticket (All)",
+        }
+        self.assertEqual(tracked_vnums([item], names), {5931, 9109})
+
+    def test_name_aware_tracking_falls_back_to_the_item_vnum(self) -> None:
+        # That fallback mirrors the controller: when no searched vnum has
+        # the row's name, it searches the item vnum itself.
+        item = BazarItem("x", build_search_packet([10, 11]), vnum=12)
+        names = {10: "Other A", 11: "Other B", 12: "My Item"}
+        self.assertEqual(tracked_vnums([item], names), {12})
+
     def test_plan_defaults(self) -> None:
         plan = InventoryPlan()
         self.assertEqual((plan.items, plan.tracked, plan.slots), ([], 0, 0))
@@ -93,6 +118,33 @@ class InventorySearchTests(unittest.TestCase):
         self.assertEqual(plan.tracked, 2)
         self.assertEqual([item.vnum for item in plan.items], [1285])
         self.assertEqual(plan.slots, 4)
+
+    def test_inventory_adds_a_group_sibling_with_another_name(self) -> None:
+        # With names, 9109 (single) is already watched by the ticket row
+        # while 5932 (all) is a different item and must be added.
+        existing = [
+            BazarItem(
+                "ticket",
+                build_search_packet([5931, 5932, 9109, 9110]),
+                vnum=5931,
+            )
+        ]
+        names = {
+            5931: "Partner Skill Ticket (Single)",
+            5932: "Partner Skill Ticket (All)",
+            9109: "Partner Skill Ticket (Single)",
+            9110: "Partner Skill Ticket (All)",
+        }
+        slots = [_slot(2, 0, 9109, 1), _slot(2, 1, 5932, 1)]
+        plan = inventory_search_items(slots, names, existing)
+        self.assertEqual(plan.tracked, 1)
+        self.assertEqual([item.vnum for item in plan.items], [5932])
+        self.assertEqual(
+            plan.items[0].name, "Partner Skill Ticket (All)"
+        )
+        self.assertEqual(
+            search_vnums(plan.items[0].search_packet), [5932]
+        )
 
     def test_names_stay_unique(self) -> None:
         plan = inventory_search_items(

@@ -1609,7 +1609,9 @@ class Application(Gtk.Application):
             return
         slots = self._world_inventory_slots()
         distinct = self._inventory_distinct(slots)
-        tracked = tracked_vnums(self.bazar.config.items)
+        tracked = tracked_vnums(
+            self.bazar.config.items, self._item_name_map()
+        )
         tracked_count = sum(1 for vnum in distinct if vnum in tracked)
         if slots:
             text = (
@@ -1819,6 +1821,14 @@ class Application(Gtk.Application):
                 pass
         return False
 
+    def _item_name_map(self) -> dict[int, str]:
+        """Real Item.dat names, as ``{vnum: name}`` for the name matching."""
+        return {
+            vnum: info.name
+            for vnum, info in getattr(self, "item_info", {}).items()
+            if info.name
+        }
+
     def _item_name_for(self, vnum: int) -> str:
         info = self.item_info.get(abs(vnum))
         if info is not None and info.name:
@@ -1928,7 +1938,9 @@ class Application(Gtk.Application):
         self._inventory_matches = matches
 
         distinct = self._inventory_distinct(slots)
-        tracked = tracked_vnums(self.bazar.config.items)
+        tracked = tracked_vnums(
+            self.bazar.config.items, self._item_name_map()
+        )
         tracked_count = sum(1 for vnum in distinct if vnum in tracked)
         costs = self._nosmall_costs()
         if self._inventory_status is not None:
@@ -2226,8 +2238,9 @@ class Application(Gtk.Application):
 
     def _bazar_item_by_vnum(self, vnum: int) -> BazarItem | None:
         target = abs(int(vnum))
+        names = self._item_name_map()
         for item in self.bazar.config.items:
-            if target in tracked_vnums([item]):
+            if target in tracked_vnums([item], names):
                 return item
         return None
 

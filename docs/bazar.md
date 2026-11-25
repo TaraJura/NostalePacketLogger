@@ -446,7 +446,10 @@ Example:
   minutes per pass, plus the refresh wait.
 - **Inventory scan duplicates**: items already covered by a configured search
   packet or `item.vnum` (compared by absolute vnum) are skipped, so pressing
-  **Price all** twice never duplicates rows.
+  **Price all** twice never duplicates rows. Coverage follows the Monitor's
+  name-aware groups: a row covers only the vnums whose Item.dat name matches
+  its own item, so a group sibling with a different name (the all-partner
+  ticket in a single-ticket row) is still added as its own row.
 - **Late attach**: inventory comes from the live `inv`/`ivn` stream and, for
   packets missed before the GUI attached, from the client's own DLL log tail.
   The log is read **once per attach** (a render never re-seeds it), so a
@@ -511,7 +514,8 @@ price; namesake aliases still compete; a name lookup that finishes mid-pass
 still attributes the answer), and that relist log lines use the display label
 passed by the GUI. `test_bazar_inventory.py` covers the inventory
 planner: duplicate collapse, negative/absolute vnums, bag preference,
-tracked-skip, unique names, cost precedence and the amount clamp.
+name-aware tracked-skip (a differently named group sibling is added, a
+namesake is not), unique names, cost precedence and the amount clamp.
 `test_inventory_cache.py` covers the per-character snapshot round-trip,
 character matching and malformed/bad-slot tolerance;
 `test_spawnlog.py` covers the full-`inv`-vs-`ivn` bag distinction and the

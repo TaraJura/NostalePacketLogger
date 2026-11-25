@@ -618,19 +618,98 @@ def monitor_source(item: BazarItem) -> str:
 # -- inventory planning ---------------------------------------------
 
 
-def tracked_vnums(items: Iterable[BazarItem]) -> set[int]:
-    """Every template vnum already covered by the configuration.
+def item_identity_name(
+    item: BazarItem, vnum_name: Callable[[int], str | None] | None
+) -> str | None:
+    """The real item name a configured row stands for, if known.
+
+    The exact item vnum wins over the search group, exactly like the name
+    the GUI shows for the row; a group then falls back through its vnums
+    until one resolves.  ``None`` keeps the pre-name behaviour.
+    """
+    if vnum_name is None:
+        return None
+    candidates: list[int] = []
+    if item.vnum:
+        candidates.append(abs(int(item.vnum)))
+    for vnum in item.vnums:
+        value = abs(int(vnum))
+        if value and value not in candidates:
+            candidates.append(value)
+    for vnum in candidates:
+        name = vnum_name(vnum)
+        if name and name.strip():
+            return name.strip()
+    return None
+
+
+def item_search_vnums(
+    item: BazarItem,
+    identity: str | None,
+    vnum_name: Callable[[int], str | None] | None,
+) -> list[int]:
+    """The search vnums of the row's own item name.
+
+    A group saved by an older config or exported from Nostale-NB can mix
+    different items (the NosMall base vnum merges the single and all partner
+    skill tickets), so searching the whole group can answer with the wrong
+    item.  Without a known identity every vnum stays.
+    """
+    vnums = [int(vnum) for vnum in item.vnums]
+    if vnum_name is None or not identity:
+        return vnums
+    key = _item_name_key(identity)
+    same: list[int] = []
+    for vnum in vnums:
+        name = vnum_name(vnum)
+        if name and _item_name_key(name) == key:
+            same.append(vnum)
+    if same:
+        return same
+    # The row names an item none of its search vnums resolves to: track the
+    # item itself rather than an unrelated group.
+    if item.vnum is not None and item.vnum > 0:
+        return [int(item.vnum)]
+    return vnums
+
+
+def tracked_vnums(
+    items: Iterable[BazarItem],
+    names: Mapping[int, str] | None = None,
+) -> set[int]:
+    """Every template vnum the configuration actually searches.
 
     ``c_blist`` searches positive template vnums, while an equip-bag slot
     carries a negative vnum (``inv 0 27.-4962...``), so both sources are
     compared by magnitude.
+
+    With ``names`` ({vnum: Item.dat name}) coverage follows the controller's
+    name-aware search: a multi-vnum group covers only the vnums whose name
+    matches the row's own item, not a sibling item that shares the group.
+    Without it every group vnum counts, the behaviour for callers that have
+    no name lookup.
     """
-    tracked: set[int] = set()
+    if not names:
+        tracked: set[int] = set()
+        for item in items:
+            for vnum in item.vnums:
+                tracked.add(abs(int(vnum)))
+            if item.vnum is not None and item.vnum != 0:
+                tracked.add(abs(int(item.vnum)))
+        return tracked
+
+    def lookup(vnum: int) -> str | None:
+        value = abs(int(vnum))
+        name = names.get(value)
+        if not name or name == f"item {value}":
+            return None
+        return name
+
+    tracked = set()
     for item in items:
-        for vnum in item.vnums:
+        identity = item_identity_name(item, lookup)
+        for vnum in item_search_vnums(item, identity, lookup):
             tracked.add(abs(int(vnum)))
-        if item.vnum is not None and item.vnum != 0:
-            tracked.add(abs(int(item.vnum)))
     return tracked
 
 
@@ -731,7 +810,7 @@ def inventory_search_items(
             continue
         groups.setdefault(abs(vnum), []).append(slot)
 
-    tracked = tracked_vnums(existing)
+    tracked = tracked_vnums(existing, names)
     taken = {item.name for item in existing}
     for vnum in sorted(groups):
         if vnum in tracked:
@@ -1762,53 +1841,14 @@ class BazarController:
         return now >= self._seller_deadline
 
     def _item_identity_name(self, item: BazarItem) -> str | None:
-        """The real item name a configured row stands for, if known.
-
-        The exact item vnum wins over the search group, exactly like the
-        name the GUI shows for the row; a group then falls back through its
-        vnums until one resolves.  ``None`` keeps the pre-name behaviour.
-        """
-        if self._vnum_name is None:
-            return None
-        candidates: list[int] = []
-        if item.vnum:
-            candidates.append(abs(int(item.vnum)))
-        for vnum in item.vnums:
-            value = abs(int(vnum))
-            if value and value not in candidates:
-                candidates.append(value)
-        for vnum in candidates:
-            name = self._vnum_name(vnum)
-            if name and name.strip():
-                return name.strip()
-        return None
+        """The real item name this row stands for, if known."""
+        return item_identity_name(item, self._vnum_name)
 
     def _search_vnums(
         self, item: BazarItem, identity: str | None
     ) -> list[int]:
-        """The search vnums of the row's own item name.
-
-        A group saved by an older config or exported from Nostale-NB can mix
-        different items (the NosMall base vnum merges the single and all
-        partner skill tickets), so searching the whole group can answer with
-        the wrong item.  Without a known identity every vnum stays.
-        """
-        vnums = [int(vnum) for vnum in item.vnums]
-        if self._vnum_name is None or not identity:
-            return vnums
-        key = _item_name_key(identity)
-        same: list[int] = []
-        for vnum in vnums:
-            name = self._vnum_name(vnum)
-            if name and _item_name_key(name) == key:
-                same.append(vnum)
-        if same:
-            return same
-        # The row names an item none of its search vnums resolves to: track
-        # the item itself rather than an unrelated group.
-        if item.vnum is not None and item.vnum > 0:
-            return [int(item.vnum)]
-        return vnums
+        """The search vnums of the row's own item name."""
+        return item_search_vnums(item, identity, self._vnum_name)
 
     def _cheapest_listing(
         self,
