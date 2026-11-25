@@ -118,8 +118,8 @@ full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
 One **Monitor Start** searches every enabled configured item, both views
 included. Each view has its own **Only priced** filter and row count; cycles
 update both tables and never clear the other view. The **search box** above
-the tabs filters both views at once by item name (the real Item.dat name) or
-by vnum; with hundreds of scanned inventory items this is how to find one
+the tabs filters both views at once by item name (the real Item.dat name),
+the configured label or a vnum; with hundreds of scanned inventory items this is how to find one
 row. The info line counts the matches and how many the Only priced filter
 hides; a search with no priced match says so instead of an empty table.
 

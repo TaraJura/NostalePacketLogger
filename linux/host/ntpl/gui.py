@@ -3762,6 +3762,7 @@ class Application(Gtk.Application):
                 quote
                 for quote in items
                 if needle in self._bazar_item_label(quote.item).casefold()
+                or needle in quote.item.name.casefold()
                 or needle in str(quote.item.vnum or "")
                 or any(needle in str(vnum) for vnum in quote.item.vnums)
             ]
@@ -4645,7 +4646,7 @@ class Application(Gtk.Application):
         search.set_placeholder_text("search item name or vnum")
         search.set_hexpand(True)
         search.set_tooltip_text(
-            "Filter both Monitor tabs by item name or vnum."
+            "Filter both Monitor tabs by item name, configured label or vnum."
         )
         search.connect(
             "search-changed", lambda *_: self._bazar_render_results()
@@ -4719,7 +4720,7 @@ class Application(Gtk.Application):
                 "NPC purchase price. Add one in Items with Cost = NPC gold; "
                 "leaving the cost at 0 fills the Item.dat price on save. "
                 "One Monitor Start searches this list together with NosMall. "
-                "The search box above filters both tabs by item name or vnum."
+                "The search box above filters both tabs by item name, configured label or vnum."
             )
         else:
             help_title = "NosMall monitor"
@@ -4729,7 +4730,8 @@ class Application(Gtk.Application):
                 "price in gold per ND spent. Import catalog groups with "
                 "Import NosMall… in Items and set their ND cost. One Monitor "
                 "Start searches this list together with NPC resale. The "
-                "search box above filters both tabs by item name or vnum."
+                "search box above filters both tabs by item name, configured "
+                "label or vnum."
             )
         tools.append(self._help_button(help_title, help_text))
         view.append(tools)
