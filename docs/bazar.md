@@ -294,7 +294,9 @@ Monitor state, so re-ticking restores the previous setup. **Add from Items** use
 selection in the Items section, **Add from Inventory** uses the rows ticked
 in the Inventory section (filling vnum, tab and stack amount from the slot),
 **Remove from relisting** clears the selected row, and **Only relisting**
-hides the rest of the list. Rows support **Ctrl+click** multi-selection;
+hides the rest of the list. **Select all** / **Unselect all** next to them
+select or clear every visible row, so a selection action can follow without
+Ctrl+click. Rows support **Ctrl+click** multi-selection;
 **Group actions…** applies one action to the whole visible list or to the
 selected rows: **Select all shown**, **Unselect all**, **Relist all shown**,
 **Stop relisting all shown**, **Relist selected**, **Stop relisting

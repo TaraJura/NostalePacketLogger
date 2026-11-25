@@ -729,6 +729,8 @@ class Application(Gtk.Application):
         self.bazar_relist_add_inventory_button = None
         self.bazar_relist_remove_button = None
         self.bazar_relist_group_button = None
+        self.bazar_relist_select_all_button = None
+        self.bazar_relist_unselect_all_button = None
         self._bazar_render_version = -1
         self._bazar_character_autofilled = False
         #: The self name was looked for in the whole DLL log once per attach
@@ -4438,7 +4440,9 @@ class Application(Gtk.Application):
                     "hides the rest of the list. Group actions… covers "
                     "every row shown (relist / stop relisting) or the rows "
                     "clicked with Ctrl (Relist selected / Stop relisting "
-                    "selected), plus Select all shown and Unselect all. "
+                    "selected). The Select all / Unselect all buttons "
+                    "select or clear the visible rows for those selection "
+                    "actions. "
                     "Select an item, set the "
                     "exact Item vnum, the inventory Tab and the Amount, "
                     "then a positive Min price (the per-unit floor). "
@@ -4509,6 +4513,27 @@ class Application(Gtk.Application):
             "clicked", lambda *_: self._bazar_relist_remove_selected()
         )
         manage_row.append(self.bazar_relist_remove_button)
+        self.bazar_relist_select_all_button = Gtk.Button(
+            label="Select all"
+        )
+        self.bazar_relist_select_all_button.set_tooltip_text(
+            "Select every row shown, so Group actions can apply to the "
+            "selection (same as Ctrl+click on each row)."
+        )
+        self.bazar_relist_select_all_button.connect(
+            "clicked", lambda *_: self._bazar_relist_select_shown()
+        )
+        manage_row.append(self.bazar_relist_select_all_button)
+        self.bazar_relist_unselect_all_button = Gtk.Button(
+            label="Unselect all"
+        )
+        self.bazar_relist_unselect_all_button.set_tooltip_text(
+            "Clear the row selection."
+        )
+        self.bazar_relist_unselect_all_button.connect(
+            "clicked", lambda *_: self._bazar_relist_unselect_all()
+        )
+        manage_row.append(self.bazar_relist_unselect_all_button)
         self.bazar_relist_filter = Gtk.CheckButton(label="Only relisting")
         self.bazar_relist_filter.set_tooltip_text(
             "Hide items that are not in the relist set."

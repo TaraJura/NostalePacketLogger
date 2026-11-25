@@ -256,6 +256,22 @@ def main() -> int:
                 app.bazar_relist_list.get_selected_rows()
             )
             result["group_button"] = app.bazar_relist_group_button is not None
+            # Standalone Select all / Unselect all buttons, combinable with
+            # the Group actions that work on the selection.
+            result["select_all_button"] = (
+                app.bazar_relist_select_all_button is not None
+            )
+            result["unselect_all_button"] = (
+                app.bazar_relist_unselect_all_button is not None
+            )
+            app.bazar_relist_select_all_button.emit("clicked")
+            result["button_selected"] = len(
+                app.bazar_relist_list.get_selected_rows()
+            )
+            app.bazar_relist_unselect_all_button.emit("clicked")
+            result["button_unselected"] = len(
+                app.bazar_relist_list.get_selected_rows()
+            )
             # A repeated click on the only selected row unselects it.
             toggle_row = _row_for(app.bazar_relist_list, feather.name)
             app.bazar_relist_list.unselect_all()
@@ -312,6 +328,10 @@ def main() -> int:
                 and result["unselected"] == 0
                 and result["toggle_unselect"] == 0
                 and result["group_button"] is True
+                and result["select_all_button"] is True
+                and result["unselect_all_button"] is True
+                and result["button_selected"] == result["shown_rows"]
+                and result["button_unselected"] == 0
                 and result["repaired"] == 1
                 and result["fixed_fields"] == (10, 3)
                 and result["saved_fields"] == (10, 3)
@@ -332,7 +352,9 @@ def main() -> int:
                 f"queue={result['queue']} "
                 f"selected={result['selected_shown']}/"
                 f"{result['shown_rows']} bulk_stop={result['bulk_stop']} "
-                f"bulk_all={result['bulk_all']}"
+                f"bulk_all={result['bulk_all']} "
+                f"buttons={result['button_selected']}/"
+                f"{result['button_unselected']}"
             )
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"check exception: {exc!r}"
