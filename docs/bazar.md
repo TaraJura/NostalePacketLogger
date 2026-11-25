@@ -73,8 +73,9 @@ full-width section: **Inventory**, **Relist**, **Monitor**, **Items** and
    amount are filled from the slot), **Remove from relisting** clears the
    selected row and **Only relisting** hides the rest. Set the selected
    item's **Item vnum**, **Tab**, **Amount** and a positive **Min price**
-   (the per-unit floor), then **Save relist settings**. Fill **Character**
-   with your own name so the host recognises your listing. The list marks
+   (the per-unit floor), then **Save relist settings**. **Character** is
+   filled from the attached client automatically so the host recognises your
+   listing. The list marks
    each item **ready**, **needs floor**, **needs vnum/tab**, **not
    relisting** or **disabled**.
 5. Open the **Monitor** section, click **Monitor Start** and watch the
@@ -322,8 +323,10 @@ row by itself: tick **Relist** (or use Set up relist… / Add from…) to put
 the item in the set.
 
 To run it:
-1. Fill **Character** with your exact character name (used to recognise your
-   own listing).
+1. **Character** is filled from the attached client automatically (its own
+   spawn or a party list names it); type it only when the client was
+   attached before the name was seen. It is used to recognise your own
+   listing.
 2. Click **Relist Start** — it is the only gate, nothing else to tick.
 
 The controller opens the bazaar if needed, asks the seller tab for our own

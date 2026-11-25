@@ -1404,9 +1404,13 @@ class Application(Gtk.Application):
     def _bazar_apply_settings(self) -> None:
         """Copy the character / NPC / refresh widgets into the config."""
         if self.bazar_character_entry is not None:
-            text = self.bazar_character_entry.get_text().strip()
-            if not text and self.engine.world.self_name:
-                text = self.engine.world.self_name
+            # The attached character is authoritative: its own `in 1` (or a
+            # party list) names it, so a relist never needs the name typed.
+            # The field/config stay as the fallback for a client attached
+            # before that packet was seen.
+            active = (self.engine.world.self_name or "").strip()
+            text = active or self.bazar_character_entry.get_text().strip()
+            if text and self.bazar_character_entry.get_text().strip() != text:
                 self.bazar_character_entry.set_text(text)
             self.bazar.config.character = text
         if self.bazar_refresh_spin is not None:
@@ -4321,7 +4325,8 @@ class Application(Gtk.Application):
         self.bazar_character_entry.set_max_length(40)
         self.bazar_character_entry.set_width_chars(18)
         self.bazar_character_entry.set_tooltip_text(
-            "Your character, to recognise your own listing."
+            "Filled from the attached character automatically; used to "
+            "recognise your own listing."
         )
         self.bazar_character_entry.connect(
             "changed", lambda *_: self._bazar_update_relist_info()
@@ -4416,8 +4421,10 @@ class Application(Gtk.Application):
                     "selected), plus Select all shown and Unselect all. "
                     "Select an item, set the "
                     "exact Item vnum, the inventory Tab and the Amount, "
-                    "then a positive Min price (the per-unit floor), and "
-                    "fill Character with your own name so the host never "
+                    "then a positive Min price (the per-unit floor). "
+                    "Character is filled from the attached client "
+                    "automatically (type it only when the client was "
+                    "attached before its name was seen) so the host never "
                     "undercuts you. Relist Start needs nothing else: it "
                     "searches only the relist set and sends one c_reg per "
                     "eligible item per pass at cheapest minus one gold, "
