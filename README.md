@@ -191,7 +191,9 @@ Quarry** first — by sending the client's own result and claim packets.
 **Play until** chooses the reward box (default 5x, the 16,000-point minimum),
 the tab shows your production points from the game's own `mlo_info`, claims
 with the server's `mlo_lv` reward level and shows the reward item from
-`mlo_rw`. Open the Great Quarry window in the game first. It is a packet
+`mlo_rw`. **Auto** repeats the claim up to 20 runs (the 2,000-point daily
+budget at 100 per claim) and stops when the points run out or a raid team
+blocks it. Open the Great Quarry window in the game first. It is a packet
 shortcut, not a visual play-through: high ban risk. See
 [docs/minigame.md](docs/minigame.md).
 
@@ -258,7 +260,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-Host **0.9.1** (Linux): 385 unit tests, 6 GTK4 window smokes and 47
+Host **0.9.2** (Linux): 385 unit tests, 6 GTK4 window smokes and 47
 fake-server bot smokes pass, and the real injector has been run against the
 live NosTale client under Wine 11 — both hooks `ACTIVE`, movement through the
 client's own MoveTo, auto-attack confirmed by the server's `su`, and the

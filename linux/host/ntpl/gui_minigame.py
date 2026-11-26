@@ -25,6 +25,7 @@ from .minigame import PRODUCTION_GAMES
 from .minigame import QUARRY_VNUM
 from .minigame import TARGET_LEVELS
 from .minigame import MinigameConfig
+from .minigame import build_production_close_packet
 from .minigame import build_production_gift_packet
 from .minigame import build_production_result_packet
 from .minigame import build_production_start_packet
@@ -254,6 +255,24 @@ class MinigamePageMixin:
             "clicked", lambda *_: self._quarry_stop()
         )
         buttons.append(self.quarry_stop_button)
+        self.quarry_auto_button = Gtk.Button(label="Auto")
+        self.quarry_auto_button.set_tooltip_text(
+            "Claim the chosen box repeatedly (Great Quarry: 100 production "
+            "points per run, at most 20 runs from a full daily budget)."
+        )
+        self.quarry_auto_button.connect(
+            "clicked", lambda *_: self._quarry_auto_start()
+        )
+        buttons.append(self.quarry_auto_button)
+        buttons.append(Gtk.Label(label="runs"))
+        self.quarry_auto_spin = Gtk.SpinButton.new_with_range(1, 50, 1)
+        self.quarry_auto_spin.set_value(20)
+        self.quarry_auto_spin.set_width_chars(3)
+        self.quarry_auto_spin.set_tooltip_text(
+            "Maximum claims in one Auto session; stops earlier when the "
+            "production points are below 100."
+        )
+        buttons.append(self.quarry_auto_spin)
         box.append(buttons)
 
         self.quarry_status = Gtk.Label(label="")
@@ -277,7 +296,11 @@ class MinigamePageMixin:
                 "tells the host the object, your production points and the "
                 "live tiers. Each claim spends production points (100 "
                 "normally; the label shows the last known amount, refilled "
-                "daily). This is a packet shortcut, not a visual "
+                "daily). Auto repeats the claim up to the runs count (20 by default, "
+                "the 2,000-point daily budget at 100 per claim); it sends the "
+                "client's mg 2 between runs and stops on the run count, when the "
+                "production points fall below 100, inside a raid team or when a "
+                "claim gets no answer. This is a packet shortcut, not a visual "
                 "play-through: the server can reject it, and it violates "
                 "the game rules with a high ban risk. The game refuses the "
                 "minigame while you are in a raid team (\"You cannot use it "
@@ -393,9 +416,14 @@ class MinigamePageMixin:
         self.quarry_seen_status = world.minigame.status_count
         self.quarry_reward_seen = world.minigame.reward_count
         self.quarry_deadline = time.monotonic() + 1.2
+        auto_prefix = (
+            f"auto {self.quarry_auto_done + 1}/{self.quarry_auto_max} · "
+            if self.quarry_auto_running
+            else ""
+        )
         self._quarry_set_status(
-            f"{name}: starting · slot {slot} · target {level}x at "
-            f"{target:,} points…",
+            f"{auto_prefix}{name}: starting · slot {slot} · target "
+            f"{level}x at {target:,} points…",
             "bazar-warn",
         )
         self._log_line(
@@ -419,11 +447,125 @@ class MinigamePageMixin:
 
     def _quarry_stop(self, quiet: bool = False) -> None:
         self.quarry_running = False
+        self.quarry_auto_running = False
         if self.quarry_timer is not None:
             GLib.source_remove(self.quarry_timer)
             self.quarry_timer = None
+        if self.quarry_auto_timer is not None:
+            GLib.source_remove(self.quarry_auto_timer)
+            self.quarry_auto_timer = None
         if not quiet:
             self._quarry_set_status("stopped.")
+
+    def _quarry_auto_start(self) -> None:
+        """Claim the chosen box repeatedly, within the daily point budget."""
+        if self.quarry_running or self.quarry_auto_running:
+            return
+        if self.client is None or not self.client.connected:
+            self._quarry_set_status(
+                "Not connected to a game client.", "bazar-bad"
+            )
+            return
+        if self._quarry_in_raid():
+            self._quarry_set_status(
+                "You are in a raid team — the minigame cannot be used. "
+                "Leave the raid team, then press Auto.",
+                "bazar-bad",
+            )
+            return
+        points = self.engine.world.minigame.points
+        if points is not None and points < 100:
+            self._quarry_set_status(
+                f"Production points {points:,} — a claim needs at least "
+                "100.",
+                "bazar-bad",
+            )
+            return
+        self.quarry_auto_max = max(
+            1, int(self.quarry_auto_spin.get_value())
+        )
+        self.quarry_auto_done = 0
+        self.quarry_auto_running = True
+        self._log_line(
+            f"minigame: auto start, {self.quarry_auto_max} claim(s) of the "
+            f"{self._quarry_selected_level()}x box"
+        )
+        self._quarry_play()
+        if not self.quarry_running:
+            self.quarry_auto_running = False
+
+    def _quarry_auto_after_success(self) -> None:
+        if not self.quarry_auto_running:
+            return
+        self.quarry_auto_done += 1
+        # Close the finished game before another start, like the client
+        # does when the result window is dismissed (live: mg 2 on Storno).
+        self._send(
+            build_production_close_packet(
+                self.quarry_vnum, self.quarry_slot
+            )
+        )
+        remaining = self.quarry_auto_max - self.quarry_auto_done
+        points = self.engine.world.minigame.points
+        if remaining <= 0:
+            self._quarry_auto_finish(
+                f"auto complete: {self.quarry_auto_done} claim(s) of the "
+                f"{self.quarry_level}x box"
+            )
+            return
+        if points is not None and points < 100:
+            self._quarry_auto_finish(
+                f"auto stopped after {self.quarry_auto_done} claim(s): "
+                f"production points {points:,} (a claim needs 100)"
+            )
+            return
+        if self.quarry_auto_timer is None:
+            self.quarry_auto_timer = GLib.timeout_add(
+                2000, self._quarry_auto_next
+            )
+
+    def _quarry_auto_next(self) -> bool:
+        self.quarry_auto_timer = None
+        if not self.quarry_auto_running:
+            return False
+        if self.quarry_running:
+            return True
+        if self.client is None or not self.client.connected:
+            self._quarry_auto_abort("auto stopped: not connected")
+            return False
+        if self._quarry_in_raid():
+            self._quarry_auto_abort(
+                "auto stopped: you are in a raid team — leave it and "
+                "start again"
+            )
+            return False
+        points = self.engine.world.minigame.points
+        if points is not None and points < 100:
+            self._quarry_auto_finish(
+                f"auto stopped: production points {points:,} (a claim "
+                "needs 100)"
+            )
+            return False
+        self._quarry_play()
+        if not self.quarry_running:
+            self.quarry_auto_running = False
+        return False
+
+    def _quarry_auto_finish(self, text: str) -> None:
+        self.quarry_auto_running = False
+        if self.quarry_auto_timer is not None:
+            GLib.source_remove(self.quarry_auto_timer)
+            self.quarry_auto_timer = None
+        self._quarry_set_status(text, "bazar-ok")
+        self._log_line(f"minigame: {text}")
+
+    def _quarry_auto_abort(self, text: str) -> None:
+        self.quarry_auto_running = False
+        if self.quarry_auto_timer is not None:
+            GLib.source_remove(self.quarry_auto_timer)
+            self.quarry_auto_timer = None
+        self._quarry_set_status(text, "bazar-bad")
+        self._log_line(f"minigame: {text}")
 
     def _quarry_tick(self) -> bool:
         if not self.quarry_running:
@@ -431,9 +573,12 @@ class MinigamePageMixin:
             return False
         if self.client is None or not self.client.connected:
             self._quarry_finish()
-            self._quarry_set_status(
-                "Minigame stopped: not connected.", "bazar-bad"
-            )
+            if self.quarry_auto_running:
+                self._quarry_auto_abort("auto stopped: not connected")
+            else:
+                self._quarry_set_status(
+                    "Minigame stopped: not connected.", "bazar-bad"
+                )
             return False
         now = time.monotonic()
         world = self.engine.world
@@ -468,15 +613,22 @@ class MinigamePageMixin:
                         f"{world.minigame.reward_amount:,}"
                     )
                 claimed = self.quarry_claim_level + 1
+                auto_prefix = (
+                    f"auto {self.quarry_auto_done + 1}/"
+                    f"{self.quarry_auto_max} · "
+                    if self.quarry_auto_running
+                    else ""
+                )
                 self._quarry_set_status(
-                    f"{claimed}x claimed · production points "
+                    f"{auto_prefix}{claimed}x claimed · production points "
                     f"{before_text} → {after_text}{reward_text}",
                     "bazar-ok",
                 )
                 self._log_line(
-                    f"minigame: {claimed}x claimed, production "
+                    f"minigame: {auto_prefix}{claimed}x claimed, production "
                     f"points {before_text} -> {after_text}{reward_text}"
                 )
+                self._quarry_auto_after_success()
                 return False
             if now >= self.quarry_deadline:
                 self._quarry_finish()
@@ -490,8 +642,11 @@ class MinigamePageMixin:
                         "no answer from the server; the minigame window may "
                         "be closed or the result rejected"
                     )
-                self._quarry_set_status(message, "bazar-bad")
-                self._log_line(f"minigame: {message}")
+                if self.quarry_auto_running:
+                    self._quarry_auto_abort(f"auto stopped: {message}")
+                else:
+                    self._quarry_set_status(message, "bazar-bad")
+                    self._log_line(f"minigame: {message}")
                 return False
             return True
         # The real client's GAMESTART is answered by `mlo_st`; once that
@@ -509,9 +664,14 @@ class MinigamePageMixin:
                 )
             ):
                 self._quarry_finish()
-                self._quarry_set_status(
-                    "Could not send the result packet.", "bazar-bad"
-                )
+                if self.quarry_auto_running:
+                    self._quarry_auto_abort(
+                        "auto stopped: could not send the result packet"
+                    )
+                else:
+                    self._quarry_set_status(
+                        "Could not send the result packet.", "bazar-bad"
+                    )
                 return False
             self.quarry_step = 1
             self.quarry_reward_seen = world.minigame.reward_count
@@ -550,9 +710,14 @@ class MinigamePageMixin:
                 )
             ):
                 self._quarry_finish()
-                self._quarry_set_status(
-                    "Could not send the claim packet.", "bazar-bad"
-                )
+                if self.quarry_auto_running:
+                    self._quarry_auto_abort(
+                        "auto stopped: could not send the claim packet"
+                    )
+                else:
+                    self._quarry_set_status(
+                        "Could not send the claim packet.", "bazar-bad"
+                    )
                 return False
             self.quarry_step = 2
             self.quarry_deadline = now + 5.0

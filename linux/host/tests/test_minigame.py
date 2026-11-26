@@ -14,6 +14,7 @@ from ntpl.minigame import (
     MIN_RADIUS,
     QUARRY_VNUM,
     MinigameConfig,
+    build_production_close_packet,
     build_production_gift_packet,
     build_production_result_packet,
     build_production_start_packet,
@@ -231,6 +232,10 @@ class ProductionMinigameTests(unittest.TestCase):
         self.assertEqual(
             build_production_gift_packet(QUARRY_VNUM, 4, 4),
             "mg 4 4 3125 4",
+        )
+        self.assertEqual(
+            build_production_close_packet(QUARRY_VNUM, 4),
+            "mg 2 4 3125",
         )
 
     def test_engine_parses_mlo_info(self):

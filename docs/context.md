@@ -58,11 +58,13 @@ the data layer in [database.md](database.md).
   points it refuses. The Great Quarry window must be open in the game (it
   sends `mlo_info`). The game refuses the minigame inside a raid team, so
   `rdlst` membership (`WorldState.raid_members`/`raid_at`) blocks Play with
-  a clear hint. Packet shortcut, high ban risk; the natural flow is
-  live-captured, the automated result is smoke-tested only.
+  a clear hint. **Auto** repeats the claim up to 20 runs (the daily budget),
+  sends `mg 2` between runs and stops on points <100/count/raid/no answer.
+  Packet shortcut, high ban risk; the natural flow is live-captured, the
+  automated result is smoke-tested only.
 - **Linux host**: 385 unittest cases, 6 GTK4 smokes, 47 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
-  linux all test-host`, tests above. The host is **0.9.1**; the GTK4 window
+  linux all test-host`, tests above. The host is **0.9.2**; the GTK4 window
   is split into `gui.py` (core) plus one mixin per page (`gui_bazar.py`,
   `gui_map.py`, `gui_bot.py`, `gui_family.py`, `gui_minigame.py`,
   `gui_stats.py`, `guicommon.py`), and a handler exception is logged and

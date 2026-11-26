@@ -113,8 +113,9 @@ visual game; it sends the result the client sends at the end of a game.
 | **Game** | Great Quarry (3125). |
 | **Play until** | Reward box to claim, 1x–5x. Default **5x**, whose minimum score is **16,000**. The result is the box's minimum from the server's own `mlo_info` tier table; the built-in table is the fallback. |
 | **production points** | The last `mlo_info`/`mlo_mg`/`mlpt` balance. The label says how to learn it when it is unknown. |
-| **Play** | Sends the sequence below. |
-| **Stop** | Cancels the sequence. |
+| **Play** | Sends the sequence below once. |
+| **Stop** | Cancels the sequence and the Auto loop. |
+| **Auto** / **runs** | Repeats the claim up to the runs count (default **20** = the 2,000-point daily budget at 100 per claim). It sends `mg 2` between runs and stops on the count, when the production points fall below 100, in a raid team, or when a claim gets no answer. |
 
 The sequence is the client's own, live-captured on 2026-11-26. The second
 field is the **object's slot** from `mlo_info` (the live object was on slot 4;
@@ -132,7 +133,8 @@ mg 4 <slot> 3125 <level>                 claim with the server's level
 
 The tab waits for `mlo_lv` and claims exactly that level (the GUI's 5x choice
 is the server's level 4); if the server stays silent it falls back to the
-chosen level minus one. The status reads
+chosen level minus one. After a confirmed claim it sends `mg 2 <slot>
+3125` (the client's close/Storno) so the next Auto run starts clean. The status reads
 `5x claimed · production points 2,000 → 1,900 · reward item 2193 ×2`, or a
 warning when no answer arrived (the window may be closed or the result
 rejected). A claim spends production points — **100** normally, less with the
@@ -176,7 +178,7 @@ risk**. The account risk is the owner's.
   the running client. Restart the game client and inject again (the picker's
   **Inject & connect**), then the window title/status shows `DLL 0.3.0`
   or newer (`0.3.1` is the current build).
-- Host **0.6.0 or newer** for the tab (0.9.1 today). Only a GUI restart is
+- Host **0.6.0 or newer** for the tab (0.9.2 today). Only a GUI restart is
   needed for host changes.
 - The game window attached to this GUI window. The tab is per client, like the
   Family and NosBazar pages.

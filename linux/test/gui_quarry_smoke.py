@@ -42,6 +42,7 @@ class QuarryServer:
         self.listener.listen(1)
         self.port = self.listener.getsockname()[1]
         self.received: list[str] = []
+        self.points = 2000
         self.connection = None
         self.stop = threading.Event()
         threading.Thread(target=self._run, daemon=True).start()
@@ -86,10 +87,13 @@ class QuarryServer:
                         return
                 elif text.startswith("SEND|mg 4 "):
                     # The claim charges 100 points and grants item 2193 x2.
+                    self.points = max(0, self.points - 100)
                     try:
                         self.connection.sendall(
-                            b"RECV|mlpt 1900 100\n"
-                            b"RECV|mlo_rw 2193 2\n"
+                            (
+                                f"RECV|mlpt {self.points} 100\n"
+                                "RECV|mlo_rw 2193 2\n"
+                            ).encode()
                         )
                     except OSError:
                         return
@@ -222,24 +226,69 @@ def main() -> int:
                 and "raid team" in status
                 and "raid team" in label
             )
-            result["ok"] = bool(
-                result.get("claimed")
-                and result.get("guard")
-                and result["raid_guard"]
-            )
-            result["detail"] = (
-                f"packets={result.get('packets')} "
-                f"status={result.get('status')!r} "
-                f"label={result.get('label')!r} "
-                f"claimed={result.get('claimed')} "
-                f"guard={result.get('guard')} "
-                f"raid_guard={result.get('raid_guard')} "
-                f"raid_label={label!r} "
-                f"running={app.quarry_running}"
-            )
+            if not result["raid_guard"]:
+                result["ok"] = False
+                app.quit()
+                return False
+            # Leave the raid, then run the Auto loop twice. Each claim costs
+            # 100 points; the fake server tracks the balance.
+            app.engine.world.raid_members.clear()
+            app.engine.world.minigame.points = 1900
+            app.quarry_auto_spin.set_value(2)
+            state["auto_before"] = len(sent_mg())
+            app._quarry_auto_start()
+            GLib.timeout_add(9000, check_auto)
         except Exception as exc:  # noqa: BLE001
             result["ok"] = False
             result["detail"] = f"raid exception: {exc!r}"
+            app.quit()
+        return False
+
+    def check_auto() -> bool:
+        try:
+            before = state.get("auto_before", 0)
+            auto_packets = sent_mg()[before:]
+            expected = [
+                "SEND|mg 1 4 3125",
+                "SEND|mg 3 4 3125 16000 16000",
+                "SEND|mg 4 4 3125 4",
+                "SEND|mg 2 4 3125",
+                "SEND|mg 1 4 3125",
+                "SEND|mg 3 4 3125 16000 16000",
+                "SEND|mg 4 4 3125 4",
+                "SEND|mg 2 4 3125",
+            ]
+            status = app.quarry_status.get_text()
+            app._quarry_points_tick()
+            label = app.quarry_points_label.get_text()
+            result["auto_packets"] = auto_packets
+            result["auto_status"] = status
+            result["auto_label"] = label
+            result["auto"] = (
+                auto_packets == expected
+                and app.quarry_auto_running is False
+                and "auto complete: 2 claim(s)" in status
+                and "1,700" in label
+            )
+            result["ok"] = bool(
+                result.get("claimed")
+                and result.get("guard")
+                and result.get("raid_guard")
+                and result["auto"]
+            )
+            result["detail"] = (
+                f"packets={result.get('packets')} "
+                f"claimed={result.get('claimed')} "
+                f"guard={result.get('guard')} "
+                f"raid_guard={result.get('raid_guard')} "
+                f"auto={result.get('auto')} "
+                f"auto_packets={auto_packets} "
+                f"auto_status={status!r} "
+                f"auto_label={label!r}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
+            result["detail"] = f"auto exception: {exc!r}"
         app.quit()
         return False
 

@@ -113,6 +113,17 @@ def build_production_gift_packet(
 ) -> str:
     return f"mg 4 {int(slot)} {int(vnum)} {int(level)}"
 
+
+def build_production_close_packet(
+    vnum: int = QUARRY_VNUM, slot: int = 1
+) -> str:
+    """Close the finished minigame before another run.
+
+    The client sends `mg 2 <slot> <vnum>` when the result window is
+    dismissed (live 2026-11-26: the user's Storno/Stop button).
+    """
+    return f"mg 2 {int(slot)} {int(vnum)}"
+
 #: Key names the DLL understands besides a single letter or digit.
 _KEY_ALIASES = {
     "return": "enter",

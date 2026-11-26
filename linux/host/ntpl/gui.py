@@ -631,6 +631,12 @@ class Application(
         self.quarry_reward_seen = 0
         self.quarry_claim_level = 0
         self.quarry_reward_before: int | None = None
+        # Auto: repeat the claim until the run count or the production points
+        # run out (20 runs = the 2,000-point daily budget at 100 per claim).
+        self.quarry_auto_running = False
+        self.quarry_auto_max = 20
+        self.quarry_auto_done = 0
+        self.quarry_auto_timer: int | None = None
         self.quarry_points_before: int | None = None
         self.quarry_deadline = 0.0
         self.minigame_guard = False
