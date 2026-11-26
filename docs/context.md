@@ -47,7 +47,7 @@ the data layer in [database.md](database.md).
   and Relist shows only the relist set by default.
   The Character frame shows the detected name above HP/MP. The active user
   config is a 25-item relist list for char `root1` (see the handoff).
-- **Minigame — Great Quarry (2026-11-26, host 0.9.10)**: the Minigame tab's
+- **Minigame — Great Quarry (2026-11-26, host 0.9.11)**: the Minigame tab's
   **Miniland production** frame plays a production minigame (Great Quarry
   3125 first). **Play until** picks the reward box 1x–5x, default 5x whose
   minimum score is 16,000; the production-points label comes from
@@ -57,8 +57,10 @@ the data layer in [database.md](database.md).
   5x), confirmed by `mlpt`/`mlo_rw`; under 100
   points it refuses. The Great Quarry window must be open in the game (it
   sends `mlo_info`). The game refuses the minigame inside a raid team, so
-  `rdlst` membership (`WorldState.raid_members`/`raid_at`) blocks Play with
-  a clear hint. **Play** loops: it claims, sends `mg 2 -1 -1` (the client's
+  the server's own `raid 1 0/1` state (`WorldState.raid_active`) blocks Play
+  with a clear hint and the packet clears it the moment the team is left
+  (the `rdlst` membership with its 60 s freshness is only the fallback for a
+  host attached mid-raid). **Play** loops: it claims, sends `mg 2 -1 -1` (the client's
   Stop/Storno; `mg 2 <slot> <vnum>` is the window close and desyncs the
   dialog), waits **40 s** (`every`, the live reward cooldown — 35–38 s was
   refused) and starts the next run until the points fall below 100; an
@@ -67,9 +69,9 @@ the data layer in [database.md](database.md).
   Minigame tick (a one-shot GLib timer stalled live). Packet shortcut, high
   ban risk; the natural flow, the automated claim and the 40 s Play loop
   are live-verified.
-- **Linux host**: 385 unittest cases, 6 GTK4 smokes, 47 fake-server bot
+- **Linux host**: 386 unittest cases, 6 GTK4 smokes, 47 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
-  linux all test-host`, tests above. The host is **0.9.10**; the GTK4 window
+  linux all test-host`, tests above. The host is **0.9.11**; the GTK4 window
   is split into `gui.py` (core) plus one mixin per page (`gui_bazar.py`,
   `gui_map.py`, `gui_bot.py`, `gui_family.py`, `gui_minigame.py`,
   `gui_stats.py`, `guicommon.py`), and a handler exception is logged and

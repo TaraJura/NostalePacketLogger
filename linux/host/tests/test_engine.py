@@ -141,6 +141,35 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(world.raid_members, {22, 7001, 2035})
         self.assertGreater(world.raid_at, 0.0)
 
+    def test_raid_state_packets_track_joining_and_leaving(self):
+        # Live 2026-11-26: joining sends `rdlst` + `raid 1 1` + `raid 2
+        # <leaderId>`; leaving sends only `raid 1 0` + `raid 2 -1`.
+        self.engine.feed(
+            packet(Kind.RECV, "at 7001 20001 76 73 2 0 115 1 -1 0 0")
+        )
+        world = self.engine.feed(
+            packet(
+                Kind.RECV,
+                "rdlst 81 99 7 99.3.1.0.Chinain.1.1168.71 "
+                "89.7.3.0.root1.0.7001.30",
+            )
+        )
+        self.assertIsNone(world.raid_active)
+        world = self.engine.feed(packet(Kind.RECV, "raid 1 1"))
+        self.assertTrue(world.raid_active)
+        world = self.engine.feed(packet(Kind.RECV, "raid 2 1168"))
+        self.assertEqual(world.raid_leader, 1168)
+        self.assertEqual(world.raid_members, {1168, 7001})
+
+        # Leaving: the server sends no new rdlst, only the state; the old
+        # membership must be gone immediately.
+        world = self.engine.feed(packet(Kind.RECV, "raid 1 0"))
+        self.assertFalse(world.raid_active)
+        self.assertEqual(world.raid_members, set())
+        self.assertEqual(world.raid_at, 0.0)
+        world = self.engine.feed(packet(Kind.RECV, "raid 2 -1"))
+        self.assertEqual(world.raid_leader, -1)
+
     def test_player_spawn_reads_family(self):
         # Live map 20 line: family id 70.918 and family name at the end.
         world = self.engine.feed(

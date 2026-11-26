@@ -337,13 +337,19 @@ class MinigamePageMixin:
             self.quarry_status.add_css_class(css)
 
     def _quarry_in_raid(self) -> bool:
-        """True while the local character is in a fresh raid/party list.
+        """True while the local character is in a raid team.
 
         The game refuses the production minigames inside a raid team
-        ("You cannot use it when you are already a member of a raid team"),
-        so the tab checks the last `rdlst` before sending anything.
+        ("You cannot use it when you are already a member of a raid team").
+        `raid 1 1`/`raid 1 0` is the server's authoritative state; the
+        `rdlst` heuristic is only the fallback for a host that attached after
+        the last state packet (the list arrives only while a team exists and
+        would otherwise keep blocking for its freshness window after the user
+        left — live 2026-11-26).
         """
         world = self.engine.world
+        if world.raid_active is not None:
+            return world.raid_active
         if not world.raid_members:
             return False
         if time.monotonic() - world.raid_at > MINIGAME_RAID_FRESH_S:
@@ -361,8 +367,12 @@ class MinigamePageMixin:
             else:
                 text = f"production points: {points:,}"
             if self._quarry_in_raid():
+                # The rdlst is often unknown (attached mid-raid) but the raid
+                # state packet says yes; show the count only when known.
+                count = len(self.engine.world.raid_members)
+                suffix = f" ({count})" if count else ""
                 text += (
-                    f" · in a raid team ({len(self.engine.world.raid_members)})"
+                    f" · in a raid team{suffix}"
                     " — leave it to play"
                 )
             self.quarry_points_label.set_text(text)

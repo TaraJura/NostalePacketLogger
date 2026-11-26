@@ -285,9 +285,17 @@ class WorldState:
     #: player included), and the monotonic time of that list. The game
     #: refuses the production minigames while the character is in a raid
     #: team ("You cannot use it when you are already a member of a raid
-    #: team"), so the Minigame tab checks this before sending a result.
+    #: team"). `raid_active` is the authoritative state; this list is the
+    #: fallback for a host that attached after the last `raid` packet.
     raid_members: set[int] = field(default_factory=set)
     raid_at: float = 0.0
+    #: `raid 1 <flag>`: the server's authoritative raid-team state (1 in a
+    #: team, 0 not) and `raid 2 <leaderId>` (the leader char id, -1 = none).
+    #: Live 2026-11-26: joining sends `raid 1 1` + `raid 2 <id>`, leaving
+    #: sends `raid 1 0` + `raid 2 -1` with no new `rdlst` — the list alone
+    #: cannot show that the team ended.
+    raid_active: bool | None = None
+    raid_leader: int = -1
 
     @property
     def position(self) -> tuple[int, int] | None:
@@ -918,6 +926,39 @@ def _on_party_list(world: WorldState, packet: Packet) -> None:
     world.raid_at = time.monotonic()
 
 
+def _on_raid(world: WorldState, packet: Packet) -> None:
+    """Track the server's own raid-team state.
+
+    Live shape (2026-11-26)::
+
+        raid 1 1                 joined a raid team
+        raid 2 1168              the leader's char id
+        raid 1 0                 left / the team ended
+        raid 2 -1                no leader any more
+
+    `rdlst` only arrives while a team exists, so without this packet the
+    Minigame tab kept blocking Play for the whole `rdlst` freshness window
+    after the user had already left the raid.
+    """
+    args = packet.args
+    if len(args) < 2:
+        return
+    try:
+        kind = int(args[0])
+        value = int(args[1])
+    except ValueError:
+        return
+    if kind == 1:
+        world.raid_active = value != 0
+        if not world.raid_active:
+            # The team ended: the last list is no longer membership.
+            world.raid_members.clear()
+            world.raid_at = 0.0
+            world.raid_leader = -1
+    elif kind == 2:
+        world.raid_leader = value
+
+
 def _on_family_index(world: WorldState, packet: Packet) -> None:
     # gidx 1 <entityId> <familyId>.<rank> <familyName> ...
     # The server sends it for players already on the map and when membership
@@ -1263,6 +1304,7 @@ class Engine:
                 #                                the bazaar on FrosTale)
                 "in": _on_spawn,        # RECV: entity spawned
                 "rdlst": _on_party_list,  # RECV: party/raid list (names)
+                "raid": _on_raid,       # RECV: joined/left a raid team
                 "gidx": _on_family_index,  # RECV: player family id/name
                 "pairy": _on_fairy_info,  # RECV: player fairy element
                 "out": _on_despawn,     # RECV: entity despawned

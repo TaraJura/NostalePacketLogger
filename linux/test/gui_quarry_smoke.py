@@ -206,11 +206,13 @@ def main() -> int:
                 and "needs at least 100" in status
             )
             # The game refuses the minigame inside a raid team. Feed the live
-            # rdlst shape with the local player and check both the refusal and
-            # the hint in the points label.
+            # shape: the list with the local player, then the authoritative
+            # raid state (joined, leader 1000).
             app.engine.world.minigame.points = 1900
             server.send(
                 "RECV|rdlst 85 99 17 89.14.3.0.Tester.0.14881134.30\n"
+                "RECV|raid 1 1\n"
+                "RECV|raid 2 1000\n"
             )
             GLib.timeout_add(500, check_raid)
         except Exception as exc:  # noqa: BLE001
@@ -236,30 +238,59 @@ def main() -> int:
                 result["ok"] = False
                 app.quit()
                 return False
-            # Leave the raid, then run the loop twice. Each claim costs
-            # 100 points; the fake server tracks the balance.
-            app.engine.world.raid_members.clear()
-            app.engine.world.minigame.points = 1900
-            # Test-only shortcut: the real gap is 40 s (the server refuses
-            # a second reward sooner); the smoke needs two runs in seconds.
-            app._quarry_gap = lambda: 5
-            state["auto_before"] = len(sent_mg())
-            app._quarry_start()
-            GLib.timeout_add(2500, check_countdown)
-            GLib.timeout_add(12000, check_auto)
+            # Leave the raid exactly as the live client does (2026-11-26
+            # 23:02:52): the client sends `rd 2 1`, the server answers only
+            # `raid 1 0` + `raid 2 -1` — no new rdlst. The tab must unblock
+            # at once, not after the rdlst freshness window.
+            server.send("RECV|raid 1 0\nRECV|raid 2 -1\n")
+            GLib.timeout_add(500, check_raid_left)
         except Exception as exc:  # noqa: BLE001
             result["ok"] = False
             result["detail"] = f"raid exception: {exc!r}"
             app.quit()
         return False
 
+    def check_raid_left() -> bool:
+        try:
+            result["raid_left"] = (
+                app.engine.world.raid_members == set()
+                and app._quarry_in_raid() is False
+                and "raid team" not in app.quarry_points_label.get_text()
+            )
+            if not result["raid_left"]:
+                result["ok"] = False
+                app.quit()
+                return False
+            # Run the loop twice. Each claim costs 100 points; the fake
+            # server tracks the balance.
+            app.engine.world.minigame.points = 1900
+            # Test-only shortcut: the real gap is 40 s (the server refuses
+            # a second reward sooner); the smoke needs two runs in seconds.
+            app._quarry_gap = lambda: 5
+            state["auto_before"] = len(sent_mg())
+            app._quarry_start()
+            # The countdown is painted by the 1 s Minigame tick, so poll for
+            # it instead of sampling one instant.
+            state["countdown_tries"] = 0
+            GLib.timeout_add(250, check_countdown)
+            GLib.timeout_add(12000, check_auto)
+        except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
+            result["detail"] = f"raid-left exception: {exc!r}"
+            app.quit()
+        return False
+
     def check_countdown() -> bool:
         try:
             text = app.quarry_countdown_label.get_text()
-            result["countdown"] = (
-                "next claim in" in text
-                and any(ch.isdigit() for ch in text)
-            )
+            if "next claim in" in text and any(ch.isdigit() for ch in text):
+                result["countdown"] = True
+                return False
+            tries = int(state.get("countdown_tries", 0)) + 1
+            state["countdown_tries"] = tries
+            if tries < 16:  # 4 s: inside the first 5 s gap
+                return True
+            result["countdown"] = False
         except Exception as exc:  # noqa: BLE001
             result["countdown"] = False
             result["detail"] = f"countdown exception: {exc!r}"
@@ -298,6 +329,7 @@ def main() -> int:
                 result.get("claimed")
                 and result.get("guard")
                 and result.get("raid_guard")
+                and result.get("raid_left")
                 and result["auto"]
             )
             result["detail"] = (
@@ -305,6 +337,7 @@ def main() -> int:
                 f"claimed={result.get('claimed')} "
                 f"guard={result.get('guard')} "
                 f"raid_guard={result.get('raid_guard')} "
+                f"raid_left={result.get('raid_left')} "
                 f"auto={result.get('auto')} "
                 f"countdown={result.get('countdown')} "
                 f"auto_packets={auto_packets} "

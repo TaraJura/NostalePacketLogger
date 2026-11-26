@@ -179,11 +179,15 @@ inventory seeds, and logs `minigame: Great Quarry from the client log`.
 **Raid team:** the game refuses the production minigame while the character is
 in a raid team — the client shows "You cannot use it when you are already a
 member of a raid team" and the server ignores the `mg` packets. The engine
-records every `rdlst` (raid/party list) into `WorldState.raid_members`
-(including the local character); the tab refuses to start while the local id
-is in a list younger than 60 s and says so, both in the points label
-(`· in a raid team (15) — leave it to play`) and on Play. Leave the raid team
-in the game, then press Play.
+tracks the server's own raid state: `raid 1 1` + `raid 2 <leaderId>` on
+joining, `raid 1 0` + `raid 2 -1` on leaving (live 2026-11-26 23:00–23:02).
+That state is authoritative — the tab unblocks the moment the leave packet
+arrives. Every `rdlst` (raid/party list) is also recorded into
+`WorldState.raid_members` (including the local character) as the fallback
+for a host that attached after the last state packet; the fallback only
+blocks while the local id is in a list younger than 60 s. The block is shown
+in the points label (`· in a raid team (15) — leave it to play`) and on
+Play. Leave the raid team in the game, then press Play.
 
 This is a packet shortcut, not a visual play-through: the server may reject
 the fabricated result, and it is a game-rule violation with a **high ban
@@ -196,7 +200,7 @@ risk**. The account risk is the owner's.
   the running client. Restart the game client and inject again (the picker's
   **Inject & connect**), then the window title/status shows `DLL 0.3.0`
   or newer (`0.3.2` is the current build).
-- Host **0.6.0 or newer** for the tab (0.9.10 today). Only a GUI restart is
+- Host **0.6.0 or newer** for the tab (0.9.11 today). Only a GUI restart is
   needed for host changes.
 - The game window attached to this GUI window. The tab is per client, like the
   Family and NosBazar pages.
@@ -217,7 +221,9 @@ risk**. The account risk is the owner's.
   `mg 1 4 3125`, `mg 3 4 3125 16000 16000` and `mg 4 4 3125 4` in order (the
   server's `mlo_lv 4` is used for the claim), the `mlpt`/`mlo_rw` replies
   change the label to 1,900 and show the reward, and a balance below 100
-  refuses to start.
+  refuses to start. A raid list (`rdlst`) plus `raid 1 1`/`raid 2 1000`
+  blocks Play, and the live leave shape `raid 1 0`/`raid 2 -1` (no new
+  `rdlst`) unblocks it immediately and starts the two-claim loop.
 - `make -C linux key-test` — the native C++ check of the DLL's key parser.
 
 Live status: the raid itself and player targeting through the client's own
