@@ -240,7 +240,7 @@ def main() -> int:
             # 100 points; the fake server tracks the balance.
             app.engine.world.raid_members.clear()
             app.engine.world.minigame.points = 1900
-            # Test-only shortcut: the real gap is 65 s (the server refuses
+            # Test-only shortcut: the real gap is 40 s (the server refuses
             # a second reward sooner); the smoke needs two runs in seconds.
             app._quarry_gap = lambda: 5
             state["auto_before"] = len(sent_mg())
