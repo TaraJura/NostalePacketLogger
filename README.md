@@ -241,7 +241,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-Host **0.7.5** (Linux): 363 unit tests, 6 GTK4 window smokes and 44
+Host **0.7.6** (Linux): 374 unit tests, 6 GTK4 window smokes and 45
 fake-server bot smokes pass, and the real injector has been run against the
 live NosTale client under Wine 11 — both hooks `ACTIVE`, movement through the
 client's own MoveTo, auto-attack confirmed by the server's `su`, and the
