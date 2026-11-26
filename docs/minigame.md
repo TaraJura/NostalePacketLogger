@@ -116,23 +116,31 @@ visual game; it sends the result the client sends at the end of a game.
 | **Play** | Sends the sequence below. |
 | **Stop** | Cancels the sequence. |
 
-The sequence (the same three client packets the game sends):
+The sequence is the client's own, live-captured on 2026-11-26. The second
+field is the **object's slot** from `mlo_info` (the live object was on slot 4;
+the forum's `1` was silently ignored by the server):
 
 ```text
-mg 1 1 3125                            start
-mg 3 1 3125 <points> <points>           result (both fields equal)
-mg 4 1 3125 <level>                     claim the 1x..5x box
+mg 1 <slot> 3125                         start (live: mg 1 4 3125)
+  -> mlo_st 0                            the server accepted the start
+mg 3 <slot> 3125 <points> <points>       result (live: 16124 16124)
+  -> mlo_lv 4                            reward level, 0-based (4 = 5x)
+mg 4 <slot> 3125 <level>                 claim with the server's level
+  -> mlpt 1900 100                       production points 2000 -> 1900
+  -> mlo_rw 2193 2                       reward item 2193 x2
 ```
 
-The server answers with `mlo_mg <vnum> <new points> ...`; the tab shows
-`5x claimed · production points 2,000 → 1,900` when the balance changed, or a
-warning when the server stayed silent (the window may be closed or the result
+The tab waits for `mlo_lv` and claims exactly that level (the GUI's 5x choice
+is the server's level 4); if the server stays silent it falls back to the
+chosen level minus one. The status reads
+`5x claimed · production points 2,000 → 1,900 · reward item 2193 ×2`, or a
+warning when no answer arrived (the window may be closed or the result
 rejected). A claim spends production points — **100** normally, less with the
 game's stacking discounts; when the last known balance is below 100 the tab
 refuses to start. The live `mlo_info` line observed on 2026-11-26 was:
 
 ```text
-mlo_info 0 3125 5 2000 0 0 0 999 1000 4999 5000 7999 8000 11999 12000 15999 16000 1000000
+mlo_info 0 3125 4 2000 0 0 0 999 1000 4999 5000 7999 8000 11999 12000 15999 16000 1000000
 ```
 
 Fields: owner flag, object vnum, slot, production points, two flags, then
@@ -159,7 +167,7 @@ risk**. The account risk is the owner's.
   the running client. Restart the game client and inject again (the picker's
   **Inject & connect**), then the window title/status shows `DLL 0.3.0`
   or newer (`0.3.1` is the current build).
-- Host **0.6.0 or newer** for the tab (0.9.0 today). Only a GUI restart is
+- Host **0.6.0 or newer** for the tab (0.9.1 today). Only a GUI restart is
   needed for host changes.
 - The game window attached to this GUI window. The tab is per client, like the
   Family and NosBazar pages.
@@ -176,10 +184,11 @@ risk**. The account risk is the owner's.
   switches when that player leaves, settings are saved per client, Stop sends
   nothing further, and an old DLL's `unknown command: KEY` stops the loop.
 - `linux/test/gui_quarry_smoke.py` — the fake server sends the live Great
-  Quarry `mlo_info` (2,000 points, the six ranges): Play sends `mg 1 1 3125`,
-  `mg 3 1 3125 16000 16000` and `mg 4 1 3125 5` in order, the `mlo_mg` reply
-  changes the label to 1,900 and the status to `5x claimed`, and a balance
-  below 100 refuses to start.
+  Quarry `mlo_info` (2,000 points, slot 4, the six ranges): Play sends
+  `mg 1 4 3125`, `mg 3 4 3125 16000 16000` and `mg 4 4 3125 4` in order (the
+  server's `mlo_lv 4` is used for the claim), the `mlpt`/`mlo_rw` replies
+  change the label to 1,900 and show the reward, and a balance below 100
+  refuses to start.
 - `make -C linux key-test` — the native C++ check of the DLL's key parser.
 
 Live status: the raid itself and player targeting through the client's own
@@ -188,10 +197,13 @@ Live status: the raid itself and player targeting through the client's own
 live-verified yet. The first live run should watch the Bot log for
 `minigame keyboard ready`, `minigame focus -> …` and the raid's Wolves column.
 
-The Great Quarry `mlo_info` line and the tier table are live-captured
-(2026-11-26, 2,000 production points), but the result/claim sequence has only
-been verified against the fake server; the first live claim should watch the
-Bot log for `minigame: 5x claimed` or the no-answer warning.
+The Great Quarry natural flow was live-verified on 2026-11-26: GAMESTART
+(`mg 1 4 3125`), a played game ending with score 16,124 (`mg 3 4 3125 16124
+16124`), the server's `mlo_lv 4`, the client's claim `mg 4 4 3125 4`, and the
+`mlpt 1900 100` + `mlo_rw 2193 2` reward. The tab's **automated** result (the
+same packets sent without playing) is verified against the fake server only;
+the first live run should watch the Bot log for `5x claimed … reward …` or the
+no-answer warning.
 
 ## Troubleshooting
 

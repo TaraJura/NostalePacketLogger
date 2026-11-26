@@ -46,6 +46,17 @@ class MinigameInfo:
     tiers: list[tuple[int, int]] = field(default_factory=list)
     updated_at: float = 0.0
     update_count: int = 0
+    #: `mlo_st <value>`: the server's answer to a minigame start/step.
+    status: int | None = None
+    status_count: int = 0
+    #: `mlo_lv <level>`: the reward level for the reported score. It is
+    #: **0-based**: the live server answered `mlo_lv 4` for a 5x score, and
+    #: the client then claims with `mg 4 <slot> <vnum> 4`.
+    reward_level: int | None = None
+    reward_count: int = 0
+    #: `mlo_rw <vnum> <amount>`: the reward item granted by the claim.
+    reward_vnum: int | None = None
+    reward_amount: int = 0
 
 
 @dataclass
@@ -423,6 +434,55 @@ def _on_minigame_result(world: WorldState, packet: Packet) -> None:
     state.vnum = values[0]
     state.points = values[1]
     state.updated_at = time.monotonic()
+    state.update_count += 1
+
+
+def _on_minigame_status(world: WorldState, packet: Packet) -> None:
+    """`mlo_st <value>`: the server's minigame start/step answer.
+
+    Live 2026-11-26: the client's own GAMESTART (`mg 1 4 3125`) is answered
+    by `mlo_st 0` within ~0.1 s.
+    """
+    if packet.direction is not Kind.RECV:
+        return
+    values = packet.ints(1)
+    if values is None:
+        return
+    state = world.minigame
+    state.status = values[0]
+    state.status_count += 1
+    state.updated_at = time.monotonic()
+
+
+def _on_minigame_level(world: WorldState, packet: Packet) -> None:
+    """`mlo_lv <level>`: the reward level for the reported score (0-based).
+
+    Live 2026-11-26: `mg 3 4 3125 16124 16124` was answered by `mlo_lv 4`;
+    the client's next packet is `mg 4 4 3125 4`.
+    """
+    if packet.direction is not Kind.RECV:
+        return
+    values = packet.ints(1)
+    if values is None:
+        return
+    state = world.minigame
+    state.reward_level = values[0]
+    state.reward_count += 1
+    state.updated_at = time.monotonic()
+
+
+def _on_minigame_reward(world: WorldState, packet: Packet) -> None:
+    """`mlo_rw <vnum> <amount>`: the reward item granted by the claim."""
+    if packet.direction is not Kind.RECV:
+        return
+    values = packet.ints(2)
+    if values is None:
+        return
+    state = world.minigame
+    state.reward_vnum = values[0]
+    state.reward_amount = values[1]
+    state.updated_at = time.monotonic()
+    # A reward is the strongest confirmation that the claim was accepted.
     state.update_count += 1
 
 
@@ -1174,6 +1234,9 @@ class Engine:
                 "gold": _on_gold,       # RECV: own gold
                 "mlo_info": _on_minigame_info,  # RECV: miniland object
                 "mlo_mg": _on_minigame_result,  # RECV: minigame result
+                "mlo_st": _on_minigame_status,  # RECV: minigame start/step
+                "mlo_lv": _on_minigame_level,  # RECV: reward level
+                "mlo_rw": _on_minigame_reward,  # RECV: reward item
                 "mlpt": _on_miniland_points,  # RECV: production points
                 "rc_blist": _on_bazar_response,  # RECV: bazaar search answer
                 "rc_reg": _on_bazar_register_ack,  # RECV: c_reg accepted

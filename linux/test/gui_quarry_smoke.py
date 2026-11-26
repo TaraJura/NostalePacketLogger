@@ -29,7 +29,7 @@ from ntpl.gui import Application
 #: window was opened before this host attached, so the server sends no new
 #: mlo_info: the attach-time log seed must supply it.
 LOG_INFO = (
-    "18:10:35.118 [RECV] mlo_info 0 3125 5 2000 0 0 0 999 1000 4999 "
+    "18:10:35.118 [RECV] mlo_info 0 3125 4 2000 0 0 0 999 1000 4999 "
     "5000 7999 8000 11999 12000 15999 16000 1000000\r\n"
 )
 
@@ -71,11 +71,25 @@ class QuarryServer:
                 line, buffer = buffer.split(b"\n", 1)
                 text = line.decode("utf-8", "replace")
                 self.received.append(text)
-                if text.startswith("SEND|mg 4 "):
-                    # The server accepted the claim and charged 100 points.
+                if text.startswith("SEND|mg 1 "):
+                    # The live server answers GAMESTART with mlo_st.
+                    try:
+                        self.connection.sendall(b"RECV|mlo_st 0\n")
+                    except OSError:
+                        return
+                elif text.startswith("SEND|mg 3 "):
+                    # The live server answers the score with the 0-based
+                    # reward level (4 = the 5x box).
+                    try:
+                        self.connection.sendall(b"RECV|mlo_lv 4\n")
+                    except OSError:
+                        return
+                elif text.startswith("SEND|mg 4 "):
+                    # The claim charges 100 points and grants item 2193 x2.
                     try:
                         self.connection.sendall(
-                            b"RECV|mlo_mg 3125 1900 0 0 100 100\n"
+                            b"RECV|mlpt 1900 100\n"
+                            b"RECV|mlo_rw 2193 2\n"
                         )
                     except OSError:
                         return
@@ -136,9 +150,9 @@ def main() -> int:
         try:
             packets = sent_mg()
             expected = [
-                "SEND|mg 1 1 3125",
-                "SEND|mg 3 1 3125 16000 16000",
-                "SEND|mg 4 1 3125 5",
+                "SEND|mg 1 4 3125",
+                "SEND|mg 3 4 3125 16000 16000",
+                "SEND|mg 4 4 3125 4",
             ]
             status = app.quarry_status.get_text()
             label = app.quarry_points_label.get_text()
@@ -149,6 +163,7 @@ def main() -> int:
                 packets == expected
                 and "5x claimed" in status
                 and "1,900" in status
+                and "reward item 2193 ×2" in status
                 and "1,900" in label
                 and app.quarry_running is False
             )

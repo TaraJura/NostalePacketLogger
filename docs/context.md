@@ -52,14 +52,15 @@ the data layer in [database.md](database.md).
   3125 first). **Play until** picks the reward box 1x–5x, default 5x whose
   minimum score is 16,000; the production-points label comes from
   `mlo_info` (engine `WorldState.minigame`). **Play** sends the client's own
-  sequence `mg 1 1 3125` → `mg 3 1 3125 <points> <points>` → `mg 4 1 3125
-  <level>` and confirms the claim from the new `mlo_mg` balance; under 100
+  sequence `mg 1 <slot> 3125` → `mg 3 <slot> 3125 <points> <points>` →
+  `mg 4 <slot> 3125 <mlo_lv level>` (the server's level is 0-based: 4 =
+  5x), confirmed by `mlpt`/`mlo_rw`; under 100
   points it refuses. The Great Quarry window must be open in the game (it
   sends `mlo_info`). Packet shortcut, high ban risk; the `mlo_info`/tiers are
   live-captured, the result/claim is smoke-tested only.
-- **Linux host**: 384 unittest cases, 6 GTK4 smokes, 47 fake-server bot
+- **Linux host**: 385 unittest cases, 6 GTK4 smokes, 47 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
-  linux all test-host`, tests above. The host is **0.9.0**; the GTK4 window
+  linux all test-host`, tests above. The host is **0.9.1**; the GTK4 window
   is split into `gui.py` (core) plus one mixin per page (`gui_bazar.py`,
   `gui_map.py`, `gui_bot.py`, `gui_family.py`, `gui_minigame.py`,
   `gui_stats.py`, `guicommon.py`), and a handler exception is logged and

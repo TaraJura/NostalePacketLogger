@@ -89,17 +89,29 @@ def tier_minimum(level: int, tiers: object = None) -> int | None:
     return None
 
 
-def build_production_start_packet(vnum: int = QUARRY_VNUM) -> str:
-    return f"mg 1 1 {int(vnum)}"
+def build_production_start_packet(
+    vnum: int = QUARRY_VNUM, slot: int = 1
+) -> str:
+    """Start: the client's own GAMESTART packet (live: `mg 1 4 3125`).
+
+    The second field is the **slot** of the object in the miniland, not a
+    constant 1: a live GAMESTART sent `mg 1 4 3125` for the object on slot 4
+    and the server answered `mlo_st 0`.
+    """
+    return f"mg 1 {int(slot)} {int(vnum)}"
 
 
-def build_production_result_packet(vnum: int, points: int) -> str:
+def build_production_result_packet(
+    vnum: int, points: int, slot: int = 1
+) -> str:
     points = int(points)
-    return f"mg 3 1 {int(vnum)} {points} {points}"
+    return f"mg 3 {int(slot)} {int(vnum)} {points} {points}"
 
 
-def build_production_gift_packet(vnum: int, level: int) -> str:
-    return f"mg 4 1 {int(vnum)} {int(level)}"
+def build_production_gift_packet(
+    vnum: int, level: int, slot: int = 1
+) -> str:
+    return f"mg 4 {int(slot)} {int(vnum)} {int(level)}"
 
 #: Key names the DLL understands besides a single letter or digit.
 _KEY_ALIASES = {

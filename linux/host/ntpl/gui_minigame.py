@@ -352,22 +352,28 @@ class MinigamePageMixin:
             )
             return
         name = dict(PRODUCTION_GAMES).get(vnum, str(vnum))
+        slot = int(world.minigame.slot or 1)
         self.quarry_running = True
         self.quarry_step = 0
         self.quarry_vnum = vnum
+        self.quarry_slot = slot
         self.quarry_level = level
         self.quarry_target = target
         self.quarry_points_before = world.minigame.points
         self.quarry_seen = world.minigame.update_count
+        self.quarry_seen_status = world.minigame.status_count
+        self.quarry_reward_seen = world.minigame.reward_count
         self.quarry_deadline = time.monotonic() + 1.2
         self._quarry_set_status(
-            f"{name}: starting · target {level}x at {target:,} points…",
+            f"{name}: starting · slot {slot} · target {level}x at "
+            f"{target:,} points…",
             "bazar-warn",
         )
         self._log_line(
-            f"minigame: {name} start, target {level}x ({target:,} pts)"
+            f"minigame: {name} start (slot {slot}), target {level}x "
+            f"({target:,} pts)"
         )
-        if not self._send(build_production_start_packet(vnum)):
+        if not self._send(build_production_start_packet(vnum, slot)):
             self._quarry_finish()
             self._quarry_set_status(
                 "Could not send the start packet.", "bazar-bad"
@@ -407,7 +413,15 @@ class MinigamePageMixin:
             # the whole deadline before showing a confirmed claim.
             answered = world.minigame.update_count > self.quarry_seen
             after = world.minigame.points
-            if answered and after != self.quarry_points_before:
+            reward_vnum = world.minigame.reward_vnum
+            new_reward = (
+                answered
+                and reward_vnum is not None
+                and reward_vnum != self.quarry_reward_before
+            )
+            if answered and (
+                after != self.quarry_points_before or new_reward
+            ):
                 self._quarry_finish()
                 before_text = (
                     f"{self.quarry_points_before:,}"
@@ -415,14 +429,24 @@ class MinigamePageMixin:
                     else "?"
                 )
                 after_text = f"{after:,}" if after is not None else "?"
+                reward_text = ""
+                if new_reward:
+                    name = self._item_name_for(int(reward_vnum))
+                    if not name:
+                        name = f"item {reward_vnum}"
+                    reward_text = (
+                        f" · reward {name} ×"
+                        f"{world.minigame.reward_amount:,}"
+                    )
+                claimed = self.quarry_claim_level + 1
                 self._quarry_set_status(
-                    f"{self.quarry_level}x claimed · production points "
-                    f"{before_text} → {after_text}",
+                    f"{claimed}x claimed · production points "
+                    f"{before_text} → {after_text}{reward_text}",
                     "bazar-ok",
                 )
                 self._log_line(
-                    f"minigame: {self.quarry_level}x claimed, production "
-                    f"points {before_text} -> {after_text}"
+                    f"minigame: {claimed}x claimed, production "
+                    f"points {before_text} -> {after_text}{reward_text}"
                 )
                 return False
             if now >= self.quarry_deadline:
@@ -441,12 +465,18 @@ class MinigamePageMixin:
                 self._log_line(f"minigame: {message}")
                 return False
             return True
-        if now < self.quarry_deadline:
+        # The real client's GAMESTART is answered by `mlo_st`; once that
+        # arrives the result may go out. The fixed delay is the fallback for
+        # a server that stays silent.
+        started = world.minigame.status_count > self.quarry_seen_status
+        if now < self.quarry_deadline and not (
+            started and now >= self.quarry_deadline - 0.6
+        ):
             return True
         if self.quarry_step == 0:
             if not self._send(
                 build_production_result_packet(
-                    self.quarry_vnum, self.quarry_target
+                    self.quarry_vnum, self.quarry_target, self.quarry_slot
                 )
             ):
                 self._quarry_finish()
@@ -455,20 +485,39 @@ class MinigamePageMixin:
                 )
                 return False
             self.quarry_step = 1
-            self.quarry_deadline = now + 0.6
+            self.quarry_reward_seen = world.minigame.reward_count
+            self.quarry_deadline = now + 2.0
             self._quarry_set_status(
-                f"result sent ({self.quarry_target:,} points) · "
-                "claiming…",
+                f"result sent ({self.quarry_target:,} points) · waiting "
+                "for the reward level…",
                 "bazar-warn",
             )
             return True
         if self.quarry_step == 1:
+            # The live server answers the result with `mlo_lv <level>`
+            # (0-based: 4 is the 5x box) and the client claims exactly that
+            # level. Use it when it arrives; fall back to the chosen level
+            # minus one so a silent server still gets a plausible claim.
+            if world.minigame.reward_count > self.quarry_reward_seen:
+                claim_level = world.minigame.reward_level
+                if claim_level is None:
+                    claim_level = max(0, self.quarry_level - 1)
+            elif now >= self.quarry_deadline:
+                claim_level = max(0, self.quarry_level - 1)
+                self._log_line(
+                    "minigame: no mlo_lv from the server; claiming level "
+                    f"{claim_level} ({self.quarry_level}x)"
+                )
+            else:
+                return True
+            self.quarry_claim_level = int(claim_level)
             # Only a response after the claim counts as confirmation.
             self.quarry_seen = world.minigame.update_count
             self.quarry_points_before = world.minigame.points
+            self.quarry_reward_before = world.minigame.reward_vnum
             if not self._send(
                 build_production_gift_packet(
-                    self.quarry_vnum, self.quarry_level
+                    self.quarry_vnum, self.quarry_claim_level, self.quarry_slot
                 )
             ):
                 self._quarry_finish()
@@ -479,7 +528,9 @@ class MinigamePageMixin:
             self.quarry_step = 2
             self.quarry_deadline = now + 5.0
             self._quarry_set_status(
-                f"claiming the {self.quarry_level}x box…", "bazar-warn"
+                f"claiming the {self.quarry_claim_level + 1}x box "
+                f"(server level {self.quarry_claim_level})…",
+                "bazar-warn",
             )
             return True
         return True

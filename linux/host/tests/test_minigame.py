@@ -216,8 +216,21 @@ class ProductionMinigameTests(unittest.TestCase):
             "mg 3 1 3125 16000 16000",
         )
         self.assertEqual(
-            build_production_gift_packet(QUARRY_VNUM, 5),
-            "mg 4 1 3125 5",
+            build_production_gift_packet(QUARRY_VNUM, 4),
+            "mg 4 1 3125 4",
+        )
+        # The live client's GAMESTART used the object's slot (4), and the
+        # claim used the server's 0-based reward level (4 for the 5x box).
+        self.assertEqual(
+            build_production_start_packet(QUARRY_VNUM, 4), "mg 1 4 3125"
+        )
+        self.assertEqual(
+            build_production_result_packet(QUARRY_VNUM, 16124, 4),
+            "mg 3 4 3125 16124 16124",
+        )
+        self.assertEqual(
+            build_production_gift_packet(QUARRY_VNUM, 4, 4),
+            "mg 4 4 3125 4",
         )
 
     def test_engine_parses_mlo_info(self):
@@ -238,6 +251,24 @@ class ProductionMinigameTests(unittest.TestCase):
         self.assertEqual(engine.world.minigame.points, 1900)
         engine.feed_text("RECV", "mlpt 2000 2000")
         self.assertEqual(engine.world.minigame.points, 2000)
+
+    def test_engine_parses_start_level_and_reward(self):
+        # The real 2026-11-26 flow: mlo_st 0 (start), mlo_lv 4 (0-based 5x
+        # reward level), then mlpt + mlo_rw (item 2193 x2) on the claim.
+        engine = Engine()
+        engine.feed_text("RECV", "mlo_st 0")
+        self.assertEqual(engine.world.minigame.status, 0)
+        self.assertEqual(engine.world.minigame.status_count, 1)
+        engine.feed_text("RECV", "mlo_lv 4")
+        self.assertEqual(engine.world.minigame.reward_level, 4)
+        self.assertEqual(engine.world.minigame.reward_count, 1)
+        before = engine.world.minigame.update_count
+        engine.feed_text("RECV", "mlo_rw 2193 2")
+        self.assertEqual(engine.world.minigame.reward_vnum, 2193)
+        self.assertEqual(engine.world.minigame.reward_amount, 2)
+        self.assertEqual(
+            engine.world.minigame.update_count, before + 1
+        )
 
     def test_malformed_minigame_packets_are_ignored(self):
         engine = Engine()

@@ -189,10 +189,11 @@ client in `~/.config/ntpl/minigame-<winpid>.json`. Needs DLL 0.3.0.
 The **Miniland production** frame plays a production minigame — **Great
 Quarry** first — by sending the client's own result and claim packets.
 **Play until** chooses the reward box (default 5x, the 16,000-point minimum),
-the tab shows your production points from the game's own `mlo_info`, and the
-claim is confirmed by the server's new balance. Open the Great Quarry window
-in the game first. It is a packet shortcut, not a visual play-through: high
-ban risk. See [docs/minigame.md](docs/minigame.md).
+the tab shows your production points from the game's own `mlo_info`, claims
+with the server's `mlo_lv` reward level and shows the reward item from
+`mlo_rw`. Open the Great Quarry window in the game first. It is a packet
+shortcut, not a visual play-through: high ban risk. See
+[docs/minigame.md](docs/minigame.md).
 
 ### Stats
 
@@ -218,7 +219,7 @@ DLL version.
 
 ```bash
 sudo apt install g++-mingw-w64-i686 xvfb          # once
-make -C linux all test-host                       # DLL + injector + 384 unit tests
+make -C linux all test-host                       # DLL + injector + 385 unit tests
 make -C linux gui-test bot-test                   # 6 GTK4 smokes, 47 fake-server smokes
 
 linux/scripts/inject.sh        # optional: the GUI picker can inject too
@@ -257,7 +258,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-Host **0.9.0** (Linux): 384 unit tests, 6 GTK4 window smokes and 47
+Host **0.9.1** (Linux): 385 unit tests, 6 GTK4 window smokes and 47
 fake-server bot smokes pass, and the real injector has been run against the
 live NosTale client under Wine 11 — both hooks `ACTIVE`, movement through the
 client's own MoveTo, auto-attack confirmed by the server's `su`, and the

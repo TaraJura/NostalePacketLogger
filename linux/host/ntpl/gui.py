@@ -623,9 +623,14 @@ class Application(
         self.quarry_timer: int | None = None
         self.quarry_step = 0
         self.quarry_vnum = QUARRY_VNUM
+        self.quarry_slot = 1
         self.quarry_level = DEFAULT_TARGET_LEVEL
         self.quarry_target = 0
         self.quarry_seen = 0
+        self.quarry_seen_status = 0
+        self.quarry_reward_seen = 0
+        self.quarry_claim_level = 0
+        self.quarry_reward_before: int | None = None
         self.quarry_points_before: int | None = None
         self.quarry_deadline = 0.0
         self.minigame_guard = False
