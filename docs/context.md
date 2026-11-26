@@ -21,17 +21,18 @@ the data layer in [database.md](database.md).
   tickets no longer leak a sibling's price); the Monitor has a search box
   filtering both tabs by name/config label/vnum, and every row has a Copy
   button (Item text is selectable; Relist/Items/Inventory keep right-click
-  copy). The inventory scan uses the same name-aware coverage. The Relist
+  copy). The Items list uses the same name-aware coverage. The Relist
   section has no Character field: own listings are matched by character id
   (`rc_blist` owner id, `self_id`, or the seller-list owner id) and the name
   is learned from the self `in 1` spawn (whole DLL log) or `rdlst`; standalone
   **Select all** / **Unselect all** buttons feed the selection group actions.
-  The Monitor section's left panel is the monitored item set: a tick per
-  configured item, Only monitored filter, Add from Items/Inventory/whole
-  inventory, a full Item.dat picker (search by name or vnum, Monitor or
-  Relist mode), Select all and group actions; the Items section has its own
-  group actions (Monitor/Relist all). Both Monitor tables show enabled items
-  only.
+  **Items** is one searchable list of every available item (configured rows
+  + inventory templates), each row with Monitor/Relist ticks; the selection
+  opens the full editor, **Add to Monitor/Relist** applies to a Ctrl+click
+  selection, Import… covers NosMall and the full Item.dat database, and ⋯
+  holds rescan/price-all/bulk switches. The Monitor left panel lists only
+  monitored items (one compact toolbar: Add from Items / Add… / Actions…),
+  and Relist shows only the relist set by default.
   The Character frame shows the detected name above HP/MP. The active user
   config is a 25-item relist list for char `root1` (see the handoff).
 - **Linux host**: 374 unittest cases, 6 GTK4 smokes, 45 fake-server bot
@@ -113,9 +114,10 @@ the data layer in [database.md](database.md).
   searches `c_blist` at 2.5 s
   pacing, parses the real 15-field `rc_blist` (minimum visible price,
   truncation-aware), keeps old rows across refresh cycles, sorts by profit
-  and has an **Only priced** filter. Relist is gated by the relist set (a
-  per-row tick, **Add from Items** / **Add from Inventory**, **Remove from
-  relisting**), an **Only relisting** filter, Ctrl+click multi-selection and
+  and has an **Only priced** filter. Relist is gated by the relist set
+  (**Relist** tick in Items, **Add from Items**, **Add whole inventory**,
+  **Item database…**, **Remove from relisting**), shown alone by default
+  (**Only relisting**), with Ctrl+click multi-selection and
   **Group actions…** (select/unselect all, relist/stop all shown or
   selected); a character name and a positive floor (Relist Start is the only switch).
   Each pass asks the seller tab (`c_slist` → **`rc_slist`**) for our own
@@ -129,20 +131,20 @@ the data layer in [database.md](database.md).
   fee (both live 2026-11-23); `unk1` is repaired from Item.dat before a
   pass; `unk2` is item-specific). **Relist Start**
   searches only the relist set while Monitor searches every enabled item.
-  The page has a second-level navbar (**Inventory**,
-  **Relist**, **Monitor**, **Items**, **Configuration**); **Monitor** has a
+  The page has a second-level navbar (**Items**,
+  **Relist**, **Monitor**, **Configuration**); **Monitor** has a
   third-level navbar, **NosMall** (ND cost; gold per ND) and **NPC resale**
   (NPC gold cost, e.g. Pet Food or Bell of Sweet Home; Markup = listing ÷ NPC
   price). One Start searches both; each view has its own Only priced filter.
   The editor Cost type chooses the view; NPC gold auto-fills from Item.dat
-  when left at 0. **Inventory** scans
-  every bag the client reports (including equipment bags 0/6/7, quantity-0
-  rows and bound negative vnums), shows Item.dat names, NPC prices and known
-  ND costs, and **Set up relist…** adds the item to the relist set and opens
-  **Relist** with the exact vnum/tab/amount for the floor and start; the
-  **Items** editor carries **Monitor**/**Relist** tracking switches;
-  **Price all** adds one search per
-  distinct owned item. The **Monitor** table and the **Relist**/**Items**
+  when left at 0. **Items** is one searchable list of every available item:
+  configured rows plus every bag the client reports (including equipment
+  bags 0/6/7, quantity-0 rows and bound negative vnums), each row with a
+  **Monitor** and a **Relist** tick (an inventory row is created on the
+  first tick; Relist sets floor 1), Item.dat names, NPC prices and known ND
+  costs; the selection opens the full editor; **Add to Monitor/Relist**
+  applies to the selection; **Price all** adds one search per distinct
+  owned item. The **Monitor** table and the **Relist**/**Items**
   lists show the real item name resolved from each entry's vnum (local DB
   first, `Item.dat` fallback), with the configured shortcut only as the
   fallback when no vnum resolves; hover the item name for the shortcut and

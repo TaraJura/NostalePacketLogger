@@ -64,28 +64,36 @@ the GUI.
 
 The auction-house workflow of
 [`TaraJura/Nostale-NB`](https://github.com/TaraJura/Nostale-NB), with a
-**second-level navbar**: **Inventory**, **Relist**, **Monitor**, **Items**,
+**second-level navbar**: **Items**, **Relist**, **Monitor**,
 **Configuration**. **Monitor** itself splits into **NosMall** (gold per ND)
 and **NPC resale** (gold markup over the NPC price).
 
-#### Inventory
+#### Items
 
-![NosBazar Inventory: every slot with name, NPC price and ND cost](docs/assets/gui-inventory.png)
+![NosBazar Items: every available item with Monitor/Relist ticks and the editor](docs/assets/gui-bazar-items.png)
 
-Every slot the client reports (Main/Etc, Equip, bags 6/7) with the Item.dat
-name, bag/slot, vnum, quantity, NPC price and known ND cost. Search by name or
-vnum; **Rescan**, **Add selected**, **Add all**, **Price all**, and **Set up
-relist…** for one item.
+One searchable list of every item available to you: the configured bazaar
+rows plus every slot the client reports (Main/Etc, Equip, bags 6/7), with the
+Item.dat name, bag/slot, vnum and stack. Each row has a **Monitor** tick
+(search it) and a **Relist** tick (put it in the relist set; a new inventory
+row is added with its tab/stack and floor 1). Select a row to edit Name,
+Search vnums, raw `c_blist`, Item vnum, Tab, Amount, Min price, the cost type
+(which chooses the Monitor view) and the advanced `c_reg` constants.
+**Add to Monitor / Add to Relist** apply to the Ctrl+click selection;
+**Import…** opens the NosMall catalog or the full Item.dat database; **⋯**
+holds Rescan/Price all/Add whole inventory, the bulk Monitor/Relist switches
+and the selection actions.
 
 #### Relist
 
 ![NosBazar Relist: relist set, readiness badges and the floor editor](docs/assets/gui-relist.png)
 
-The relist set. Tick a row to add it, untick to keep watching without
-changing its listing; **Add from Items** / **Add from Inventory** / **Remove
-from relisting**, **Select all** / **Unselect all** (for the selection-based
-group actions), **Only relisting**, Ctrl+click and **Group actions…**. Set
-the exact **Item vnum / Tab / Amount** and a positive **Min price**; the badge
+The relist set, shown alone by default (**Only relisting** is on). Untick a
+row to keep watching it without changing its listing; **Add from Items**,
+**Add whole inventory**, **Item database…**, **Remove from relisting**,
+**Select all** / **Unselect all** (for the selection-based group actions),
+Ctrl+click and **Group actions…**. Set the exact **Item vnum / Tab / Amount**
+and a positive **Min price**; the badge
 reads `ready` / `needs floor` / `needs vnum/tab`. The character name is
 detected automatically (no field to fill) and own listings are matched by
 character id, **Relist Start** opens the bazaar
@@ -104,29 +112,22 @@ ignored (no rc_reg)`.
 
 ![NosBazar Monitor: NPC resale markup view](docs/assets/gui-bazar-resale.png)
 
-One search pass at the required 2.5 s pacing over every enabled item, cheapest
-listing per item, sorted most profitable first; **Only priced** hides empty
-rows and timed-out items get one retry. The **NosMall** view shows gold per
+One search pass at the required 2.5 s pacing over every monitored item,
+cheapest listing per item, sorted most profitable first; **Only priced**
+hides empty rows and timed-out items get one retry. The left list holds the
+monitored set (chosen with the Monitor tick in Items); **Add from Items**,
+**Add…** and **Actions…** manage it. The **NosMall** view shows gold per
 ND; **NPC resale** shows the gold markup over the NPC price for items bought
 at an NPC (Pet Food, Bell of Sweet Home, …). A **search box** above the tabs
 filters both views by item name, configured label or vnum. A row only reports
 the listings of the item it displays: saved search groups that mix different
 items (the partner skill tickets are one NosMall base vnum group) no longer
 show a sibling's price. Every row has a **Copy** button for the real item
-name (also selectable text / right-click), and the Relist and Inventory rows
+name (also selectable text / right-click), and the Relist and Items rows
 have the same right-click copy.
 
 The Map/Bot **Character** frame shows the detected character name in bold
 above the HP/MP bars.
-
-#### Items
-
-![NosBazar Items: the full item editor and the NosMall import](docs/assets/gui-bazar-items.png)
-
-The full editor for one item: Name, Search vnums, raw `c_blist`, Item vnum,
-Tab, Amount, Min price, the cost type (which chooses the Monitor view) and the
-advanced `c_reg` constants. **Import NosMall…**, **New** and **Delete** manage
-the catalog.
 
 #### Configuration
 

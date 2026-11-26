@@ -50,8 +50,8 @@ are stored per source.
 The decrypted `Item.dat`, `monster.dat`, `Skill.dat`, `npctalk.dat`,
 `shoptype.dat`, `MapIDData.dat` and the NosMall data are also kept in
 `source_files`, so a future parser can re-read them without touching the client
-archives. The NosBazar **Inventory** section and the item names in
-**Monitor**, **Relist** and **Items** come from the `items` table first
+archives. The NosBazar **Items** section and the item names in
+**Monitor**, **Relist** and the editor come from the `items` table first
 (`database.item_info`, a few milliseconds) for names, NPC prices and
 categories, and fall back to `Item.dat` (`nosmall.load_item_info`) when the
 database is missing or empty. Rebuild the database with `ntpl db build` if an

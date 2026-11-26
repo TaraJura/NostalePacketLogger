@@ -298,7 +298,6 @@ def main() -> int:
             # Select one inventory item and set up relisting through the new
             # second-level section navbar.
             app._inventory_checks = {(1, 0)}
-            app._inventory_update_add_button()
             app._inventory_set_up_relist()
             result["relist_page"] = app.bazar_section_notebook.get_current_page()
             result["relist_expected"] = app._bazar_section_index.get("relist")
@@ -407,7 +406,7 @@ def main() -> int:
                 and result["relist_saved_tab"] == 1
                 and result["relist_saved_amount"] == 5
                 and result["relist_mode"] == "relist"
-                and result["sections"] == 5
+                and result["sections"] == 4
                 # The page map must have started the real lookup by itself.
                 and result["auto_count"]
                 and result["auto_name"] == "Group Time-Space Piece"

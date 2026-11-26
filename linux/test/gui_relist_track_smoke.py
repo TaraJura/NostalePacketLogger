@@ -141,6 +141,12 @@ def main() -> int:
             result["section_expected"] = app._bazar_section_index.get(
                 "relist"
             )
+            # The tab shows only the relist set by default; nothing is in
+            # it yet. Turn the filter off to pick a row from all items.
+            result["filter_default"] = (
+                app.bazar_relist_filter.get_active()
+            )
+            app.bazar_relist_filter.set_active(False)
             result["rows"] = len(_rows(app.bazar_relist_list))
             # No checkbox may be ticked before the user chooses an item.
             result["ticks_off"] = all(
@@ -300,6 +306,7 @@ def main() -> int:
             )
             result["ok"] = (
                 result["items"] == 7
+                and result["filter_default"] is True
                 and result["initial_relist"] == []
                 and result["initial_ready"] == 0
                 and result["ticks_off"]
@@ -311,7 +318,8 @@ def main() -> int:
                 and result["badge_ready"] == "ready"
                 and result["filtered_rows"] == 1
                 and result["from_items"] is True
-                and result["from_items_badge"] == "needs floor"
+                and result["from_items_badge"] == "ready"
+                and blessing.min_price == 1
                 and result["from_inventory"] is True
                 and result["feather_tab"] == 2
                 and result["feather_amount"] == 11

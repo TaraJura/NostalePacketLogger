@@ -6,7 +6,7 @@ spawns a few monsters with their real names, and leaves the window on screen
 for ``linux/scripts/readme-shots.sh`` to capture with ffmpeg/Xvfb.
 
     NTPL_SHOT_MODE=map|packets|picker|spells|botlog|family|malicious|
-        minigame|stats|bazar|resale|inventory|relist|items|config \
+        minigame|stats|bazar|resale|relist|items|config \
         PYTHONPATH=linux/host python3 linux/test/gui_readme_shots.py
 
 ``map``, ``packets`` and ``spells`` show the Map/Bot tab, ``bazar`` and
@@ -41,7 +41,6 @@ MODE = os.environ.get("NTPL_SHOT_MODE", "map")
 BAZAR_MODES = (
     "bazar",
     "resale",
-    "inventory",
     "relist",
     "items",
     "config",
@@ -226,7 +225,7 @@ def start_fake_client(scene) -> int:
                 "RECV|gold 100000 0",
             ]
         )
-        if MODE in ("inventory", "relist"):
+        if MODE in ("items", "relist"):
             # A real mix: normal stacks, equipment rows (quantity 0 and a
             # bound negative vnum) and the extra bags 6/7.
             lines.extend(
@@ -239,8 +238,8 @@ def start_fake_client(scene) -> int:
                 ]
             )
         else:
-            # A complete core inventory (bags 0/1/2) keeps the Inventory
-            # frame from being marked partial in the demo shot.
+            # A complete core inventory (bags 0/1/2) keeps the Items
+            # summary from being marked partial in the demo shot.
             lines.extend(
                 [
                     "RECV|inv 0 30.885.0.0.0.0.0",
@@ -421,7 +420,6 @@ def main() -> int:
         "late": False,
         "bazar": False,
         "resale": False,
-        "inventory": False,
         "relist": False,
         "items": False,
         "config": False,
@@ -551,26 +549,6 @@ def main() -> int:
         app._set_status(
             "minigame · Sheep Farm · key y every 120 ms · focus players "
             "within 12 tiles"
-        )
-        return False
-
-    def start_inventory() -> bool:
-        if app.window is None or not app.engine.world.inventory:
-            return True
-        from ntpl.nosmall import load_item_info
-
-        try:
-            app.item_info = load_item_info()
-        except Exception:  # noqa: BLE001 - shot works without names
-            app.item_info = {}
-        app.item_info_loaded = True
-        app._open_inventory_picker()
-        app._bazar_show_section("inventory")
-        if app.window is not None:
-            app.window.set_default_size(1440, 900)
-        app._set_status(
-            "inventory · every owned slot with Item.dat name, "
-            "NPC price and known ND cost"
         )
         return False
 
@@ -767,15 +745,6 @@ def main() -> int:
             if not scheduled["bazar"]:
                 scheduled["bazar"] = True
                 GLib.timeout_add(1500, start_bazar)
-            return False
-        if MODE == "inventory":
-            if app.window is None:
-                return True
-            app.window.set_default_size(1440, 900)
-            app.notebook.set_current_page(3)
-            if not scheduled["inventory"]:
-                scheduled["inventory"] = True
-                GLib.timeout_add(1500, start_inventory)
             return False
         if MODE == "relist":
             if app.window is None:

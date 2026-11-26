@@ -168,98 +168,125 @@ def main() -> int:
             app.quit()
         return False
 
+    def item_rows() -> dict[str, object]:
+        """Unified Items rows keyed by item name or ``vnum N``."""
+        found: dict[str, object] = {}
+        listbox = app.bazar_items_list
+        child = listbox.get_first_child() if listbox is not None else None
+        while child is not None:
+            key = getattr(child, "item_name", None) or (
+                f"vnum {getattr(child, 'slot_vnum', 0)}"
+            )
+            found[key] = child
+            child = child.get_next_sibling()
+        return found
+
+    def select_item_rows(*keys: str) -> None:
+        app.bazar_items_list.unselect_all()
+        found = item_rows()
+        for key in keys:
+            app.bazar_items_list.select_row(found[key])
+
     def check_panel() -> bool:
         try:
             shown = rows()
-            ticked = {
-                name: bool(getattr(row, "monitor_check").get_active())
-                for name, row in shown.items()
-            }
-            info = app.bazar_monitor_items_info.get_text()
+            items = item_rows()
+            info = app.bazar_items_info.get_text()
             panel_ok = (
-                set(shown) == {"bubbl", "stone"}
-                and ticked == {"bubbl": True, "stone": False}
-                and info == "2 shown · 1 monitored · 2 configured"
+                set(shown) == {"bubbl"}
+                and {"bubbl", "stone"} <= set(items)
+                and "vnum 2282" in items
+                and "1 monitored" in info
+                and "0 relisting" in info
             )
             result["panel"] = panel_ok
 
-            # Ticking a row enables its searches; unticking disables it but
-            # keeps the configuration and its floor.
-            getattr(shown["stone"], "monitor_check").set_active(True)
-            getattr(shown["bubbl"], "monitor_check").set_active(False)
+            # The ticks live in the Items list: ticking enables the
+            # searches, unticking removes the row from the Monitor list.
+            getattr(items["stone"], "monitor_check").set_active(True)
+            getattr(items["bubbl"], "monitor_check").set_active(False)
+            GLib.timeout_add(250, check_toggles)
+        except Exception as exc:  # noqa: BLE001
+            result["detail"] = f"panel exception: {exc!r}"
+            app.quit()
+        return False
+
+    def check_toggles() -> bool:
+        try:
             items = {item.name: item for item in app.bazar.config.items}
             toggles_ok = (
                 items["stone"].enabled is True
                 and items["bubbl"].enabled is False
                 and items["bubbl"].min_price == 0
-                and app.bazar_monitor_items_info.get_text()
-                == "2 shown · 1 monitored · 2 configured"
+                and set(rows()) == {"stone"}
             )
             result["toggles"] = toggles_ok
 
-            # An unticked item has no live price: the Monitor views only
-            # show enabled items.
-            app._bazar_monitor_set_many(["bubbl", "stone"], False)
+            # An unticked item has no live price: Monitor tables show
+            # enabled items only.
+            app._bazar_monitor_set_many(["stone"], False)
             app._bazar_render_results()
-            empty_ok = (
+            result["hidden"] = (
                 app.bazar_results_infos["nosmall"].get_text() == "No items"
             )
-            app._bazar_monitor_set_all_shown(True)
-            result["hidden"] = empty_ok
 
-            # Only monitored filters the list; Select all feeds the selection
-            # group actions.
-            app._bazar_monitor_set_many(["bubbl"], False)
-            app.bazar_monitor_filter.set_active(True)
-            filtered = rows()
-            filtered_info = app.bazar_monitor_items_info.get_text()
-            app.bazar_monitor_filter.set_active(False)
-            app._bazar_monitor_select_shown()
-            selected = set(app._bazar_monitor_selected)
-            app._bazar_monitor_set_selected(False)
-            disabled = [
-                item.enabled for item in app.bazar.config.items
-            ]
-            app._bazar_monitor_unselect_all()
-            cleared = not app._bazar_monitor_selected
-            app._bazar_monitor_set_all_shown(True)
-            selection_ok = (
-                set(filtered) == {"stone"}
-                and filtered_info == "1 shown · 1 monitored · 2 configured"
-                and selected == {"bubbl", "stone"}
-                and disabled == [False, False]
-                and cleared
-            )
-            result["selection"] = selection_ok
+            # A Relist tick on an unconfigured inventory row creates the
+            # item with the slot's tab/stack and floor 1.
+            found = item_rows()
+            getattr(found["vnum 2282"], "relist_check").set_active(True)
+            GLib.timeout_add(250, check_relist_tick)
+        except Exception as exc:  # noqa: BLE001
+            result["detail"] = f"toggle exception: {exc!r}"
+            app.quit()
+        return False
 
-            # Add from Items re-enables the selected configured row.
-            app._bazar_monitor_set_many(["bubbl"], False)
-            app.bazar_selected_name = "bubbl"
-            app._bazar_monitor_add_from_items()
-            from_items_ok = find_item(2174).enabled is True
-            result["from_items"] = from_items_ok
-
-            # Add from Inventory enables a configured row and creates a new
-            # row with the slot's tab and stack.
-            app._bazar_monitor_set_many(["stone"], False)
-            app._inventory_checks.add((1, 0))
-            app._inventory_checks.add((1, 1))
-            app._bazar_monitor_add_from_inventory()
-            app._inventory_checks.clear()
+    def check_relist_tick() -> bool:
+        try:
             angel = find_item(2282)
-            from_inv_ok = (
-                find_item(1362).enabled is True
-                and angel is not None
+            result["relist_tick"] = (
+                angel is not None
                 and angel.enabled is True
-                and angel.relist is False
+                and angel.relist is True
+                and angel.min_price == 1
                 and angel.inv_tab == 1
                 and angel.amount == 11
                 and angel.name == "Angel's Feather"
             )
-            result["from_inventory"] = from_inv_ok
+            relist_rows = []
+            child = app.bazar_relist_list.get_first_child()
+            while child is not None:
+                if getattr(child, "item_name", None):
+                    relist_rows.append(child.item_name)
+                child = child.get_next_sibling()
+            result["relist_list"] = relist_rows == ["Angel's Feather"]
+
+            # Monitor selection + group actions: stop the shown rows, then
+            # re-enable through the new Items multi-selection buttons.
+            app._bazar_monitor_set_many(["Angel's Feather"], True)
+            app._bazar_monitor_select_shown()
+            selected = set(app._bazar_monitor_selected)
+            app._bazar_monitor_set_selected(False)
+            stopped = not any(
+                item.enabled for item in app.bazar.config.items
+            )
+            select_item_rows("bubbl", "stone")
+            app._bazar_add_selected_to("enabled")
+            reenabled = (
+                find_item(2174).enabled is True
+                and find_item(1362).enabled is True
+            )
+            result["selection"] = (
+                selected == {"Angel's Feather"} and stopped and reenabled
+            )
+
+            # Add from Items works on the Items selection too.
+            app._bazar_monitor_set_many(["stone"], False)
+            select_item_rows("stone")
+            app._bazar_monitor_add_from_items()
+            result["from_items"] = find_item(1362).enabled is True
             GLib.timeout_add(200, check_database)
         except Exception as exc:  # noqa: BLE001
-            result["detail"] = f"panel exception: {exc!r}"
+            result["detail"] = f"relist exception: {exc!r}"
             app.quit()
         return False
 
@@ -338,9 +365,10 @@ def main() -> int:
                     "panel",
                     "toggles",
                     "hidden",
+                    "relist_tick",
+                    "relist_list",
                     "selection",
                     "from_items",
-                    "from_inventory",
                     "database",
                     "group_actions",
                     "saved",
@@ -349,9 +377,11 @@ def main() -> int:
             result["ok"] = ok
             result["detail"] = (
                 f"panel={result['panel']} toggles={result['toggles']} "
-                f"hidden={result['hidden']} selection={result['selection']} "
+                f"hidden={result['hidden']} "
+                f"relist_tick={result['relist_tick']} "
+                f"relist_list={result['relist_list']} "
+                f"selection={result['selection']} "
                 f"from_items={result['from_items']} "
-                f"from_inventory={result['from_inventory']} "
                 f"database={result['database']} "
                 f"group={result['group_actions']} saved={result['saved']}"
             )
