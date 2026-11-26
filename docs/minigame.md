@@ -195,7 +195,7 @@ risk**. The account risk is the owner's.
   `linux/build/PacketLogger.dll` is not enough: the old module stays mapped in
   the running client. Restart the game client and inject again (the picker's
   **Inject & connect**), then the window title/status shows `DLL 0.3.0`
-  or newer (`0.3.1` is the current build).
+  or newer (`0.3.2` is the current build).
 - Host **0.6.0 or newer** for the tab (0.9.9 today). Only a GUI restart is
   needed for host changes.
 - The game window attached to this GUI window. The tab is per client, like the

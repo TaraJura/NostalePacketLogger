@@ -168,6 +168,40 @@ void test_cast_speed_zero()
           "sr duration text");
 }
 
+void test_correction_window()
+{
+    // One correction is a respawn, a mount/dismount or a resync, not a speed
+    // rejection: it must not settle the boost.
+    speedboost::CorrectionWindow window;
+    check(!window.note(1000), "a lone correction is not a burst");
+    check(window.count == 1, "the first correction opens the window");
+
+    // A second correction a few seconds later is still not enough.
+    check(!window.note(4000), "two corrections are not a burst");
+    check(window.note(9000), "three in 8 s are a burst");
+
+    // The window slides: corrections spaced past the window start over.
+    window.reset();
+    check(!window.note(1000), "window reset");
+    check(!window.note(12000), "a correction past the window restarts it");
+    check(window.count == 1, "the window restarted");
+    check(!window.note(13000), "second in the new window");
+    check(window.note(14000), "third in the new window is a burst");
+
+    // The live shape: a respawn pair (revive at 21:44:06 and 21:44:31,
+    // 25 s apart) never reaches a burst.
+    window.reset();
+    check(!window.note(1000), "respawn 1");
+    check(!window.note(26000), "respawn 2 does not settle");
+    check(!window.note(50000), "respawn 3 does not settle");
+
+    // A real correction loop (tps every few seconds) does.
+    window.reset();
+    check(!window.note(1000), "loop 1");
+    check(!window.note(3000), "loop 2");
+    check(window.note(5000), "loop 3 settles");
+}
+
 }  // namespace
 
 int main()
@@ -176,6 +210,7 @@ int main()
     test_clamp_walk();
     test_parse_cond();
     test_cast_speed_zero();
+    test_correction_window();
     if (g_failures != 0) {
         std::fprintf(stderr, "%d speed-boost test(s) failed\n", g_failures);
         return 1;

@@ -312,12 +312,18 @@ Limits and safety:
   zero-padded when the server base has fewer digits (`255 -> 012`), keeping
   the client's string length valid; the server's integer parser reads `12`.
 - The value applies **immediately** (no probe). The walk clamp normally
-  prevents the server from seeing the boost at all. If a server still
-  corrects the player (`tp 1 <charId> …`), the DLL settles at **+1** or turns
-  off if the correction hits +1, and sends `STATUS|SPEED TUNED 1` /
-  `STATUS|SPEED CORRECTED`; the GUI shows the limit and sets the spin
-  silently. Turning the boost off forces the entity back to the server base
-  even while idle. This is the safety net against a teleport/kick loop.
+  prevents the server from seeing the boost at all. A lone server position
+  correction (`tp 1 <charId> …`) is **not** a speed rejection: the live
+  client also gets one on a death respawn (`revive`), when it mounts or
+  dismounts a flying partner and on an ordinary resync, with the walk speed
+  clamped the whole time (live 2026-11-26). Only a **burst** — 3 corrections
+  within 10 s, the actual correction-loop shape — settles the boost to
+  **+1** (or turns it off when even +1 is rejected), and sends
+  `STATUS|SPEED TUNED 1` / `STATUS|SPEED CORRECTED`; the GUI shows the limit
+  and sets the spin silently. A new Speed + value starts a fresh burst
+  window. Turning the boost off forces the entity back to the server base
+  even while idle. This is the safety net against a teleport/kick loop
+  without the old false drops after every respawn or mount.
 - **Live verification (2026-11-20, client PID 1948, base 11):** the walk
   clamp works. A `+3` request logged `testing +1` (actor 11→12), then the
   probe passed and applied +3 (actor 12→14); every outgoing `walk` stayed at
@@ -326,6 +332,15 @@ Limits and safety:
   un-clamped builds sent 12/13/16 against cond 11/12 and were corrected
   within 4–5 s; the clamp is what makes it work. If a server still corrects,
   the settle/unsupported safety above applies.
+- **Live false settle (2026-11-26, client PID 836, DLL 0.3.1):** the old
+  one-`tp` safety dropped Speed + to +1 every few minutes while the walk
+  packets stayed clamped (base 14). The DLL log shows every such `tp` next to
+  a death respawn (`revive 1 7001 0`, 21:44) or the client's own
+  `rest 2 1 7001 2 822160` mount/dismount, not a correction loop; with +3 the
+  boost ran for 7 minutes through continuous walking with a single resync
+  `tp`. DLL **0.3.2** requires a burst (3 corrections in 10 s) and logs an
+  ignored lone correction. The user saw the spin snap back to 1 each time —
+  that GUI update now only happens on a real burst.
 - **This is a client hack.** The game rules prohibit client manipulation, and
   bot vendors themselves label speed hacks "high ban risk"; the account risk
   is the owner's. The default 0 keeps it off.

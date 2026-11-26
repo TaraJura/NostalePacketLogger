@@ -168,6 +168,41 @@ inline bool clamp_walk(char* text, int base)
     return true;
 }
 
+// A server position correction (`tp 1 <self>`) is not by itself proof that
+// the server rejects the boosted speed. The live client also gets one on a
+// death respawn (`revive`), when it mounts or dismounts a flying partner and
+// on an ordinary resync — minutes apart, with the walk speed clamped to the
+// server's cond the whole time (live 2026-11-26). A real rejection is a burst:
+// the server corrects again within seconds while the client keeps walking.
+// Requiring a burst keeps Speed + from silently dropping back to +1 after a
+// while, while still stopping a correction/kick loop.
+constexpr int kCorrectionBurst = 3;
+constexpr unsigned long kCorrectionWindowMs = 10000;
+
+struct CorrectionWindow {
+    int count = 0;
+    unsigned long start = 0;  // 0 = no window open
+
+    // Note one correction at `now_ms` (a monotonic millisecond clock).
+    // Returns true when this correction completes a burst.
+    bool note(unsigned long now_ms)
+    {
+        if (start == 0 || now_ms - start > kCorrectionWindowMs) {
+            count = 1;
+            start = now_ms;
+            return false;
+        }
+        ++count;
+        return count >= kCorrectionBurst;
+    }
+
+    void reset()
+    {
+        count = 0;
+        start = 0;
+    }
+};
+
 // Parse `cond 1 <id> <unknown> <unknown> <speed>` for the local player.
 inline Cond parse_cond(const char* text, int add)
 {

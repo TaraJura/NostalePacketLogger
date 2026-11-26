@@ -65,10 +65,12 @@ int speed_request();    // bonus the host asked for
 void set_cast_zero(bool enabled);
 bool cast_zero();
 
-// True once after the server corrected the player's position while a speed
-// boost was active. `settle` is the bonus to keep: +1 when a higher value was
-// rejected (the +1 probe had passed), 0 when even +1 was rejected. The worker
-// reports it to the host so the GUI can show the limit.
+// True once after a burst of server position corrections (`tp 1 <self>`)
+// while a speed boost was active — several within seconds, the real
+// correction loop. A lone correction (respawn, mount/dismount, resync) does
+// not settle. `settle` is the bonus to keep: +1 when a higher value was
+// rejected, 0 when even +1 was rejected. The worker reports it to the host so
+// the GUI can show the limit.
 bool take_speed_correction(int& settle);
 
 // True once after the server corrected even the +1 probe: this server does

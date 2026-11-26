@@ -261,15 +261,17 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-Host **0.9.9** (Linux): 385 unit tests, 6 GTK4 window smokes and 47
-fake-server bot smokes pass, and the real injector has been run against the
-live NosTale client under Wine 11 — both hooks `ACTIVE`, movement through the
-client's own MoveTo, auto-attack confirmed by the server's `su`, and the
+Host **0.9.10** (Linux), DLL **0.3.2**: 385 unit tests, 6 GTK4 window smokes
+and 47 fake-server bot smokes pass, and the real injector has been run against
+the live NosTale client under Wine 11 — both hooks `ACTIVE`, movement through
+the client's own MoveTo, auto-attack confirmed by the server's `su`, and the
 bazaar open/relist/registration verified live (2026-11-23); the DPS meter
 decodes the same live `su` damage. The Great Quarry minigame was verified
 live on 2026-11-26: the natural start/play/claim flow, the automated claim
 (a reward without playing) and the Play loop with its 40 s reward cooldown,
-the Stop between runs and the points-exhaustion stop. The original Windows
+the Stop between runs and the points-exhaustion stop. Speed + keeps the
+requested value through respawn/mount/resync position corrections (live
+2026-11-26; only a correction burst settles it). The original Windows
 tree is unchanged.
 
 Gameforge's terms of service prohibit automation and client manipulation.

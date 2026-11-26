@@ -9,9 +9,11 @@
 
 namespace ntpl {
 
-// 0.3.1: client build 0.9.3.3262 (2026-11-25) player global/MoveTo/speed
-// table addresses; 0.3.0 was the 0.9.3.3261 build.
-constexpr const char* kVersion = "0.3.1";
+// 0.3.2: Speed + keeps the requested value through a lone self `tp`
+// (death respawn, partner mount/dismount, resync); only a burst of position
+// corrections settles it. 0.3.1: client build 0.9.3.3262 (2026-11-25) player
+// global/MoveTo/speed table addresses; 0.3.0 was the 0.9.3.3261 build.
+constexpr const char* kVersion = "0.3.2";
 
 // The DLL listens on loopback only. A signed 16-bit port is plenty; the host
 // connects with a retry loop, so nothing has to be started in a fixed order.

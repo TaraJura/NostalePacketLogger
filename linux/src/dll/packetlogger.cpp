@@ -56,8 +56,9 @@ std::atomic<bool>    g_block_portal{false};
 // function the server's `cond` packet reaches). Nothing on the wire is
 // rewritten: the client's walk builder reads the same entity, so the wire
 // follows the client's entity speed rather than an independently patched
-// field. If the server corrects the player (tp 1 <self>) while a boost is
-// active, the boost is turned off at once to stop a correction/kick loop.
+// field. If the server corrects the player (tp 1 <self>) in a burst while a
+// boost is active, the boost is settled to +1 to stop a correction/kick loop;
+// a lone correction (respawn, mount, resync) leaves the boost alone.
 std::atomic<int>           g_speed_boost{0};      // effective add
 std::atomic<int>           g_speed_request{0};    // what the host asked for
 std::atomic<int>           g_cond_base{0};
@@ -68,6 +69,13 @@ std::atomic<int>           g_logged_actor{-1};
 std::atomic<int>           g_speed_correction{-1};
 std::atomic<bool>          g_speed_reset{false};
 std::atomic<bool>          g_speed_unsupported{false};
+// Consecutive `tp 1 <self>` corrections while a boost is active. Only a burst
+// is a speed rejection; a lone one is a respawn, a mount/dismount resync or an
+// ordinary position sync (live 2026-11-26). Written on the recv thread only;
+// `set_speed_boost` asks for a reset through the flag so it never touches the
+// window from the worker thread.
+std::atomic<bool>          g_speed_window_reset{false};
+speedboost::CorrectionWindow g_speed_tp_window;
 std::atomic<unsigned long> g_self_id{0};
 std::atomic<unsigned long> g_self_id_at{0};
 
@@ -208,13 +216,29 @@ void ntpl_on_packet_recv(const char* packet) {
     // This changes only the client's copy of the packet, in its receive
     // buffer; the server's cooldown enforcement is untouched.
     zero_cast_packet(const_cast<char*>(packet));
-    // A server correction while the boost is active means the server did not
-    // accept the faster walk (the 2026-11-20 teleports/kick). Drop the boost
-    // at the first one instead of feeding it more corrections.
+    // A server correction while the boost is active used to drop the boost at
+    // once (the 2026-11-20 teleports/kick). That fired on every self `tp`:
+    // but a respawn, a partner mount/dismount and a map resync also send one,
+    // with the walk speed clamped to the server's cond, so a lone `tp` is not
+    // a speed rejection (live 2026-11-26: the boost fell to +1 every few
+    // minutes for exactly this). Only a burst of corrections — the real
+    // correction loop — settles the boost.
     if (g_speed_boost.load(std::memory_order_relaxed) > 0) {
         unsigned long id = 0;
         if (std::sscanf(packet, "tp 1 %lu", &id) == 1 &&
             id == local_char_id()) {
+            if (g_speed_window_reset.exchange(false,
+                                             std::memory_order_acq_rel)) {
+                g_speed_tp_window.reset();
+            }
+            if (!g_speed_tp_window.note(GetTickCount())) {
+                ntpl::logf(
+                    "speed: position correction %d/%d ignored (respawn, "
+                    "mount or resync; the walk clamp is intact)",
+                    g_speed_tp_window.count,
+                    speedboost::kCorrectionBurst);
+                return;
+            }
             const int effective = g_speed_boost.load(std::memory_order_relaxed);
             const int settle = effective > 1 ? 1 : 0;
             if (effective <= 1) {
@@ -224,6 +248,7 @@ void ntpl_on_packet_recv(const char* packet) {
             g_speed_boost.store(settle, std::memory_order_release);
             g_speed_correction.store(settle, std::memory_order_release);
             g_speed_reset.store(true, std::memory_order_release);
+            g_speed_tp_window.reset();
             ntpl::logf("speed boost limited to +%d by the server", settle);
         }
     }
@@ -445,6 +470,9 @@ void set_speed_boost(int add) {
     const int previous =
         g_speed_request.exchange(add, std::memory_order_release);
     g_logged_actor.store(-1, std::memory_order_relaxed);
+    // A new request starts a fresh correction window: corrections seen for an
+    // earlier value must not settle this one.
+    g_speed_window_reset.store(true, std::memory_order_release);
     if (add <= 0) {
         g_speed_boost.store(0, std::memory_order_release);
         g_speed_reset.store(true, std::memory_order_release);
