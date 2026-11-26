@@ -242,7 +242,7 @@ class MinigamePageMixin:
         self.quarry_play_button.add_css_class("suggested-action")
         self.quarry_play_button.set_tooltip_text(
             "Claim the chosen box repeatedly until the production points "
-            "run out (35 s between claims)."
+            "run out (65 s between claims, the server's reward cooldown)."
         )
         self.quarry_play_button.connect(
             "clicked", lambda *_: self._quarry_start()
@@ -258,12 +258,12 @@ class MinigamePageMixin:
         buttons.append(self.quarry_stop_button)
         buttons.append(Gtk.Label(label="every"))
         self.quarry_gap_spin = Gtk.SpinButton.new_with_range(30, 600, 5)
-        self.quarry_gap_spin.set_value(35)
+        self.quarry_gap_spin.set_value(65)
         self.quarry_gap_spin.set_width_chars(4)
         self.quarry_gap_spin.set_tooltip_text(
-            "Seconds between claims. Live testing puts the server cooldown "
-            "at about 30 s, so the default is 35; raise this if a run gets "
-            "no mlo_lv."
+            "Seconds between claims. The live server refuses a reward for "
+            "about 60 s after one was collected, so the default is 65; a "
+            "shorter gap gets every other claim refused."
         )
         buttons.append(self.quarry_gap_spin)
         buttons.append(Gtk.Label(label="s"))
@@ -295,8 +295,8 @@ class MinigamePageMixin:
                 "live tiers. Each claim spends production points (100 "
                 "normally; the label shows the last known amount, refilled "
                 "daily). Play is automatic: it claims, clicks the client's Stop "
-                "(Storno), waits 'every' seconds (35 by default, the server's "
-                "cooldown) and "
+                "(Storno), waits 'every' seconds (65 by default: the server "
+                "refuses a second reward for about 60 s) and "
                 "starts the next one until the production points fall below "
                 "100, a raid team blocks it or a claim gets no answer; Stop "
                 "ends the loop. This is a packet shortcut, not a visual "
@@ -489,7 +489,7 @@ class MinigamePageMixin:
 
     def _quarry_gap(self) -> int:
         if self.quarry_gap_spin is None:
-            return 35
+            return 65
         return max(5, int(self.quarry_gap_spin.get_value()))
 
     def _quarry_start(self) -> None:
@@ -686,8 +686,8 @@ class MinigamePageMixin:
                     )
                 else:
                     message = (
-                        "no answer from the server; the minigame window may "
-                        "be closed or the result rejected"
+                        "the server refused the claim; its reward cooldown is "
+                        "about 60 s, so the next run should get it"
                     )
                 if self.quarry_auto_running:
                     self._quarry_auto_retry(message)

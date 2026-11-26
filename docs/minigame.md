@@ -115,7 +115,7 @@ visual game; it sends the result the client sends at the end of a game.
 | **production points** | The last `mlo_info`/`mlo_mg`/`mlpt` balance. The label says how to learn it when it is unknown. |
 | **Play** | Sends the sequence below, then clicks the client's **Stop** (Storno) and waits **every** seconds and starts the next one — it claims until the production points fall below 100, a raid team blocks it or a claim gets no answer. Stop ends the loop. |
 | **Stop** | Cancels the running sequence and the Play loop. |
-| **every** | Seconds between claims, 30–600. Default **35** (the server's cooldown); raise it if a run gets no `mlo_lv`. |
+| **every** | Seconds between claims, 30–600. Default **65**: the server refuses a reward for about 60 s after one is collected, so a shorter gap gets every other claim refused. |
 
 The sequence is the client's own, live-captured on 2026-11-26. The second
 field is the **object's slot** from `mlo_info` (the live object was on slot 4;
@@ -146,13 +146,13 @@ first automated claim was live-verified on 2026-11-26 (`mlo_lv 4`,
 16 s later got no `mlo_lv`. The cooldown was measured live on 2026-11-26
 (20:38–20:43): every attempt 35–38 s after a reward was refused, while the
 retry ~80 s after the reward claimed, so the server cooldown is above 38 s
-and at most ~78 s — most likely **60 s**. Play waits **35 s** between claims
-by default (the user's setting; `every`, 30–600 s), retries an ignored run
-up to 3 times (see the live **next claim in N s** countdown under the
-status) and ends with a points/raid/no-answer message. A 35 s gap still
-claims, but with this cooldown one attempt of each pair is refused; raise
-`every` to **60** to make every attempt count. Twenty claims take about 12
-minutes at a clean 35 s, or about 27 minutes with the refusals. The status reads
+and at most ~78 s — most likely **60 s**. Play waits **65 s** between claims
+by default (the ~60 s cooldown plus a margin; `every`, 30–600 s), retries an
+ignored run up to 3 times (see the live **next claim in N s** countdown
+under the status) and ends with a points/raid/no-answer message. A 35 s gap
+still claims, but with this cooldown one attempt of each pair is refused;
+65 s makes every attempt count. Twenty claims take about 22 minutes at
+65 s. The status reads
 `5x claimed · production points 2,000 → 1,900 · reward item 2193 ×2`, or a
 warning when no answer arrived (the window may be closed or the result
 rejected). A claim spends production points — **100** normally, less with the
@@ -196,7 +196,7 @@ risk**. The account risk is the owner's.
   the running client. Restart the game client and inject again (the picker's
   **Inject & connect**), then the window title/status shows `DLL 0.3.0`
   or newer (`0.3.1` is the current build).
-- Host **0.6.0 or newer** for the tab (0.9.7 today). Only a GUI restart is
+- Host **0.6.0 or newer** for the tab (0.9.8 today). Only a GUI restart is
   needed for host changes.
 - The game window attached to this GUI window. The tab is per client, like the
   Family and NosBazar pages.
@@ -231,7 +231,7 @@ The Great Quarry natural flow was live-verified on 2026-11-26: GAMESTART
 16124`), the server's `mlo_lv 4`, the client's claim `mg 4 4 3125 4`, and the
 `mlpt 1900 100` + `mlo_rw 2193 2` reward. The tab's **automated** result was live-verified once (20:08:14:
 `mlpt 1800`, `mlo_rw 2213 ×1`); the Play loop's repeat pacing is verified
-against the fake server only, with the 35 s gap: the first live repeat should
+against the fake server only, with the 65 s gap: the first live repeat should
 watch the Bot log for `auto 2 · 5x claimed … reward …` or the no-answer
 warning.
 

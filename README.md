@@ -191,7 +191,7 @@ Quarry** first — by sending the client's own result and claim packets.
 **Play until** chooses the reward box (default 5x, the 16,000-point minimum),
 the tab shows your production points from the game's own `mlo_info`, claims
 with the server's `mlo_lv` reward level and shows the reward item from
-`mlo_rw`. **Play** keeps going: it claims, clicks the client's **Stop** (Storno), waits 35 s
+`mlo_rw`. **Play** keeps going: it claims, clicks the client's **Stop** (Storno), waits 65 s
 (the server's cooldown between rewards) and starts the next one until the
 production points run out, retrying an ignored run and showing a live
 **next claim in N s** countdown; **Stop** ends the loop. Open the Great Quarry window in the game first. It is a packet
@@ -261,7 +261,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-Host **0.9.7** (Linux): 385 unit tests, 6 GTK4 window smokes and 47
+Host **0.9.8** (Linux): 385 unit tests, 6 GTK4 window smokes and 47
 fake-server bot smokes pass, and the real injector has been run against the
 live NosTale client under Wine 11 — both hooks `ACTIVE`, movement through the
 client's own MoveTo, auto-attack confirmed by the server's `su`, and the
