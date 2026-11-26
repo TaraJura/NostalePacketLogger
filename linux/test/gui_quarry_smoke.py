@@ -235,9 +235,12 @@ def main() -> int:
             app.engine.world.raid_members.clear()
             app.engine.world.minigame.points = 1900
             app.quarry_auto_spin.set_value(2)
+            # Test-only shortcut: the real gap is 120 s (the server refuses a
+            # second reward sooner); the smoke needs two runs in seconds.
+            app._quarry_gap = lambda: 5
             state["auto_before"] = len(sent_mg())
             app._quarry_auto_start()
-            GLib.timeout_add(9000, check_auto)
+            GLib.timeout_add(12000, check_auto)
         except Exception as exc:  # noqa: BLE001
             result["ok"] = False
             result["detail"] = f"raid exception: {exc!r}"

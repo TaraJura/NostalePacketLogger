@@ -115,7 +115,7 @@ visual game; it sends the result the client sends at the end of a game.
 | **production points** | The last `mlo_info`/`mlo_mg`/`mlpt` balance. The label says how to learn it when it is unknown. |
 | **Play** | Sends the sequence below once. |
 | **Stop** | Cancels the sequence and the Auto loop. |
-| **Auto** / **runs** | Repeats the claim up to the runs count (default **20** = the 2,000-point daily budget at 100 per claim). It sends `mg 2` between runs and stops on the count, when the production points fall below 100, in a raid team, or when a claim gets no answer. |
+| **Auto** / **runs** / **every** | Repeats the claim up to the runs count (default **20** = the 2,000-point daily budget at 100 per claim), **30 s apart** by default. It sends `mg 2` between runs, retries an ignored run up to 3 times after the same pause, and stops on the count, when the production points fall below 100, in a raid team, or after 3 ignored runs. |
 
 The sequence is the client's own, live-captured on 2026-11-26. The second
 field is the **object's slot** from `mlo_info` (the live object was on slot 4;
@@ -134,7 +134,15 @@ mg 4 <slot> 3125 <level>                 claim with the server's level
 The tab waits for `mlo_lv` and claims exactly that level (the GUI's 5x choice
 is the server's level 4); if the server stays silent it falls back to the
 chosen level minus one. After a confirmed claim it sends `mg 2 <slot>
-3125` (the client's close/Storno) so the next Auto run starts clean. The status reads
+3125` (the client's close/Storno) so the next Auto run starts clean.
+
+The server refuses a second reward soon after one was collected. The
+first automated claim was live-verified on 2026-11-26 (`mlo_lv 4`,
+`mlpt 1900→1800`, `mlo_rw 2213 ×1`), but an immediate second attempt
+16 s later got no `mlo_lv`. Live testing (2026-11-26) puts the minimum cooldown at about **30 s**:
+Auto waits **30 s** between runs by default (`every`, 30–600 s) and
+retries an ignored run up to 3 times. If a run still gets no `mlo_lv`,
+raise `every`; 20 claims at 30 s take about 10 minutes. The status reads
 `5x claimed · production points 2,000 → 1,900 · reward item 2193 ×2`, or a
 warning when no answer arrived (the window may be closed or the result
 rejected). A claim spends production points — **100** normally, less with the
@@ -178,7 +186,7 @@ risk**. The account risk is the owner's.
   the running client. Restart the game client and inject again (the picker's
   **Inject & connect**), then the window title/status shows `DLL 0.3.0`
   or newer (`0.3.1` is the current build).
-- Host **0.6.0 or newer** for the tab (0.9.2 today). Only a GUI restart is
+- Host **0.6.0 or newer** for the tab (0.9.3 today). Only a GUI restart is
   needed for host changes.
 - The game window attached to this GUI window. The tab is per client, like the
   Family and NosBazar pages.
@@ -211,8 +219,9 @@ live-verified yet. The first live run should watch the Bot log for
 The Great Quarry natural flow was live-verified on 2026-11-26: GAMESTART
 (`mg 1 4 3125`), a played game ending with score 16,124 (`mg 3 4 3125 16124
 16124`), the server's `mlo_lv 4`, the client's claim `mg 4 4 3125 4`, and the
-`mlpt 1900 100` + `mlo_rw 2193 2` reward. The tab's **automated** result (the
-same packets sent without playing) is verified against the fake server only;
+`mlpt 1900 100` + `mlo_rw 2193 2` reward. The tab's **automated** result was live-verified once (20:08:14:
+`mlpt 1800`, `mlo_rw 2213 ×1`); the Auto loop's repeat pacing is
+verified against the fake server only, with the 120 s cooldown:
 the first live run should watch the Bot log for `5x claimed … reward …` or the
 no-answer warning.
 

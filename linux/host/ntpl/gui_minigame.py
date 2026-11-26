@@ -273,6 +273,16 @@ class MinigamePageMixin:
             "production points are below 100."
         )
         buttons.append(self.quarry_auto_spin)
+        buttons.append(Gtk.Label(label="every"))
+        self.quarry_gap_spin = Gtk.SpinButton.new_with_range(30, 600, 5)
+        self.quarry_gap_spin.set_value(30)
+        self.quarry_gap_spin.set_width_chars(4)
+        self.quarry_gap_spin.set_tooltip_text(
+            "Seconds between Auto claims. Live testing puts the server cooldown "
+            "at about 30 s; raise this if a run gets no mlo_lv."
+        )
+        buttons.append(self.quarry_gap_spin)
+        buttons.append(Gtk.Label(label="s"))
         box.append(buttons)
 
         self.quarry_status = Gtk.Label(label="")
@@ -457,6 +467,11 @@ class MinigamePageMixin:
         if not quiet:
             self._quarry_set_status("stopped.")
 
+    def _quarry_gap(self) -> int:
+        if self.quarry_gap_spin is None:
+            return 30
+        return max(5, int(self.quarry_gap_spin.get_value()))
+
     def _quarry_auto_start(self) -> None:
         """Claim the chosen box repeatedly, within the daily point budget."""
         if self.quarry_running or self.quarry_auto_running:
@@ -485,10 +500,12 @@ class MinigamePageMixin:
             1, int(self.quarry_auto_spin.get_value())
         )
         self.quarry_auto_done = 0
+        self.quarry_auto_retries = 0
         self.quarry_auto_running = True
         self._log_line(
             f"minigame: auto start, {self.quarry_auto_max} claim(s) of the "
-            f"{self._quarry_selected_level()}x box"
+            f"{self._quarry_selected_level()}x box, "
+            f"{self._quarry_gap()} s apart"
         )
         self._quarry_play()
         if not self.quarry_running:
@@ -519,9 +536,16 @@ class MinigamePageMixin:
                 f"production points {points:,} (a claim needs 100)"
             )
             return
+        self.quarry_auto_retries = 0
+        gap = self._quarry_gap()
+        self._quarry_set_status(
+            f"auto {self.quarry_auto_done}/{self.quarry_auto_max} · "
+            f"next claim in {gap} s (server cooldown)…",
+            "bazar-warn",
+        )
         if self.quarry_auto_timer is None:
-            self.quarry_auto_timer = GLib.timeout_add(
-                2000, self._quarry_auto_next
+            self.quarry_auto_timer = GLib.timeout_add_seconds(
+                gap, self._quarry_auto_next
             )
 
     def _quarry_auto_next(self) -> bool:
@@ -550,6 +574,37 @@ class MinigamePageMixin:
         if not self.quarry_running:
             self.quarry_auto_running = False
         return False
+
+    def _quarry_auto_retry(self, message: str) -> None:
+        """Retry an ignored run after the cooldown; stop after 3 attempts."""
+        self.quarry_auto_retries += 1
+        if self.quarry_auto_retries > 3:
+            self._quarry_auto_abort(
+                f"auto stopped: {message} "
+                f"({self.quarry_auto_retries - 1} attempt(s))"
+            )
+            return
+        # Close the failed session before the next attempt.
+        self._send(
+            build_production_close_packet(
+                self.quarry_vnum, self.quarry_slot
+            )
+        )
+        gap = self._quarry_gap()
+        self._quarry_set_status(
+            f"auto {self.quarry_auto_done + 1}/{self.quarry_auto_max} · "
+            f"{message} · retry {self.quarry_auto_retries}/3 in "
+            f"{gap} s…",
+            "bazar-warn",
+        )
+        self._log_line(
+            f"minigame: auto retry {self.quarry_auto_retries}/3 in "
+            f"{gap} s: {message}"
+        )
+        if self.quarry_auto_timer is None:
+            self.quarry_auto_timer = GLib.timeout_add_seconds(
+                gap, self._quarry_auto_next
+            )
 
     def _quarry_auto_finish(self, text: str) -> None:
         self.quarry_auto_running = False
@@ -643,7 +698,7 @@ class MinigamePageMixin:
                         "be closed or the result rejected"
                     )
                 if self.quarry_auto_running:
-                    self._quarry_auto_abort(f"auto stopped: {message}")
+                    self._quarry_auto_retry(message)
                 else:
                     self._quarry_set_status(message, "bazar-bad")
                     self._log_line(f"minigame: {message}")

@@ -637,6 +637,9 @@ class Application(
         self.quarry_auto_max = 20
         self.quarry_auto_done = 0
         self.quarry_auto_timer: int | None = None
+        #: Consecutive runs the server ignored (a reward cooldown); reset on
+        #: a confirmed claim.
+        self.quarry_auto_retries = 0
         self.quarry_points_before: int | None = None
         self.quarry_deadline = 0.0
         self.minigame_guard = False
