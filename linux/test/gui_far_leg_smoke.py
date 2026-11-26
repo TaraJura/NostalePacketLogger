@@ -142,6 +142,7 @@ def main() -> int:
                 f"{app.path_index == 0}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"check exception: {exc!r}"
         app.quit()
         return False

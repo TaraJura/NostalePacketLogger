@@ -158,6 +158,7 @@ def main() -> int:
                 f"status={app.status.get_text()!r}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"check_range exception: {exc!r}"
         app.quit()
         return False

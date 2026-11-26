@@ -37,8 +37,6 @@ from .bazar import (
     build_search_packet,
     default_config_path as default_bazar_config_path,
     inventory_search_items,
-    item_identity_name,
-    item_search_vnums,
     load_config as load_bazar_config,
     monitor_source,
     normalize_search_packet,
@@ -434,6 +432,10 @@ class Application(Gtk.Application):
         self.inbox: queue.Queue = queue.Queue()
         self.filter_text = ""
         self.status_received = False
+        # Handler failures do not stop the pump; the first one per opcode
+        # goes to the Bot log (see _on_packet_error).
+        self.packet_error_count = 0
+        self.packet_error_opcodes: set[str] = set()
         # Startup client selector: the window lists the running game windows
         # and injects/attaches to the chosen one instead of always dialing the
         # default port. Off by default so headless tests stay deterministic.
@@ -709,7 +711,6 @@ class Application(Gtk.Application):
         self.bazar_config_path = default_bazar_config_path()
         self.bazar_config_label = None
         self.bazar_info = None
-        self.bazar_status = None
         self.bazar_results_box = None
         # The Monitor section's third-level views: NosMall (ND/no cost) and
         # NPC resale (gold cost). Each view owns its table and Only priced
@@ -1007,10 +1008,6 @@ class Application(Gtk.Application):
         header = Gtk.HeaderBar()
         window.set_titlebar(header)
 
-        clear = Gtk.Button(label="Clear")
-        clear.connect("clicked", lambda *_: self.store.remove_all())
-        header.pack_start(clear)
-
         client_button = Gtk.Button(label="Client…")
         client_button.set_tooltip_text(
             "List the running NosTale clients and attach to one of them"
@@ -1150,6 +1147,15 @@ class Application(Gtk.Application):
         send_button.connect("clicked", lambda *_: self._on_send(self.send_entry))
         toolbar.append(send_button)
 
+        # The table belongs to this tab; a window-level Clear suggested it
+        # cleared whichever tab was open.
+        clear_button = Gtk.Button(label="Clear")
+        clear_button.set_tooltip_text(
+            "Empty the packet table; the session log stays on disk."
+        )
+        clear_button.connect("clicked", lambda *_: self.store.remove_all())
+        toolbar.append(clear_button)
+
         self.follow = Gtk.ToggleButton(label="Follow")
         self.follow.set_active(True)
         self.follow.set_tooltip_text("Scroll to the newest packet automatically")
@@ -1236,6 +1242,48 @@ class Application(Gtk.Application):
         for widget in widgets:
             row.append(widget)
         return row
+
+    def _menu_button(
+        self,
+        label: str,
+        tooltip: str,
+        entries: tuple[tuple[str, object] | None, ...],
+    ) -> Gtk.MenuButton:
+        """A menu button whose popover holds flat action buttons.
+
+        ``None`` inserts a separator. Clicking an entry closes the popover
+        before running the action, so a dialog cannot open underneath a menu
+        that is still up. The created buttons are kept on
+        ``button.ntpl_entries`` for callers that need to drive or test one.
+        """
+        button = Gtk.MenuButton(label=label)
+        button.set_tooltip_text(tooltip)
+        popover = Gtk.Popover()
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+        box.set_margin_start(6)
+        box.set_margin_end(6)
+        created: dict[str, Gtk.Button] = {}
+        for entry in entries:
+            if entry is None:
+                box.append(Gtk.Separator())
+                continue
+            text, callback = entry
+            item = Gtk.Button(label=text)
+            item.add_css_class("flat")
+            item.set_halign(Gtk.Align.FILL)
+            item.connect(
+                "clicked",
+                lambda _button, cb=callback: (popover.popdown(), cb()),
+            )
+            created[text] = item
+            box.append(item)
+        popover.set_child(box)
+        button.set_popover(popover)
+        # Attribute kept on the instance; mypy ignores PyGObject shadowing.
+        button.ntpl_entries = created  # type: ignore[attr-defined]
+        return button
 
     def _bind_toggle_color(self, button: Gtk.ToggleButton) -> None:
         """Paint an active toggle green and an inactive one red."""
@@ -1383,9 +1431,10 @@ class Application(Gtk.Application):
         return True
 
     def _bazar_log(self, text: str) -> None:
-        self._log_line(text)
-        if self.bazar_status is not None:
-            self.bazar_status.set_text(text.strip())
+        # One status bar per window: the NosBazar page reads its live state
+        # from bazar_info (top) and actions from the window status bar,
+        # exactly like every other tab.
+        self._set_status(text)
 
     @staticmethod
     def _bazar_path_for(winpid: int) -> Path:
@@ -5295,18 +5344,19 @@ class Application(Gtk.Application):
         toolbar.append(
             self._help_button(
                 "NosBazar",
-                "Section tabs: Inventory scans every owned slot and can set "
-                "up relisting; Relist sets the floor, character and starts "
-                "registrations; Monitor searches and shows prices/profit, "
-                "with third-level NosMall (ND cost, gold per ND) and NPC "
-                "resale (NPC gold cost, such as Pet Food or Bell of Sweet "
-                "Home; gold markup) views; Items edits the searches and the "
-                "Cost type that chooses the monitor; Configuration has the "
-                "Bibi id, refresh and config file. Open bazaar replays the "
-                "Bibi Basar dialog through the client's own send path; with "
-                "no Bibi visible it uses the portable NosBazar medal (vnum "
-                "1955) from the inventory instead. "
-                "Relist changes real listings and spends the fee.",
+                "Section tabs: Items is the searchable catalog of every "
+                "Item.dat row, where the Monitor and Relist ticks choose "
+                "what this client watches and relists, and the editor sets "
+                "the amount, floor and Cost type; Relist sets the exact "
+                "vnum, tab and floor and starts registrations; Monitor "
+                "searches and shows prices/profit, with third-level NosMall "
+                "(ND cost, gold per ND) and NPC resale (NPC gold cost, such "
+                "as Pet Food or Bell of Sweet Home; gold markup) views; "
+                "Configuration has the Bibi id, refresh and config file. "
+                "Open bazaar replays the Bibi Basar dialog through the "
+                "client's own send path; with no Bibi visible it uses the "
+                "portable NosBazar medal (vnum 1955) from the inventory "
+                "instead. Relist changes real listings and spends the fee.",
             )
         )
         page.append(toolbar)
@@ -5327,12 +5377,6 @@ class Application(Gtk.Application):
         sections.connect("switch-page", self._bazar_section_switched)
         page.append(sections)
         page.connect("map", self._bazar_page_mapped)
-
-        self.bazar_status = Gtk.Label(label="NosBazar idle")
-        self.bazar_status.set_xalign(0)
-        self.bazar_status.set_wrap(True)
-        self.bazar_status.add_css_class("dim-label")
-        page.append(self.bazar_status)
 
         self.bazar_page = page
         self._bazar_render_items()
@@ -5467,18 +5511,14 @@ class Application(Gtk.Application):
                     "Monitor keeps watching it. The list shows only the "
                     "relist set by default (Only relisting is on); choose "
                     "items with the Relist tick in the Items section. Add "
-                    "from Items takes the Items selection; Add whole "
-                    "inventory puts every distinct bag item into the set "
-                    "(second click confirms); Item database… searches all "
-                    "of Item.dat and adds the picks. Remove from "
-                    "relisting (or the row tick) keeps the item and its "
-                    "floor, only out of the relist set. Only relisting "
-                    "hides the rest of the list. Group actions… covers "
-                    "every row shown (relist / stop relisting) or the rows "
-                    "clicked with Ctrl (Relist selected / Stop relisting "
-                    "selected). The Select all / Unselect all buttons "
-                    "select or clear the visible rows for those selection "
-                    "actions. "
+                    "from Items takes the Items selection; Add… puts every "
+                    "distinct bag item into the set (second click "
+                    "confirms) or searches all of Item.dat and adds the "
+                    "picks. Actions… removes the selected rows from "
+                    "relisting (the item and its floor stay), selects or "
+                    "clears the visible rows, and applies relist / stop "
+                    "relisting to every row shown or to the Ctrl+clicked "
+                    "rows. Only relisting hides the rest of the list. "
                     "Select an item, set the "
                     "exact Item vnum, the inventory Tab and the Amount, "
                     "then a positive Min price (the per-unit floor). "
@@ -5508,11 +5548,13 @@ class Application(Gtk.Application):
         return page
 
     def _build_bazar_relist_tracking(self) -> Gtk.Widget:
-        """Add/remove/filter controls under the relist item list."""
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        add_row = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, spacing=6
-        )
+        """One compact toolbar: add, manage and filter the relist set.
+
+        Same shape as the Monitor toolbar: the everyday action is a plain
+        button, the rest live behind Add…/Actions…, and the filter stays
+        visible. This used to be five stacked button rows.
+        """
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.bazar_relist_add_items_button = Gtk.Button(
             label="Add from Items"
         )
@@ -5522,66 +5564,57 @@ class Application(Gtk.Application):
         self.bazar_relist_add_items_button.connect(
             "clicked", lambda *_: self._bazar_relist_add_from_items()
         )
-        add_row.append(self.bazar_relist_add_items_button)
-        box.append(add_row)
-        import_row = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, spacing=6
+        row.append(self.bazar_relist_add_items_button)
+        self.bazar_relist_add_button = self._menu_button(
+            "Add…",
+            "Put every inventory item or a database pick into the relist "
+            "set.",
+            (
+                (
+                    "Add whole inventory",
+                    self._bazar_relist_add_whole_inventory,
+                ),
+                (
+                    "Item database…",
+                    lambda: self._open_item_database_picker("relist"),
+                ),
+            ),
         )
-        whole = Gtk.Button(label="Add whole inventory")
-        whole.set_tooltip_text(
-            "Put every distinct inventory item into the relist set with its "
-            "tab and stack, and a floor of 1 where none is set. A second "
-            "click confirms."
+        row.append(self.bazar_relist_add_button)
+        self.bazar_relist_group_button = self._menu_button(
+            "Actions…",
+            "Select or unselect rows, remove the selection from relisting, "
+            "or put every shown or selected row in or out of the relist set "
+            "at once.",
+            (
+                ("Select all shown", self._bazar_relist_select_shown),
+                ("Unselect all", self._bazar_relist_unselect_all),
+                None,
+                (
+                    "Remove from relisting",
+                    self._bazar_relist_remove_selected,
+                ),
+                None,
+                (
+                    "Relist all shown",
+                    lambda: self._bazar_relist_set_all_shown(True),
+                ),
+                (
+                    "Stop relisting all shown",
+                    lambda: self._bazar_relist_set_all_shown(False),
+                ),
+                None,
+                (
+                    "Relist selected",
+                    lambda: self._bazar_relist_set_selected(True),
+                ),
+                (
+                    "Stop relisting selected",
+                    lambda: self._bazar_relist_set_selected(False),
+                ),
+            ),
         )
-        whole.connect(
-            "clicked", lambda *_: self._bazar_relist_add_whole_inventory()
-        )
-        import_row.append(whole)
-        database = Gtk.Button(label="Item database…")
-        database.set_tooltip_text(
-            "Search all items in the local database and add them to the "
-            "relist set."
-        )
-        database.connect(
-            "clicked", lambda *_: self._open_item_database_picker("relist")
-        )
-        import_row.append(database)
-        box.append(import_row)
-        manage_row = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, spacing=6
-        )
-        self.bazar_relist_remove_button = Gtk.Button(
-            label="Remove from relisting"
-        )
-        self.bazar_relist_remove_button.set_tooltip_text(
-            "Stop changing the selected listing; the item stays monitored "
-            "and keeps its floor."
-        )
-        self.bazar_relist_remove_button.connect(
-            "clicked", lambda *_: self._bazar_relist_remove_selected()
-        )
-        manage_row.append(self.bazar_relist_remove_button)
-        self.bazar_relist_select_all_button = Gtk.Button(
-            label="Select all"
-        )
-        self.bazar_relist_select_all_button.set_tooltip_text(
-            "Select every row shown, so Group actions can apply to the "
-            "selection (same as Ctrl+click on each row)."
-        )
-        self.bazar_relist_select_all_button.connect(
-            "clicked", lambda *_: self._bazar_relist_select_shown()
-        )
-        manage_row.append(self.bazar_relist_select_all_button)
-        self.bazar_relist_unselect_all_button = Gtk.Button(
-            label="Unselect all"
-        )
-        self.bazar_relist_unselect_all_button.set_tooltip_text(
-            "Clear the row selection."
-        )
-        self.bazar_relist_unselect_all_button.connect(
-            "clicked", lambda *_: self._bazar_relist_unselect_all()
-        )
-        manage_row.append(self.bazar_relist_unselect_all_button)
+        row.append(self.bazar_relist_group_button)
         self.bazar_relist_filter = Gtk.CheckButton(label="Only relisting")
         self.bazar_relist_filter.set_tooltip_text(
             "Show only items in the relist set (on by default); turn it "
@@ -5591,65 +5624,14 @@ class Application(Gtk.Application):
         self.bazar_relist_filter.connect(
             "toggled", lambda *_: self._bazar_render_relist_items()
         )
-        manage_row.append(self.bazar_relist_filter)
-        box.append(manage_row)
-        self.bazar_relist_group_button = (
-            self._build_bazar_relist_group_button()
-        )
-        box.append(self.bazar_relist_group_button)
-        return box
-
-    def _build_bazar_relist_group_button(self) -> Gtk.MenuButton:
-        """Bulk actions for the rows shown or the Ctrl+clicked rows."""
-        button = Gtk.MenuButton(label="Group actions…")
-        button.set_tooltip_text(
-            "Bulk actions: select or unselect rows, or put every shown row "
-            "or the Ctrl+clicked rows in or out of relisting at once."
-        )
-        popover = Gtk.Popover()
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
-        box.set_margin_start(6)
-        box.set_margin_end(6)
-        entries = (
-            ("Select all shown", self._bazar_relist_select_shown),
-            ("Unselect all", self._bazar_relist_unselect_all),
-            None,
-            (
-                "Relist all shown",
-                lambda: self._bazar_relist_set_all_shown(True),
-            ),
-            (
-                "Stop relisting all shown",
-                lambda: self._bazar_relist_set_all_shown(False),
-            ),
-            None,
-            (
-                "Relist selected",
-                lambda: self._bazar_relist_set_selected(True),
-            ),
-            (
-                "Stop relisting selected",
-                lambda: self._bazar_relist_set_selected(False),
-            ),
-        )
-        for entry in entries:
-            if entry is None:
-                box.append(Gtk.Separator())
-                continue
-            label, callback = entry
-            item_button = Gtk.Button(label=label)
-            item_button.add_css_class("flat")
-            item_button.set_halign(Gtk.Align.FILL)
-            item_button.connect(
-                "clicked",
-                lambda _button, cb=callback: (popover.popdown(), cb()),
-            )
-            box.append(item_button)
-        popover.set_child(box)
-        button.set_popover(popover)
-        return button
+        row.append(self.bazar_relist_filter)
+        # The named buttons stay available for the smoke and for callers;
+        # they are the popover entries now.
+        entries = self.bazar_relist_group_button.ntpl_entries
+        self.bazar_relist_select_all_button = entries["Select all shown"]
+        self.bazar_relist_unselect_all_button = entries["Unselect all"]
+        self.bazar_relist_remove_button = entries["Remove from relisting"]
+        return row
 
     def _build_bazar_relist_editor(self) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -5817,7 +5799,8 @@ class Application(Gtk.Application):
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         title = Gtk.Label(label="Monitor items")
         title.set_xalign(0)
-        title.set_hexpand(True)
+        # Keep the ? next to the title instead of at the far edge of the
+        # panel; every other section header reads the same way.
         header.append(title)
         header.append(
             self._help_button(
@@ -5872,96 +5855,56 @@ class Application(Gtk.Application):
         return box
 
     def _build_bazar_monitor_add_button(self) -> Gtk.MenuButton:
-        button = Gtk.MenuButton(label="Add…")
-        button.set_tooltip_text(
-            "Add every inventory item or pick from the Item.dat database."
-        )
-        popover = Gtk.Popover()
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
-        box.set_margin_start(6)
-        box.set_margin_end(6)
-        entries = (
+        return self._menu_button(
+            "Add…",
+            "Add every inventory item or pick from the Item.dat database.",
             (
-                "Add whole inventory",
-                self._bazar_monitor_add_whole_inventory,
-            ),
-            (
-                "Item database…",
-                lambda: self._open_item_database_picker("monitor"),
+                (
+                    "Add whole inventory",
+                    self._bazar_monitor_add_whole_inventory,
+                ),
+                (
+                    "Item database…",
+                    lambda: self._open_item_database_picker("monitor"),
+                ),
             ),
         )
-        for label, callback in entries:
-            item = Gtk.Button(label=label)
-            item.add_css_class("flat")
-            item.set_halign(Gtk.Align.FILL)
-            item.connect(
-                "clicked",
-                lambda _button, cb=callback: (popover.popdown(), cb()),
-            )
-            box.append(item)
-        popover.set_child(box)
-        button.set_popover(popover)
-        return button
 
     def _build_bazar_monitor_group_button(self) -> Gtk.MenuButton:
         """Bulk actions for the Monitor set (shown or selected rows)."""
-        button = Gtk.MenuButton(label="Actions…")
-        button.set_tooltip_text(
+        return self._menu_button(
+            "Actions…",
             "Bulk actions: monitor or stop the visible rows, monitor or "
             "stop the selected rows, select/clear the selection, and open "
-            "the full editor."
+            "the full editor.",
+            (
+                (
+                    "Monitor all shown",
+                    lambda: self._bazar_monitor_set_all_shown(True),
+                ),
+                (
+                    "Stop monitoring all shown",
+                    lambda: self._bazar_monitor_set_all_shown(False),
+                ),
+                None,
+                (
+                    "Monitor selected",
+                    lambda: self._bazar_monitor_set_selected(True),
+                ),
+                (
+                    "Stop monitoring selected",
+                    lambda: self._bazar_monitor_set_selected(False),
+                ),
+                None,
+                (
+                    "Select all shown",
+                    self._bazar_monitor_select_shown,
+                ),
+                ("Unselect all", self._bazar_monitor_unselect_all),
+                None,
+                ("Open full editor", self._bazar_monitor_open_editor),
+            ),
         )
-        popover = Gtk.Popover()
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
-        box.set_margin_start(6)
-        box.set_margin_end(6)
-        entries = (
-            (
-                "Monitor all shown",
-                lambda: self._bazar_monitor_set_all_shown(True),
-            ),
-            (
-                "Stop monitoring all shown",
-                lambda: self._bazar_monitor_set_all_shown(False),
-            ),
-            None,
-            (
-                "Monitor selected",
-                lambda: self._bazar_monitor_set_selected(True),
-            ),
-            (
-                "Stop monitoring selected",
-                lambda: self._bazar_monitor_set_selected(False),
-            ),
-            None,
-            (
-                "Select all shown",
-                self._bazar_monitor_select_shown,
-            ),
-            ("Unselect all", self._bazar_monitor_unselect_all),
-            None,
-            ("Open full editor", self._bazar_monitor_open_editor),
-        )
-        for entry in entries:
-            if entry is None:
-                box.append(Gtk.Separator())
-                continue
-            label, callback = entry
-            item_button = Gtk.Button(label=label)
-            item_button.add_css_class("flat")
-            item_button.set_halign(Gtk.Align.FILL)
-            item_button.connect(
-                "clicked",
-                lambda _button, cb=callback: (popover.popdown(), cb()),
-            )
-            box.append(item_button)
-        popover.set_child(box)
-        button.set_popover(popover)
-        return button
 
     def _build_bazar_monitor_view(self, source: str) -> Gtk.Widget:
         view = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -6029,52 +5972,30 @@ class Application(Gtk.Application):
 
     def _build_items_group_button(self) -> Gtk.MenuButton:
         """Bulk Monitor/Relist switches over the whole configured list."""
-        button = Gtk.MenuButton(label="Group actions…")
-        button.set_tooltip_text(
+        return self._menu_button(
+            "Group actions…",
             "Bulk switches over every configured item: monitor or stop, "
-            "relist or stop."
-        )
-        popover = Gtk.Popover()
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
-        box.set_margin_start(6)
-        box.set_margin_end(6)
-        entries = (
+            "relist or stop.",
             (
-                "Monitor all",
-                lambda: self._bazar_items_set_all("enabled", True),
-            ),
-            (
-                "Stop monitoring all",
-                lambda: self._bazar_items_set_all("enabled", False),
-            ),
-            None,
-            (
-                "Relist all",
-                lambda: self._bazar_items_set_all("relist", True),
-            ),
-            (
-                "Stop relisting all",
-                lambda: self._bazar_items_set_all("relist", False),
+                (
+                    "Monitor all",
+                    lambda: self._bazar_items_set_all("enabled", True),
+                ),
+                (
+                    "Stop monitoring all",
+                    lambda: self._bazar_items_set_all("enabled", False),
+                ),
+                None,
+                (
+                    "Relist all",
+                    lambda: self._bazar_items_set_all("relist", True),
+                ),
+                (
+                    "Stop relisting all",
+                    lambda: self._bazar_items_set_all("relist", False),
+                ),
             ),
         )
-        for entry in entries:
-            if entry is None:
-                box.append(Gtk.Separator())
-                continue
-            label, callback = entry
-            item_button = Gtk.Button(label=label)
-            item_button.add_css_class("flat")
-            item_button.set_halign(Gtk.Align.FILL)
-            item_button.connect(
-                "clicked",
-                lambda _button, cb=callback: (popover.popdown(), cb()),
-            )
-            box.append(item_button)
-        popover.set_child(box)
-        button.set_popover(popover)
-        return button
 
     def _bazar_items_set_all(self, attribute: str, active: bool) -> None:
         if attribute not in ("enabled", "relist"):
@@ -6121,105 +6042,61 @@ class Application(Gtk.Application):
         self._bazar_log(text)
 
     def _build_items_import_button(self) -> Gtk.MenuButton:
-        button = Gtk.MenuButton(label="Import…")
-        button.set_tooltip_text(
-            "Add items from the NosMall catalog or the whole Item.dat "
-            "database."
-        )
-        popover = Gtk.Popover()
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
-        box.set_margin_start(6)
-        box.set_margin_end(6)
-        entries = (
-            ("Import NosMall…", self._open_nosmall_picker),
+        return self._menu_button(
+            "Import…",
+            "Add items from the NosMall catalog, the whole Item.dat "
+            "database, or a saved bazar config.",
             (
-                "Item database…",
-                lambda: self._open_item_database_picker("monitor"),
-            ),
-            None,
-            (
-                "Import config (add)…",
-                lambda: self._open_config_import("add"),
-            ),
-            (
-                "Replace with config…",
-                lambda: self._open_config_import("replace"),
+                ("Import NosMall…", self._open_nosmall_picker),
+                (
+                    "Item database…",
+                    lambda: self._open_item_database_picker("monitor"),
+                ),
+                None,
+                (
+                    "Import config (add)…",
+                    lambda: self._open_config_import("add"),
+                ),
+                (
+                    "Replace with config…",
+                    lambda: self._open_config_import("replace"),
+                ),
             ),
         )
-        for entry in entries:
-            if entry is None:
-                box.append(Gtk.Separator())
-                continue
-            label, callback = entry
-            item = Gtk.Button(label=label)
-            item.add_css_class("flat")
-            item.set_halign(Gtk.Align.FILL)
-            item.connect(
-                "clicked",
-                lambda _button, cb=callback: (popover.popdown(), cb()),
-            )
-            box.append(item)
-        popover.set_child(box)
-        button.set_popover(popover)
-        return button
 
     def _build_items_more_button(self) -> Gtk.MenuButton:
-        button = Gtk.MenuButton(label="⋯")
-        button.set_tooltip_text(
-            "Inventory refresh, bulk actions and selection."
+        return self._menu_button(
+            "⋯",
+            "Inventory refresh, bulk actions and selection.",
+            (
+                ("Rescan inventory", self._inventory_reload),
+                ("Price all inventory", self._bazar_price_inventory),
+                ("Add whole inventory", self._bazar_add_whole_inventory),
+                None,
+                (
+                    "Monitor all configured",
+                    lambda: self._bazar_items_set_all("enabled", True),
+                ),
+                (
+                    "Stop monitoring all configured",
+                    lambda: self._bazar_items_set_all("enabled", False),
+                ),
+                (
+                    "Relist all configured",
+                    lambda: self._bazar_items_set_all("relist", True),
+                ),
+                (
+                    "Stop relisting all configured",
+                    lambda: self._bazar_items_set_all("relist", False),
+                ),
+                None,
+                (
+                    "Select all shown",
+                    lambda: self._bazar_select_all_shown(),
+                ),
+                ("Unselect all", self._bazar_unselect_all),
+            ),
         )
-        popover = Gtk.Popover()
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
-        box.set_margin_start(6)
-        box.set_margin_end(6)
-        entries = (
-            ("Rescan inventory", self._inventory_reload),
-            ("Price all inventory", self._bazar_price_inventory),
-            ("Add whole inventory", self._bazar_add_whole_inventory),
-            None,
-            (
-                "Monitor all configured",
-                lambda: self._bazar_items_set_all("enabled", True),
-            ),
-            (
-                "Stop monitoring all configured",
-                lambda: self._bazar_items_set_all("enabled", False),
-            ),
-            (
-                "Relist all configured",
-                lambda: self._bazar_items_set_all("relist", True),
-            ),
-            (
-                "Stop relisting all configured",
-                lambda: self._bazar_items_set_all("relist", False),
-            ),
-            None,
-            (
-                "Select all shown",
-                lambda: self._bazar_select_all_shown(),
-            ),
-            ("Unselect all", self._bazar_unselect_all),
-        )
-        for entry in entries:
-            if entry is None:
-                box.append(Gtk.Separator())
-                continue
-            label, callback = entry
-            item = Gtk.Button(label=label)
-            item.add_css_class("flat")
-            item.set_halign(Gtk.Align.FILL)
-            item.connect(
-                "clicked",
-                lambda _button, cb=callback: (popover.popdown(), cb()),
-            )
-            box.append(item)
-        popover.set_child(box)
-        button.set_popover(popover)
-        return button
 
     def _bazar_select_all_shown(self) -> None:
         if self.bazar_items_selection is not None:
@@ -6708,8 +6585,9 @@ class Application(Gtk.Application):
                     "Open the bazaar once by hand (talk to Bibi Basar -> "
                     "NosBazar) so the Bibi entity id and dialog option are "
                     "learned; the id also appears here from the client log. "
-                    "Refresh is the wait between passes. The character name "
-                    "used to recognise your own listing is set in Relist."
+                    "Refresh is the wait between passes. Your own listings "
+                    "are recognised by character id from the packets, so "
+                    "there is no name to enter."
                 ),
             )
         )
@@ -12747,27 +12625,33 @@ class Application(Gtk.Application):
                 self._set_status("disconnected")
             else:
                 packet = Packet.from_message(message)
-                self.engine.feed(packet)
-                self._track_packet(packet)
-                # Cast speed without the bot: repeat the skill the player
-                # pressed when its server cooldown ends.
-                self._cast_assist_packet(packet)
-                self._bazar_on_packet(packet)
-                self._family_on_packet(packet)
-                self._dps_on_packet(packet)
-                self._learn_char_id(self.engine.world.self_id)
-                # Switch the map as soon as the server announces it instead of
-                # waiting for the next 2 s auto-map tick.
-                if packet.opcode == "ski":
-                    for info in self.spell_rows:
-                        self._update_spell_desc(info)
-                if packet.opcode in ("c_map", "mapout", "at"):
-                    map_id = self.engine.world.map_id
-                    if map_id is not None and (
-                        self.map_grid is None
-                        or map_id != self.map_grid.map_id
-                    ):
-                        self._auto_map_tick()
+                # One handler bug must never stop the pump: an exception
+                # escaping this callback would abort the GLib source and the
+                # window would silently stop receiving packets.
+                try:
+                    self.engine.feed(packet)
+                    self._track_packet(packet)
+                    # Cast speed without the bot: repeat the skill the player
+                    # pressed when its server cooldown ends.
+                    self._cast_assist_packet(packet)
+                    self._bazar_on_packet(packet)
+                    self._family_on_packet(packet)
+                    self._dps_on_packet(packet)
+                    self._learn_char_id(self.engine.world.self_id)
+                    # Switch the map as soon as the server announces it
+                    # instead of waiting for the next 2 s auto-map tick.
+                    if packet.opcode == "ski":
+                        for info in self.spell_rows:
+                            self._update_spell_desc(info)
+                    if packet.opcode in ("c_map", "mapout", "at"):
+                        map_id = self.engine.world.map_id
+                        if map_id is not None and (
+                            self.map_grid is None
+                            or map_id != self.map_grid.map_id
+                        ):
+                            self._auto_map_tick()
+                except Exception as error:  # noqa: BLE001 - keep the pump up
+                    self._on_packet_error(packet.opcode, error)
                 if (
                     self.packet_page is not None
                     and self.notebook is not None
@@ -12798,6 +12682,22 @@ class Application(Gtk.Application):
             self._schedule_map_redraw()
             self._schedule_stats_redraw()
         return True
+
+    def _on_packet_error(self, opcode: str, error: Exception) -> None:
+        """Record an exception raised while handling one packet.
+
+        The pump keeps running; the first failure per opcode is written to the
+        Bot log so a broken handler is visible instead of silently dropping
+        packets.
+        """
+        self.packet_error_count += 1
+        if opcode in self.packet_error_opcodes:
+            return
+        self.packet_error_opcodes.add(opcode)
+        self._log_line(
+            f"packet handler error on {opcode}: "
+            f"{type(error).__name__}: {error}"
+        )
 
     def _track_packet(self, packet: Packet) -> None:
         now = time.monotonic()

@@ -371,6 +371,36 @@ class EngineInventoryTests(unittest.TestCase):
         self.assertTrue(state.option_learned)
         self.assertEqual(state.response_count, 1)
 
+    def test_learning_the_bazaar_npc_with_a_visible_entity(self) -> None:
+        # The learn path compares the dialog entity against BIBI_VNUM; a
+        # missing import used to raise NameError out of Engine.feed() and
+        # stopped the GUI's packet pump whenever Bibi was visible.
+        engine = Engine()
+        engine.feed_text(
+            "RECV",
+            "in 2 793 9584 30 30 3 100 100 460 0 0 -1 1 0 -1 - 0",
+        )
+        engine.feed_text("SEND", "npc_req 2 9584")
+        engine.feed_text("SEND", "n_run 16 1 2 9584")
+        engine.feed_text("SEND", "c_blist 0 0 0 0 0 0 0 0 0")
+        state = engine.world.bazar
+        self.assertEqual(state.npc_id, 9584)
+        self.assertEqual((state.open_option, state.open_page), (16, 1))
+        self.assertTrue(state.option_learned)
+
+    def test_a_non_bibi_entity_is_not_learned_as_the_bazaar(self) -> None:
+        engine = Engine()
+        engine.feed_text(
+            "RECV",
+            "in 2 11009 4411 30 30 3 100 100 11009 0 0 -1 1 0 -1 - 0",
+        )
+        engine.feed_text("SEND", "npc_req 2 4411")
+        engine.feed_text("SEND", "n_run 16 1 2 4411")
+        engine.feed_text("SEND", "c_blist 0 0 0 0 0 0 0 0 0")
+        state = engine.world.bazar
+        self.assertIsNone(state.npc_id)
+        self.assertFalse(state.option_learned)
+
     def test_map_change_resets_bazar(self) -> None:
         engine = Engine()
         engine.feed_text("SEND", "npc_req 2 9584")

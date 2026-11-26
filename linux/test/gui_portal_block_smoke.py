@@ -198,6 +198,7 @@ def main() -> int:
                 f"last={lines[-8:]}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"phase3 exception: {exc!r}"
         app.quit()
         return False

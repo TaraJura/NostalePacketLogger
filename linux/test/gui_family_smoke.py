@@ -166,7 +166,6 @@ def main() -> int:
             result["manual_add"] = "listonly" in app._family_invited
             app._family_remove("ListOnly")
             result["manual_remove"] = "listonly" not in app._family_invited
-            before = len(invites(server.received))
             app.family_name_entry.set_text("Bad Name")
             app.family_invite_button.emit("clicked")
             GLib.timeout_add(300, phase4)

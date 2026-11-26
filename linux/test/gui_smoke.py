@@ -60,6 +60,9 @@ def start_fake_server() -> int:
         connection, _ = listener.accept()
         connection.sendall(
             b"STATUS|ready\n"
+            # The smoke registers a throwing handler for this opcode: the
+            # pump must log it and keep processing the packets after it.
+            b"RECV|boomtest 1 2 3\n"
             b"RECV|walk 1 2 3 4\n"
             b"SEND|walk 2 2 0 10\n"
             b"SEND|u_s 1 2\n"
@@ -106,6 +109,11 @@ def main() -> int:
 
     port = start_fake_server()
     app = Application("127.0.0.1", port, unique=False, log_file=log_path)
+
+    def boom(world, packet):  # noqa: ARG001 - a deliberate handler bug
+        raise RuntimeError("handler regression")
+
+    app.engine.on("boomtest", boom)
     result = {"ok": False, "detail": "no check ran"}
 
     def check() -> bool:
@@ -266,6 +274,14 @@ def main() -> int:
                     app._bot_log_lines, LOG_MAX_LINES
                 )
 
+            # A handler exception must be recorded and must not stop the
+            # drain: `stat` right after `boomtest` still reached the world.
+            pump_ok = (
+                app.packet_error_count >= 1
+                and "boomtest" in app.packet_error_opcodes
+                and stats.hp == 100
+            )
+
             # The packet table is intentionally paused while another tab is
             # visible; switching back replays the recent buffered packets.
             app.notebook.set_current_page(0)
@@ -281,6 +297,7 @@ def main() -> int:
                 f"hp={stats.hp}/{stats.hp_max} stats_area={app.stats_area is not None} "
                 f"switched={switched} tooltips={tooltips_ok} "
                 f"toggle={toggle_ok} banner={banner_ok} "
+                f"pump={pump_ok}({app.packet_error_count}) "
                 f"size={app.map_area.get_width()}x{app.map_area.get_height()} "
                 f"entities={len(app.engine.world.entities)} "
                 f"tips={own_tip!r}/{player_tip!r}/{monster_tip!r}/"
@@ -299,6 +316,7 @@ def main() -> int:
                 and log_ok
                 and trim_ok
                 and help_ok
+                and pump_ok
             )
         except Exception as exc:  # noqa: BLE001 - report, do not crash GTK
             result["detail"] = f"exception: {exc!r}"

@@ -90,6 +90,7 @@ def main() -> int:
                 f"phase={app.bazar.phase} error={app.bazar.last_error!r}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"check exception: {exc!r}"
         app.quit()
         return False

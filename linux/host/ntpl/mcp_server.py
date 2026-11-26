@@ -29,11 +29,9 @@ import sys
 import threading
 import time
 from collections import deque
-from pathlib import Path
 from typing import Any, Callable, TextIO
 
 from . import __version__
-from .client import PacketClient
 from .clients import discover_clients
 from .engine import Engine, Entity
 from .mapdata import (
@@ -1460,7 +1458,7 @@ class McpServer:
                         ]
                     },
                 )
-            return _error(request_id, -32602, f"unknown resource")
+            return _error(request_id, -32602, "unknown resource")
         if method == "tools/call":
             return self._call_tool(request_id, request.get("params") or {})
         if method is None:

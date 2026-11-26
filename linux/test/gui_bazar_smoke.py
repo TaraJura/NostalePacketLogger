@@ -541,19 +541,20 @@ def main() -> int:
                 f"reload={reload_ok} "
                 f"saved={saved} separators={separators} "
                 f"mode={app.bazar.mode} phase={app.bazar.phase} "
-                f"status={app.bazar_status.get_text()!r}"
+                f"status={app.status.get_text()!r}"
             )
             # The Delete confirmation must not resurface the shortcut, and it
             # must survive the stop log emitted by deleting during a pass.
             app.bazar_selected_name = "bubbl"
             app._bazar_delete_item()
-            delete_status = app.bazar_status.get_text() or ""
+            delete_status = app.status.get_text() or ""
             delete_ok = "deleted Speech Bubble" in delete_status
             result["ok"] = bool(result["ok"] and delete_ok)
             result["detail"] += (
                 f" deleted={delete_ok} delete_status={delete_status!r}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"check exception: {exc!r}"
         app.quit()
         return False

@@ -134,6 +134,7 @@ def main() -> int:
                 f"running={app.bot_running} status={status!r}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"check exception: {exc!r}"
         app.quit()
         return False

@@ -259,6 +259,7 @@ def main() -> int:
                 app.minigame_status.get_text()
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"phase6 exception: {exc!r}"
         app.quit()
         return False

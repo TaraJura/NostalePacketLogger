@@ -168,6 +168,7 @@ def main() -> int:
                 f"reset={result['reset_rows']}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"check exception: {exc!r}"
         app.quit()
         return False

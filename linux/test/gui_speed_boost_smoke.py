@@ -251,6 +251,7 @@ def main() -> int:
             status = app.status.get_text() if app.status is not None else ""
             result["unsupported_status"] = "rejects even +1" in status
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"phase8 exception: {exc!r}"
         app.quit()
         return False

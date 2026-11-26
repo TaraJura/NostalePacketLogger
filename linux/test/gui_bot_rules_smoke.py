@@ -347,6 +347,7 @@ def main() -> int:
                 f"picker_dialog={picker_dialog_ok} lines={lines[-10:]}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"check exception: {exc!r}"
         app.quit()
         return False

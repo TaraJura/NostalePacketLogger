@@ -165,6 +165,7 @@ def main() -> int:
                 f"kill_seen={kill_index is not None}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"check exception: {exc!r}"
         app.quit()
         return False

@@ -59,7 +59,6 @@ def main() -> int:
             app._open_nosmall_picker()
             matches = list(app._nosmall_matches)
             costs = app._nosmall_costs()
-            names = [group.name for group in matches]
             priced = all(
                 app._nosmall_group_cost(group, costs) is not None
                 for group in matches
@@ -134,6 +133,7 @@ def main() -> int:
                 f"no_pets={no_pets} status={app._nosmall_status.get_text()!r}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"check exception: {exc!r}"
         app.quit()
         return False

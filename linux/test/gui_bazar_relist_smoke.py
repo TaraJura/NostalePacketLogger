@@ -95,6 +95,7 @@ def main() -> int:
                 f"bibi={[e.entity_id for e in app.engine.world.entities.values() if e.vnum == 793]}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"check exception: {exc!r}"
         app.quit()
         return False

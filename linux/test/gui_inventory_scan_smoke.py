@@ -443,6 +443,7 @@ def main() -> int:
                 f"fields={result['equipment_fields']!r}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"all exception: {exc!r}"
         app.quit()
         return False

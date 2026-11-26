@@ -217,6 +217,7 @@ def main() -> int:
                 f"status={status!r}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"recover_check exception: {exc!r}"
         app.quit()
         return False

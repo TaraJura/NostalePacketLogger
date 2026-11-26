@@ -219,6 +219,7 @@ def main() -> int:
                 f"lines={server.received[-10:]}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"check_off exception: {exc!r}"
         app.quit()
         return False

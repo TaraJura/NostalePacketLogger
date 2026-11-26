@@ -248,6 +248,7 @@ def main() -> int:
                 f"{server.killed_502} status={app.status.get_text()!r}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"check exception: {exc!r}"
         app.quit()
         return False

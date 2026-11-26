@@ -407,6 +407,7 @@ def main() -> int:
                 f"group={result['group_actions']} saved={result['saved']}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"group exception: {exc!r}"
         app.quit()
         return False

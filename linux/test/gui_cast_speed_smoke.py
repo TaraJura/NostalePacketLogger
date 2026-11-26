@@ -153,6 +153,7 @@ def main() -> int:
             result["no_zeroing_off"] = "CAST|1" not in server.received
             result["scale_one"] = app._cast_speed_scale() == 1.0
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"phase3 exception: {exc!r}"
         app.quit()
         return False

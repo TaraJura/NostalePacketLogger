@@ -23,7 +23,6 @@ from collections.abc import Iterator
 from .protocol import (
     DEFAULT_HOST,
     MAX_LINE_BYTES,
-    Kind,
     Message,
     ProtocolError,
     decode_line,

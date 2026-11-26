@@ -106,7 +106,6 @@ def main() -> int:
     server = NamelessServer()
     app = Application("127.0.0.1", server.port, unique=False)
     result = {"ok": False, "detail": "not checked"}
-    state = {"phase": 0}
 
     def start_bot(name: str) -> None:
         app.path_cells = []
@@ -153,6 +152,7 @@ def main() -> int:
                 f"status={app.status.get_text()!r}"
             )
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"second check exception: {exc!r}"
         app.quit()
         return False

@@ -209,7 +209,7 @@ def start_fake_client(scene) -> int:
         monster_line(421, 5003, *last),
         f"RECV|in 1 Mira - 900 {player[0]} {player[1]} 2 0 0 0",
         "RECV|ncif 3 5001",
-        f"SEND|u_s 0 3 5001",
+        "SEND|u_s 0 3 5001",
         "RECV|su 1 14881134 3 5001 855 7 11 4001 0 0 0 0 1817 0 0 0 4140",
         f"RECV|mv 3 5003 {last[0]} {last[1]} 4",
         "RECV|get 5001 4001",

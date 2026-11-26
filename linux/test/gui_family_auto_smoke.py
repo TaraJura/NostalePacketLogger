@@ -247,6 +247,7 @@ def main() -> int:
             )
             app.family_auto_toggle.set_active(False)
         except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
             result["detail"] = f"phase5 exception: {exc!r}"
         app.quit()
         return False

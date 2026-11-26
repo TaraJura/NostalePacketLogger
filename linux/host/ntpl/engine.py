@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from .bazar import (
     BAZAR_SKILL_WINDOW_S,
     BAZAR_WINDOW_TYPE,
+    BIBI_VNUM,
     BazarError,
     BazarState,
     parse_rc_slist,
