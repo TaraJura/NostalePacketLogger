@@ -135,6 +135,8 @@ def main() -> int:
                 return False
             app.item_info = {
                 2174: ItemInfo(2174, "Speech Bubble", 3000, 0),
+                # A same-name search alias of item 2174.
+                10029: ItemInfo(10029, "Speech Bubble", 3000, 0),
                 1362: ItemInfo(1362, "Soulstone Blessing", 100, 0),
                 2282: ItemInfo(2282, "Angel's Feather", 100, 0),
                 905: ItemInfo(905, "Red Magician Specialist Card", 0, 0),
@@ -142,7 +144,7 @@ def main() -> int:
             app.item_info_loaded = True
             bubble = BazarItem(
                 "bubbl",
-                build_search_packet([2174]),
+                build_search_packet([2174, 10029]),
                 vnum=2174,
                 inv_tab=1,
                 amount=5,
@@ -221,6 +223,35 @@ def main() -> int:
                 and "0 relisting" in info
             )
             result["panel"] = panel_ok
+
+            # A configured item is one catalog row even when its search
+            # group lists several DB vnums with the same name; searching an
+            # alias vnum still finds that row.
+            def catalog_rows():
+                store = app.bazar_items_store
+                return [
+                    store.get_item(position)
+                    for position in range(store.get_n_items())
+                ]
+
+            bubble_rows = [
+                row
+                for row in catalog_rows()
+                if row is not None
+                and row.item is not None
+                and row.item.name == "bubbl"
+            ]
+            app._inventory_search.set_text("10029")
+            app._bazar_render_items()
+            alias_found = any(
+                row is not None
+                and row.item is not None
+                and row.item.name == "bubbl"
+                for row in catalog_rows()
+            )
+            app._inventory_search.set_text("")
+            app._bazar_render_items()
+            result["dedupe"] = len(bubble_rows) == 1 and alias_found
 
             # The ticks live in the Items catalog: ticking enables the
             # searches, unticking removes the row from the Monitor list.
@@ -384,6 +415,7 @@ def main() -> int:
                 bool(result.get(key))
                 for key in (
                     "panel",
+                    "dedupe",
                     "toggles",
                     "hidden",
                     "relist_tick",
@@ -397,7 +429,8 @@ def main() -> int:
             )
             result["ok"] = ok
             result["detail"] = (
-                f"panel={result['panel']} toggles={result['toggles']} "
+                f"panel={result['panel']} dedupe={result['dedupe']} "
+                f"toggles={result['toggles']} "
                 f"hidden={result['hidden']} "
                 f"relist_tick={result['relist_tick']} "
                 f"relist_list={result['relist_list']} "

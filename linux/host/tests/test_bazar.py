@@ -538,6 +538,7 @@ class ControllerTests(unittest.TestCase):
             inv_tab=2,
             amount=5,
             min_price=1,
+            relist=True,
         )
         controller, engine, clock, sent = self._controller(
             [item], character="root1"
@@ -835,6 +836,7 @@ class ControllerTests(unittest.TestCase):
             inv_tab=2,
             amount=5,
             min_price=5000,
+            relist=True,
         )
         watched = BazarItem(
             "flask", build_search_packet([2282]), relist=False
@@ -883,6 +885,7 @@ class ControllerTests(unittest.TestCase):
             inv_tab=2,
             amount=5,
             min_price=43000,
+            relist=True,
         )
         controller, engine, clock, sent = self._controller(
             [item], character="root1"
@@ -920,6 +923,7 @@ class ControllerTests(unittest.TestCase):
             inv_tab=2,
             amount=5,
             min_price=10000,
+            relist=True,
         )
         controller, engine, clock, sent = self._controller(
             [item], character="root1"
@@ -964,6 +968,7 @@ class ControllerTests(unittest.TestCase):
             inv_tab=2,
             amount=5,
             min_price=10000,
+            relist=True,
         )
         controller, engine, clock, sent = self._controller(
             [item], character="root1"
@@ -994,6 +999,7 @@ class ControllerTests(unittest.TestCase):
             inv_tab=2,
             amount=5,
             min_price=43000,
+            relist=True,
         )
         sent: list[str] = []
         logs: list[str] = []
@@ -1032,6 +1038,7 @@ class ControllerTests(unittest.TestCase):
             inv_tab=2,
             amount=5,
             min_price=1,
+            relist=True,
         )
         controller, engine, clock, sent = self._controller(
             [item], character="root1"
@@ -1054,6 +1061,7 @@ class ControllerTests(unittest.TestCase):
             inv_tab=2,
             amount=5,
             min_price=1,
+            relist=True,
         )
         controller, engine, clock, sent = self._controller(
             [item], character="root1"
@@ -1076,6 +1084,7 @@ class ControllerTests(unittest.TestCase):
             inv_tab=0,
             amount=1,
             min_price=1,
+            relist=True,
         )
         controller, engine, clock, sent = self._controller(
             [item], character="root1"
@@ -1105,6 +1114,7 @@ class ControllerTests(unittest.TestCase):
             inv_tab=2,
             amount=5,
             min_price=1,
+            relist=True,
         )
         controller, engine, clock, sent = self._controller(
             [item], character="root1"
@@ -1130,6 +1140,7 @@ class ControllerTests(unittest.TestCase):
             inv_tab=2,
             amount=5,
             min_price=1,
+            relist=True,
         )
         controller, engine, clock, sent = self._controller(
             [item], character="Sérox"
@@ -1152,6 +1163,7 @@ class ControllerTests(unittest.TestCase):
             inv_tab=2,
             amount=5,
             min_price=44000,
+            relist=True,
         )
         controller, engine, clock, sent = self._controller(
             [item], character="root1"
@@ -1187,6 +1199,7 @@ class ControllerTests(unittest.TestCase):
             inv_tab=2,
             amount=5,
             min_price=1,
+            relist=True,
         )
         controller, engine, clock, sent = self._controller([item])
         engine.world.self_id = 5119  # the _response owner id
@@ -1205,7 +1218,7 @@ class ControllerTests(unittest.TestCase):
         # the config/result key but must not leak into user-facing log lines.
         logs: list[str] = []
         clock = Clock()
-        item = BazarItem("bubbl", build_search_packet([2174]))
+        item = BazarItem("bubbl", build_search_packet([2174]), relist=True)
         controller = BazarController(
             lambda packet: True,
             log=logs.append,

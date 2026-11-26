@@ -55,7 +55,7 @@ Item fields that matter for monitoring:
 | `search_packet` | The `c_blist` sent by Monitor; `vnums` are its positive template vnums. A saved group can hold aliases; the controller searches only the vnums whose Item.dat name matches the row's own item. |
 | `vnum` | The exact template vnum, used for relisting and for matching the inventory slot. |
 | `enabled` | **Monitor** tick: the item is searched by Monitor Start. Off keeps the row and its settings but skips every pass. |
-| `relist` | **Relist** tick: the item is in the relist set. Relist Start searches only items with `enabled && relist` and may reprice them. |
+| `relist` | **Relist** tick: the item is in the relist set. Relist Start searches only items with `enabled && relist` and may reprice them. New items default to off (relisting changes real listings); an old file without the field infers it from `min_price > 0`. |
 | `min_price` | The per-unit floor. Relist refuses to go below it; a relist row with no floor is skipped until one is set. |
 | `nos_cost` | NosMall ND cost. A positive value puts the item in the **NosMall** Monitor view and computes gold per ND. |
 | `npc_cost` | NPC gold price. Used for the **NPC resale** view (markup = listing ÷ NPC price) when no ND cost is set. |
@@ -83,6 +83,11 @@ Both write the current per-client `bazar-<pid>.json`; the source file is
 never modified. Both use `load_config`, so a malformed file (bad JSON, a
 duplicate name, more than `MAX_ITEMS`) is rejected before anything changes
 and the error is logged in the Bot log.
+
+Monitor-first additions are monitor-only: **Import NosMall…**, the Item
+database picker, an inventory scan and the `ntpl db nosmall --export`
+catalog write `relist: false`, so nothing joins **Relist Start**'s queue
+until its Relist tick is set in Items.
 
 After an import, use the catalog's **All items / Monitored / Relisting**
 filter to see just the monitoring set. The filter and the search box combine.
@@ -185,15 +190,17 @@ PYTHONPATH=linux/host python3 -m ntpl db nosmall --export ~/bazar-nosmall-all.js
 
 - The list is a virtualized `Gtk.ColumnView` over every Item.dat row (about
   7,805), plus configured rows whose vnums the database does not know and
-  inventory-only vnums. Columns: **Monitor**, **Relist**, **Item**, **Vnum**,
-  **Where**, **Cost**.
+  inventory-only vnums. A configured item appears once, at its own vnum;
+  its other search-group vnums still match the search but do not get a
+  separate row, because both rows would switch the same ticks. Columns:
+  **Monitor**, **Relist**, **Item**, **Vnum**, **Where**, **Cost**.
 - **Where** annotates the live inventory (a bag/slot ×quantity, or “not in
   inventory”). Ticking a DB row that is not configured creates a monitor-only
   item from the DB; the Relist tick also sets floor 1 and, when the item is in
   a bag, its vnum/tab/amount. A bound (negative) vnum or bags 6/7 cannot be
   relisted; their Monitor tick still works.
-- **Search** matches the real name, the configured label, the vnum and the
-  Where text. The filter selects **All items**, **Monitored** or
+- **Search** matches the real name, the configured label, every tracked
+  search vnum and the Where text. The filter selects **All items**, **Monitored** or
   **Relisting**; the info line reads e.g. `7/7805 items · monitored only`.
 - Rendering the whole catalog takes about 0.16 s; a tick schedules an idle
   rebuild of the virtualized store and does not overwrite unsaved editor

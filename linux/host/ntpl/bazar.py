@@ -517,9 +517,10 @@ class BazarItem:
     enabled: bool = True
     #: The relist set: only these items are searched by **Relist Start**
     #: and may change a listing. Monitor-only items keep a floor without
-    #: ever sending `c_reg`. Configs written before this flag existed infer
-    #: it from a positive ``min_price``.
-    relist: bool = True
+    #: ever sending `c_reg`. The default is off: relisting changes real
+    #: listings, so it is opted into per item (the GUI ticks, an explicit
+    #: flag, or an old config's positive ``min_price``).
+    relist: bool = False
 
     @property
     def vnums(self) -> list[int]:

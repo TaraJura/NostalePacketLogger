@@ -197,6 +197,7 @@ def main() -> int:
                 inv_tab=2,
                 amount=5,
                 min_price=43000,
+                relist=True,
                 nos_cost=0.5,
             )
             # An NPC-resale item: gold cost, so it belongs in the second

@@ -113,6 +113,10 @@ def main() -> int:
                 word in added_names
                 for word in ("pet food", "fairy booster", "partner medicine")
             )
+            # Importing the catalog is a monitoring action: no imported
+            # item may join Relist Start's set without a Relist tick.
+            imported_only = [item for item in added if item is not good]
+            no_relist = all(item.relist is False for item in imported_only)
             result["ok"] = bool(
                 matches
                 and priced
@@ -123,6 +127,7 @@ def main() -> int:
                 and kept == [good]
                 and added_priced
                 and no_pets
+                and no_relist
                 and len(added) >= len(matches) - 1
             )
             result["detail"] = (
@@ -130,6 +135,7 @@ def main() -> int:
                 f"pets={pets[:3]} fairy={fairy} armed={armed} "
                 f"kept={[i.name for i in kept]} "
                 f"added={len(added)} added_priced={added_priced} "
+                f"no_relist={no_relist} "
                 f"no_pets={no_pets} status={app._nosmall_status.get_text()!r}"
             )
         except Exception as exc:  # noqa: BLE001

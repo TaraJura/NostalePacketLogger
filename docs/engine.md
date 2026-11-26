@@ -21,7 +21,7 @@ PacketClient ──► Message/Packet ──► Engine ──► WorldState
 | `engine.py` | `WorldState` and packet handlers |
 | `mapdata.py` | `NStcData.NOS` parser, terrain palette, A*, map ranking |
 | `cli.py` | command line actions and confirmations |
-| `gui.py` | GTK4 window: client picker, packet table, Map/Bot tab |
+| `gui.py` + `gui_*.py` | GTK4 window: `gui.py` is the core (client picker, packet table, Bot log, status, drain); one mixin per page: `gui_bazar.py`, `gui_map.py`, `gui_bot.py`, `gui_family.py`, `gui_minigame.py`, `gui_stats.py`; `guicommon.py` holds shared constants/row models |
 | `mcp_server.py` | MCP stdio server + local broker: agent tools and a fan-out of the DLL stream for the GUI/CLI |
 
 ## PacketClient
@@ -329,4 +329,5 @@ the main thread.
 - Confirm actions from the server, never assume.
 - One host connection at a time.
 - The GUI never touches sockets from the GTK thread.
-- The core has no third-party dependencies; PyGObject is only for `gui.py`.
+- The core has no third-party dependencies; PyGObject is only for the
+  `gui*.py` modules.

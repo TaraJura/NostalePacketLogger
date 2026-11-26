@@ -1,4 +1,9 @@
-"""GTK4 front end: packet table + map/path/auto-attack controls.
+"""GTK4 front end: the Application core and the window scaffolding.
+
+The page code lives in one mixin per page (``gui_bazar``, ``gui_map``,
+``gui_bot``, ``gui_family``, ``gui_minigame``, ``gui_stats``); every method
+still runs on the single Application instance. ``guicommon`` holds the
+constants and row models all of them share.
 
 The GTK loop and the socket reader never share a thread: the reader pushes into
 a ``queue.Queue`` and a 50 ms GLib timeout drains it on the main loop. The bot
@@ -10,6 +15,7 @@ never touches GTK from a worker thread.
 import os
 import queue
 from collections import deque
+from collections.abc import Callable
 import threading
 import time
 from pathlib import Path
@@ -272,7 +278,6 @@ class Application(
         self.assist_status_at = 0.0
         # Host `SEND|u_s ...` echoes; they are not key presses.
         self._host_skill_sends: list[tuple[int, float, str]] = []
-        # -- cross-client packet mirroring (Follow frame) ------------------
         # Every attached host publishes its own `walk`/`u_s` to the mirror
         # bus; a follower replays the followed character's actions with its
         # own char id substituted. The server's `mv`/`su` broadcasts are the
@@ -664,9 +669,7 @@ class Application(
             return
         self._set_status(f"copied {what}: {text}")
 
-
     # -- UI -------------------------------------------------------------
-
     def do_activate(self) -> None:
         active = self.get_active_window()
         if active is not None:
@@ -938,7 +941,7 @@ class Application(
         self,
         label: str,
         tooltip: str,
-        entries: tuple[tuple[str, object] | None, ...],
+        entries: tuple[tuple[str, Callable[[], None]] | None, ...],
     ) -> Gtk.MenuButton:
         """A menu button whose popover holds flat action buttons.
 
@@ -1106,167 +1109,6 @@ class Application(
         if self.bot_log_buffer is not None:
             self.bot_log_buffer.set_text("")
             self._bot_log_lines = 0
-
-    # -- NosBazar -------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # -- NosBazar inventory --------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # -- Relist section -------------------------------------------------
-
-
-
-
-
-    # -- relist tracking -------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # -- Monitor item set -------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # -- full item database picker ---------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     def _build_bazar_relist_section(self) -> Gtk.Widget:
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -1811,24 +1653,6 @@ class Application(
         self.bazar_only_priced_checks[source] = only
         return view
 
-
-
-
-
-
-
-
-
-    # -- config import ---------------------------------------------------
-
-
-
-
-
-
-
-
-
     def _build_bazar_items_section(self) -> Gtk.Widget:
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         page.set_margin_top(6)
@@ -2080,56 +1904,6 @@ class Application(
         )
         return page
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # -- minigame -------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     def _install_css(self) -> None:
         provider = Gtk.CssProvider()
         provider.load_from_data(
@@ -2159,125 +1933,6 @@ class Application(
                 display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
             )
 
-    # -- map data -------------------------------------------------------
-
-
-
-
-
-    # -- target filter --------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-    # -- spell rules ----------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # -- configuration --------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # -- redraw scheduling ---------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # -- map drawing ----------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-    # -- map tooltips ---------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     def _on_page_switch(self, _notebook, _page, _page_num) -> None:
         self._ensure_map_loaded()
         if self.map_area is not None:
@@ -2297,10 +1952,6 @@ class Application(
                 )
 
     # -- connection -----------------------------------------------------
-
-
-
-
     def _start_client(self, port: int | None = None) -> None:
         """(Re)start the reader thread against the selected client.
 
@@ -2397,7 +2048,6 @@ class Application(
             GLib.timeout_add(DRAIN_INTERVAL_MS, self._drain)
 
     # -- client selection -----------------------------------------------
-
     def _begin_client_selection(self, auto_single: bool = False) -> None:
         """Scan for running game windows and either attach or show the picker.
 
@@ -3157,11 +2807,7 @@ class Application(
             f"{type(error).__name__}: {error}"
         )
 
-
-
-
     # -- callbacks ------------------------------------------------------
-
     def _append(self, packet: Packet) -> None:
         self.store.append(PacketRow(packet))
         if self.store.get_n_items() > MAX_ROWS:
@@ -3257,8 +2903,6 @@ class Application(
         if getattr(self, "path_info", None) is not None:
             self.path_info.set_text(text)
 
-    # -- bot ------------------------------------------------------------
-
     def _char_id(self) -> int | None:
         return self.char_id or self.engine.world.self_id
 
@@ -3289,41 +2933,6 @@ class Application(
             self._maybe_load_inventory_cache()
             self._save_inventory_cache()
         self._update_char_info()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     def do_shutdown(self) -> None:
         self._closing = True

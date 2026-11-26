@@ -25,10 +25,15 @@ the data layer in [database.md](database.md).
   copy). The Items list uses the same name-aware coverage. The Relist
   section has no Character field: own listings are matched by character id
   (`rc_blist` owner id, `self_id`, or the seller-list owner id) and the name
-  is learned from the self `in 1` spawn (whole DLL log) or `rdlst`; standalone
-  **Select all** / **Unselect all** buttons feed the selection group actions.
+  is learned from the self `in 1` spawn (whole DLL log) or `rdlst`; the
+  relist toolbar is one row (Add from Items / Add… / Actions… / Only
+  relisting), with select/unselect, remove and the bulk switches inside
+  **Actions…**.
   **Items** is a searchable catalog of every Item.dat row (about 7,805)
-  plus configured rows the DB lacks and inventory-only vnums; each row has
+  plus configured rows the DB lacks and inventory-only vnums. A configured
+  item is listed once at its own vnum; its other search vnums still match
+  the search but are not separate rows (they would switch the same ticks).
+  Each row has
   a Monitor/Relist tick (a DB row is created on the first tick; Relist
   fills vnum/tab/stack and floor 1), an **All items / Monitored /
   Relisting** filter narrows the catalog, the selection opens the full
@@ -42,9 +47,13 @@ the data layer in [database.md](database.md).
   and Relist shows only the relist set by default.
   The Character frame shows the detected name above HP/MP. The active user
   config is a 25-item relist list for char `root1` (see the handoff).
-- **Linux host**: 374 unittest cases, 6 GTK4 smokes, 46 fake-server bot
+- **Linux host**: 376 unittest cases, 6 GTK4 smokes, 46 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
-  linux all test-host`, tests above. The host is **0.7.8**: it opens the
+  linux all test-host`, tests above. The host is **0.8.0**; the GTK4 window
+  is split into `gui.py` (core) plus one mixin per page (`gui_bazar.py`,
+  `gui_map.py`, `gui_bot.py`, `gui_family.py`, `gui_minigame.py`,
+  `gui_stats.py`, `guicommon.py`), and a handler exception is logged and
+  skipped instead of stopping the packet pump. It opens the
   bazaar with the client's own shortcut (`c_skill` → `wopen 32`, FrosTale)
   when no Bibi or medal is available, and charges the bazaar's **50-gold
   minimum listing fee** in `c_reg` (the server silently drops a registration
@@ -122,11 +131,11 @@ the data layer in [database.md](database.md).
   pacing, parses the real 15-field `rc_blist` (minimum visible price,
   truncation-aware), keeps old rows across refresh cycles, sorts by profit
   and has an **Only priced** filter. Relist is gated by the relist set
-  (**Relist** tick in Items, **Add from Items**, **Add whole inventory**,
-  **Item database…**, **Remove from relisting**), shown alone by default
-  (**Only relisting**), with Ctrl+click multi-selection and
-  **Group actions…** (select/unselect all, relist/stop all shown or
-  selected); a character name and a positive floor (Relist Start is the only switch).
+  (**Relist** tick in Items; **Add from Items** / **Add…** for whole
+  inventory or the Item database; **Actions…** for select/unselect, remove
+  and the relist/stop bulk actions), shown alone by default
+  (**Only relisting**), with Ctrl+click multi-selection; a positive floor is
+  required (Relist Start is the only switch).
   Each pass asks the seller tab (`c_slist` → **`rc_slist`**) for our own
   listings: one with **nothing sold** is repriced with the in-game Change
   action (`c_mod`, no inventory slot needed, confirmed by the refreshed

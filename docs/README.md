@@ -14,7 +14,7 @@
 | [context.md](context.md) | quick map of the current state, user config/database paths and next likely work |
 | [mcp.md](mcp.md) | expose the engine to an AI agent over MCP: tools, the DLL broker, Claude Code config, security |
 | [autonomous-play.md](autonomous-play.md) | the policy for driving a live character: observe → decide → act → survive, resync, log entity seeding, target/HP/survival thresholds, handover, failure modes |
-| [handoff-2026-11-26.md](handoff-2026-11-26.md) | **latest handoff**: client 0.9.3.3262/DLL 0.3.1, the NosBazar Items catalog (all 7,805 DB rows, Monitor/Relist ticks, filters), config import, name-aware pricing, relist by owner id, and the 17-item monitoring profile |
+| [handoff-2026-11-26.md](handoff-2026-11-26.md) | **latest handoff**: client 0.9.3.3262/DLL 0.3.1, the NosBazar Items catalog (all 7,805 DB rows, Monitor/Relist ticks, filters), config import, name-aware pricing, relist by owner id, the 17-item monitoring profile, and the host 0.8.0 retest (packet-pump fix, UX standardization, GTK4 mixin split) |
 | [handoff-2026-11-19.md](handoff-2026-11-19.md) | previous session: multi-client logs and window numbering, follow mode (loot/attack), strict focus, recovery priority and configured thresholds, route resume/click behavior, the 96 MB log freeze fix |
 | [handoff-2026-11-06.md](handoff-2026-11-06.md) | **read after a reboot**: current state, why Gameforge shows "Ve hře", exact reinjection + auto-attack test procedure |
 | [live-session-2026-11-06.md](live-session-2026-11-06.md) | what was verified on the running client, the bugs fixed, the mechanics learned, open items |
@@ -37,7 +37,7 @@ the host differ, the game's packets do not.
 - **Windows tree (`windows/`)** — the original working implementation. Injector
   + DLL + WinForms GUI, named pipes.
 - **Linux tree (`linux/`)** — MinGW DLL + TCP loopback + Python CLI + GTK4 GUI
-  + state engine. Builds cleanly, **374 host tests pass**, the GTK4 window
+  + state engine. Builds cleanly, **376 host tests pass**, the GTK4 window
   passes six headless smokes (packet window, client picker, multi-client
   locks, Family, Family auto-invite, Minigame), and the DLL has
   been verified against the **live NosTale client** under Wine 11: both hooks

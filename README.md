@@ -74,7 +74,10 @@ and **NPC resale** (gold markup over the NPC price).
 
 One searchable catalog of **every item in the local Item.dat database**
 (about 7,805), plus configured rows the database does not know and
-inventory-only vnums. Each row shows the real name, vnum, where the item is
+inventory-only vnums. A configured item is listed once, at its own vnum;
+its other search vnums still match the search, so an alias cannot be
+mistaken for a second item with independent ticks. Each row shows the real
+name, vnum, where the item is
 in your bags and its known cost, with a **Monitor** tick (search it) and a
 **Relist** tick (put it in the relist set; a new row gets its vnum/tab/stack
 and floor 1). Select a row to edit Name, Search vnums, raw `c_blist`, Item
@@ -92,10 +95,11 @@ actions.
 ![NosBazar Relist: relist set, readiness badges and the floor editor](docs/assets/gui-relist.png)
 
 The relist set, shown alone by default (**Only relisting** is on). Untick a
-row to keep watching it without changing its listing; **Add from Items**,
-**Add whole inventory**, **Item database…**, **Remove from relisting**,
-**Select all** / **Unselect all** (for the selection-based group actions),
-Ctrl+click and **Group actions…**. Set the exact **Item vnum / Tab / Amount**
+row to keep watching it without changing its listing. **Add from Items**
+takes the Items selection; **Add…** holds whole inventory and Item
+database…; **Actions…** holds select/unselect, remove from relisting, and
+relist/stop for the shown or Ctrl+clicked rows. Set the exact
+**Item vnum / Tab / Amount**
 and a positive **Min price**; the badge
 reads `ready` / `needs floor` / `needs vnum/tab`. The character name is
 detected automatically (no field to fill) and own listings are matched by
@@ -207,8 +211,8 @@ DLL version.
 
 ```bash
 sudo apt install g++-mingw-w64-i686 xvfb          # once
-make -C linux all test-host                       # DLL + injector + 363 unit tests
-make -C linux gui-test bot-test                   # 6 GTK4 smokes, 44 fake-server smokes
+make -C linux all test-host                       # DLL + injector + 376 unit tests
+make -C linux gui-test bot-test                   # 6 GTK4 smokes, 46 fake-server smokes
 
 linux/scripts/inject.sh        # optional: the GUI picker can inject too
 linux/scripts/gui.sh           # one window per client; run again for another
@@ -246,7 +250,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-Host **0.7.8** (Linux): 374 unit tests, 6 GTK4 window smokes and 46
+Host **0.8.0** (Linux): 376 unit tests, 6 GTK4 window smokes and 46
 fake-server bot smokes pass, and the real injector has been run against the
 live NosTale client under Wine 11 — both hooks `ACTIVE`, movement through the
 client's own MoveTo, auto-attack confirmed by the server's `su`, and the

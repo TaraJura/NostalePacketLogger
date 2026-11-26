@@ -94,7 +94,7 @@ RESALE_ITEMS = (
 #: status bar and the per-client file).
 DEMO_LOG_LINES = (
     "NosTale [#1] · PID 1512 · connected to 127.0.0.1:47821",
-    "ntpl 0.3.0 | hooks recv=ACTIVE send=ACTIVE skill=ACTIVE",
+    "ntpl 0.3.1 | hooks recv=ACTIVE send=ACTIVE skill=ACTIVE",
     "loaded map 2628 (170x150) · 19 NosBazar item(s)",
     "path ready · 23 cells · 3 waypoints",
     "auto-attack on · retaliate on · pickup on · recover 50/30",
@@ -119,6 +119,7 @@ def demo_items():
             min_price=0,
             nos_cost=cost,
             enabled=True,
+            relist=False,
         )
         for name, vnums, cost, _price, _seller in BAZAR_ITEMS
     ]
@@ -135,6 +136,7 @@ def resale_items():
             min_price=0,
             npc_cost=npc,
             enabled=True,
+            relist=False,
         )
         for name, vnum, amount, npc, _price, _seller in RESALE_ITEMS
     ]

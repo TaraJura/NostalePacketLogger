@@ -56,6 +56,7 @@ def main() -> int:
                 inv_tab=2,
                 amount=5,
                 min_price=5000,
+                relist=True,
                 nos_cost=0.5,
             )
             app.bazar.set_items([item], character="root1", refresh=30)

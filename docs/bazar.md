@@ -55,7 +55,10 @@ full-width section: **Items**, **Relist**, **Monitor** and
    second time before the refresh interval.
 3. Open the **Items** section. It is a searchable catalog of **every item
    in the local Item.dat database** (about 7,805), plus configured rows the
-   database does not know and inventory-only vnums. Each row shows the real
+   database does not know and inventory-only vnums. A configured item
+   appears once, at its own vnum; its other search-group vnums still match
+   the search box but do not get a second row (both rows would switch the
+   same item). Each row shows the real
    name, vnum, where it is in your bags and its known cost, and has two
    ticks:
    - **Monitor** searches the item during Monitor Start;
@@ -75,10 +78,11 @@ full-width section: **Items**, **Relist**, **Monitor** and
    it is cached for later attaches).
 4. In **Relist**, the list shows only the relist set by default (turn
    **Only relisting** off to browse every configured item). Untick a row to
-   stop changing that listing while the Monitor keeps watching it;
-   **Add from Items** takes the Items selection, **Add whole inventory** and
-   **Item database…** bulk-add, and **Remove from relisting** clears the
-   selected row. Set the selected item's **Item vnum**, **Tab**, **Amount**
+   stop changing that listing while the Monitor keeps watching it.
+   **Add from Items** takes the Items selection, **Add…** holds **Add whole
+   inventory** and **Item database…**, and **Actions…** holds **Remove from
+   relisting** plus the selection and bulk switches. Set the selected
+   item's **Item vnum**, **Tab**, **Amount**
    and a positive **Min price** (the per-unit floor), then **Save relist
    settings**. There is no character field: the host recognises your own
    listings by character id (or the name from the client's spawn/party
@@ -338,21 +342,21 @@ the **Items** list — shows the real name instead:
 The **Relist** section is the setup and control surface. The list shows every
 configured item with a **Relist** tick: ticked rows are the *relist set* that
 **Relist Start** searches and may reprice, while unticked rows stay
-configured and monitored but are never touched. **Clicking the only selected
+configured and monitored but are never touched. New items (an import, an
+inventory scan, a catalog tick) start with the tick off, so only an explicit
+Relist tick can change a real listing. **Clicking the only selected
 row again unselects it** (no Ctrl needed); Ctrl+click builds a group. A tick
 writes the config immediately; unticking keeps the item, its floor and its
 Monitor state, so re-ticking restores the previous setup. The list shows
 only the relist set by default (**Only relisting** is on); turn it off to
-browse every configured item. **Add from Items** uses the selection in the
-Items section, **Add whole inventory** and **Item database…** bulk-add,
-**Remove from relisting** clears the selected row. **Select all** /
-**Unselect all** next to them
-select or clear every visible row, so a selection action can follow without
-Ctrl+click. Rows support **Ctrl+click** multi-selection;
-**Group actions…** applies one action to the whole visible list or to the
-selected rows: **Select all shown**, **Unselect all**, **Relist all shown**,
-**Stop relisting all shown**, **Relist selected**, **Stop relisting
-selected**. Each group action writes the config once and logs one line.
+browse every configured item. The toolbar stays on one row: **Add from
+Items** uses the selection in the Items section, **Add…** holds **Add whole
+inventory** and **Item database…**, and **Actions…** holds **Select all
+shown**, **Unselect all**, **Remove from relisting**, **Relist all shown**,
+**Stop relisting all shown**, **Relist selected** and **Stop relisting
+selected**. A group action writes the config once and logs one line. Rows
+support **Ctrl+click** multi-selection, and the popover entries apply to
+the rows shown or selected.
 Ticking a single row updates that row in place and every render restores
 the scroll position, so working down a long list never jumps back to the
 top. The badge explains a ticked item that still

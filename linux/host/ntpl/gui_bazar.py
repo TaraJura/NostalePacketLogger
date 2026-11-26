@@ -1204,10 +1204,17 @@ class BazarPageMixin:
                     cost_text = f"{known:g} ND"
                 elif info is not None and info.npc_price > 0:
                     cost_text = f"{info.npc_price:,} g"
+            # A configured item's other search vnums still find its row.
+            tracked_text = (
+                " ".join(str(v) for v in tracked_vnums([item], names))
+                if item is not None
+                else ""
+            )
             haystack = " ".join(
                 (
                     display,
                     str(vnum or ""),
+                    tracked_text,
                     item.name if item is not None else "",
                     location,
                 )
@@ -1231,6 +1238,11 @@ class BazarPageMixin:
             if vnum <= 0:
                 continue
             item = lookup.get(vnum)
+            if item is not None and vnum != self._bazar_row_vnum(item):
+                # A search alias of a configured item. It has no ticks of
+                # its own: both rows would switch the same item, so the
+                # item is listed once at its representative vnum.
+                continue
             if item is not None:
                 seen_items.add(id(item))
             group = groups.get(vnum, [])
@@ -3108,6 +3120,10 @@ class BazarPageMixin:
             amount=5,
             min_price=0,
             nos_cost=cost,
+            enabled=True,
+            # Importing the NosMall catalog is a monitoring action; items
+            # join the relist set only through a Relist tick.
+            relist=False,
         )
 
     def _nosmall_add(self, group) -> None:

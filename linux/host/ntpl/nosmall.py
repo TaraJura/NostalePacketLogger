@@ -546,6 +546,9 @@ def bazar_items(
                 min_price=0,
                 nos_cost=cost,
                 enabled=True,
+                # A catalog export is monitor-only; relisting is opted into
+                # per item with the Relist tick.
+                relist=False,
             )
         )
     return items

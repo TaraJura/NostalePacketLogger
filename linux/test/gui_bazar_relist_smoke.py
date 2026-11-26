@@ -54,6 +54,7 @@ def main() -> int:
                 amount=5,
                 min_price=5000,
                 nos_cost=0.5,
+                relist=True,
             )
             app.bazar.set_items([item], character="root1", refresh=30)
             app.bazar_character_entry.set_text("root1")
