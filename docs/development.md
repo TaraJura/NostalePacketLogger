@@ -11,6 +11,27 @@ CLAUDE.md             working context for Claude Code
 README.md             entry point
 ```
 
+### The GTK4 window
+
+`gui.py` holds the application core: window and tab scaffolding, the packet
+table, the Bot log, the status bar, client selection/attach and the drain
+loop. Each page is a mixin in its own module, and every method still runs on
+the one `Application` instance, so a page uses `self` exactly like the core:
+
+| Module | Contents |
+|---|---|
+| `gui.py` | `Application` (core methods), `run_gui`; re-exports the constants tests use |
+| `guicommon.py` | shared constants, the `Gtk` row models (`PacketRow`, `DpsRowView`, `BazarItemRowView`) and `_column` |
+| `gui_bazar.py` | NosBazar: Items catalog, Relist, Monitor, pickers, config import |
+| `gui_map.py` | Map/Bot page, targets, spell rules, map drawing, travel, speed and cast controls |
+| `gui_bot.py` | bot loop, follow, mirror bus, packet tracking |
+| `gui_family.py` | Family page and auto-invite |
+| `gui_minigame.py` | Minigame page |
+| `gui_stats.py` | Stats DPS meter |
+
+New UI goes into the page's mixin; only scaffolding shared by every page
+belongs in `gui.py`.
+
 ## Build matrix
 
 | Target | Command | Output |

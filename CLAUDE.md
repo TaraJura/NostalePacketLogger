@@ -176,9 +176,12 @@ Two discovery/injection safety rules (both live-tested 2026-11-18):
   `botconfig.py`
   (JSON bot configuration: target filters, spell rules, validation and atomic
   save/load), `cli.py` (`walk` waits for the server's `tp`/`mv`; `cast` waits
-  for `su`), `gui.py` (packet table + Map/Bot + Bot log + NosBazar tabs;
-  non-unique windows, one per client, per-client attach locks and a
-  client-specific title; the bazar tab saves `bazar-<pid>.json`), `mcp_server.py` (MCP
+  for `su`), `gui.py` (the core: window/tab scaffolding, packet table, Bot log,
+  status bar, client picker/attach and the drain loop; non-unique windows, one
+  per client, per-client attach locks and a client-specific title) with one
+  mixin per page: `gui_bazar.py`, `gui_map.py`, `gui_bot.py`, `gui_family.py`,
+  `gui_minigame.py`, `gui_stats.py`, and `guicommon.py` (shared constants and
+  row models); the bazar tab saves `bazar-<pid>.json`, `mcp_server.py` (MCP
   stdio server + `Broker`: the broker owns the DLL's one host connection and
   fans out `RECV`/`SEND`/`STATUS` to the GUI/CLI on 47900; tools read
   `WorldState` and act through the same commands). Standard library only
@@ -326,7 +329,8 @@ Two discovery/injection safety rules (both live-tested 2026-11-18):
 - **GUI text:** explanations never sit in the layout. Every section, frame,
   tab and dialog gets a compact **?** button whose popover says what it does
   and how it works — use `_help_button()` and `_frame(..., help_text=...)` in
-  `gui.py`. Keep live status values and short empty states; keep control
+  `gui.py`. Put a page's UI in its mixin (`gui_<page>.py`), not in the core.
+  Keep live status values and short empty states; keep control
   tooltips to one line. `gui_smoke.py` enforces this, so update the help text
   with every new feature instead of adding a paragraph.
 - **Terms of service:** Gameforge prohibits automation. The owner accepts the
