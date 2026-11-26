@@ -234,8 +234,7 @@ class ProductionMinigameTests(unittest.TestCase):
             "mg 4 4 3125 4",
         )
         self.assertEqual(
-            build_production_close_packet(QUARRY_VNUM, 4),
-            "mg 2 4 3125",
+            build_production_close_packet(), "mg 2 -1 -1"
         )
 
     def test_engine_parses_mlo_info(self):

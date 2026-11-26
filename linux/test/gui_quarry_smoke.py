@@ -43,6 +43,7 @@ class QuarryServer:
         self.port = self.listener.getsockname()[1]
         self.received: list[str] = []
         self.points = 2000
+        self.claims = 0
         self.connection = None
         self.stop = threading.Event()
         threading.Thread(target=self._run, daemon=True).start()
@@ -87,7 +88,12 @@ class QuarryServer:
                         return
                 elif text.startswith("SEND|mg 4 "):
                     # The claim charges 100 points and grants item 2193 x2.
+                    # The second auto claim leaves 50 points so the loop's
+                    # next check stops on the exhausted balance.
+                    self.claims += 1
                     self.points = max(0, self.points - 100)
+                    if self.claims == 3:
+                        self.points = 50
                     try:
                         self.connection.sendall(
                             (
@@ -230,16 +236,15 @@ def main() -> int:
                 result["ok"] = False
                 app.quit()
                 return False
-            # Leave the raid, then run the Auto loop twice. Each claim costs
+            # Leave the raid, then run the loop twice. Each claim costs
             # 100 points; the fake server tracks the balance.
             app.engine.world.raid_members.clear()
             app.engine.world.minigame.points = 1900
-            app.quarry_auto_spin.set_value(2)
-            # Test-only shortcut: the real gap is 120 s (the server refuses a
-            # second reward sooner); the smoke needs two runs in seconds.
+            # Test-only shortcut: the real gap is 35 s (the server refuses
+            # a second reward sooner); the smoke needs two runs in seconds.
             app._quarry_gap = lambda: 5
             state["auto_before"] = len(sent_mg())
-            app._quarry_auto_start()
+            app._quarry_start()
             GLib.timeout_add(2500, check_countdown)
             GLib.timeout_add(12000, check_auto)
         except Exception as exc:  # noqa: BLE001
@@ -268,11 +273,11 @@ def main() -> int:
                 "SEND|mg 1 4 3125",
                 "SEND|mg 3 4 3125 16000 16000",
                 "SEND|mg 4 4 3125 4",
-                "SEND|mg 2 4 3125",
+                "SEND|mg 2 -1 -1",
                 "SEND|mg 1 4 3125",
                 "SEND|mg 3 4 3125 16000 16000",
                 "SEND|mg 4 4 3125 4",
-                "SEND|mg 2 4 3125",
+                "SEND|mg 2 -1 -1",
             ]
             status = app.quarry_status.get_text()
             app._quarry_points_tick()
@@ -283,8 +288,9 @@ def main() -> int:
             result["auto"] = (
                 auto_packets == expected
                 and app.quarry_auto_running is False
-                and "auto complete: 2 claim(s)" in status
-                and "1,700" in label
+                and "auto stopped after 2 claim(s)" in status
+                and "50" in status
+                and "50" in label
                 and result.get("countdown") is True
                 and app.quarry_countdown_label.get_text() == ""
             )

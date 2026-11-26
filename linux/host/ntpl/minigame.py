@@ -114,15 +114,15 @@ def build_production_gift_packet(
     return f"mg 4 {int(slot)} {int(vnum)} {int(level)}"
 
 
-def build_production_close_packet(
-    vnum: int = QUARRY_VNUM, slot: int = 1
-) -> str:
-    """Close the finished minigame before another run.
+def build_production_close_packet() -> str:
+    """Dismiss the result window with the client's Stop (Storno).
 
-    The client sends `mg 2 <slot> <vnum>` when the result window is
-    dismissed (live 2026-11-26: the user's Storno/Stop button).
+    Live 2026-11-26: the Stop button sends `mg 2 -1 -1` and returns the
+    window to its Start Game screen. `mg 2 <slot> <vnum>` is the client's
+    window close (the X), which makes the dialog disappear and leaves the
+    game window out of sync, so it must not be used between runs.
     """
-    return f"mg 2 {int(slot)} {int(vnum)}"
+    return "mg 2 -1 -1"
 
 #: Key names the DLL understands besides a single letter or digit.
 _KEY_ALIASES = {

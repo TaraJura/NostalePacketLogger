@@ -631,17 +631,16 @@ class Application(
         self.quarry_reward_seen = 0
         self.quarry_claim_level = 0
         self.quarry_reward_before: int | None = None
-        # Auto: repeat the claim until the run count or the production points
-        # run out (20 runs = the 2,000-point daily budget at 100 per claim).
+        # Auto: Play repeats the claim until the production points run out
+        # (100 per claim, 2,000 a day).
         self.quarry_auto_running = False
-        self.quarry_auto_max = 20
         self.quarry_auto_done = 0
-        self.quarry_auto_timer: int | None = None
         #: Consecutive runs the server ignored (a reward cooldown); reset on
         #: a confirmed claim.
         self.quarry_auto_retries = 0
         #: Monotonic time of the next Auto claim (0 while a claim is
-        #: running or Auto is idle); drives the UI countdown.
+        #: running or Auto is idle); drives the UI countdown and the
+        #: claim start in the 1 s Minigame tick.
         self.quarry_auto_next_at = 0.0
         self.quarry_points_before: int | None = None
         self.quarry_deadline = 0.0
