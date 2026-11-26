@@ -26,18 +26,22 @@ the data layer in [database.md](database.md).
   (`rc_blist` owner id, `self_id`, or the seller-list owner id) and the name
   is learned from the self `in 1` spawn (whole DLL log) or `rdlst`; standalone
   **Select all** / **Unselect all** buttons feed the selection group actions.
-  **Items** is one searchable list of every available item (configured rows
-  + inventory templates), each row with Monitor/Relist ticks; the selection
-  opens the full editor, **Add to Monitor/Relist** applies to a Ctrl+click
-  selection, Import… covers NosMall and the full Item.dat database, and ⋯
-  holds rescan/price-all/bulk switches. The Monitor left panel lists only
+  **Items** is a searchable catalog of every Item.dat row (about 7,805)
+  plus configured rows the DB lacks and inventory-only vnums; each row has
+  a Monitor/Relist tick (a DB row is created on the first tick; Relist
+  fills vnum/tab/stack and floor 1), the selection opens the full editor,
+  **Add to Monitor/Relist** applies to a Ctrl+click selection, Import…
+  covers NosMall, the full Item.dat picker and saved config files (add or
+  replace), and ⋯ holds rescan/price-all/bulk switches. A curated 17-item
+  profitable-NosMall monitoring config is
+  `~/.config/ntpl/bazar-monitor-15.json`. The Monitor left panel lists only
   monitored items (one compact toolbar: Add from Items / Add… / Actions…),
   and Relist shows only the relist set by default.
   The Character frame shows the detected name above HP/MP. The active user
   config is a 25-item relist list for char `root1` (see the handoff).
-- **Linux host**: 374 unittest cases, 6 GTK4 smokes, 45 fake-server bot
+- **Linux host**: 374 unittest cases, 6 GTK4 smokes, 46 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
-  linux all test-host`, tests above. The host is **0.7.6**: it opens the
+  linux all test-host`, tests above. The host is **0.7.7**: it opens the
   bazaar with the client's own shortcut (`c_skill` → `wopen 32`, FrosTale)
   when no Bibi or medal is available, and charges the bazaar's **50-gold
   minimum listing fee** in `c_reg` (the server silently drops a registration
@@ -190,15 +194,19 @@ the data layer in [database.md](database.md).
 3. Live-test **Mirror movement & spells** with two of our own clients: both
    GUIs publish to `~/.cache/ntpl/mirror`; the follower should replay the
    leader's walks and spells with its own char id. Fake-server verified.
-4. Live-test `c_reg` on a cheap item; no server acknowledgement is captured,
+4. Try the 17-item profitable NosMall monitoring config
+   (`~/.config/ntpl/bazar-monitor-15.json`) on a live client: Items →
+   Import… → Replace with config…, then Monitor Start; the pass takes
+   about 45 s at the default 2.5 s pacing.
+5. Live-test `c_reg` on a cheap item; no server acknowledgement is captured,
    so relist is currently fake-server verified only.
-5. Grow the NosMall ND price map: the importer now lists only priced,
+6. Grow the NosMall ND price map: the importer now lists only priced,
    non-pet groups (18 today). Client COST blocks do not contain the web-shop
    price; add an item with **New**, set its Cost, then reopen the picker, or
    extend `known_reference_costs`.
-6. If desired: a CLI `ntpl bazar` monitor and a read-only MCP bazar tool
+7. If desired: a CLI `ntpl bazar` monitor and a read-only MCP bazar tool
    using the same controller; a price-map importer.
-7. Remember the UI preferences: never clear the table at a cycle start;
+8. Remember the UI preferences: never clear the table at a cycle start;
    profit-sorted with Only priced; cp1252/latin-1 name decoding.
 
 ## Commands

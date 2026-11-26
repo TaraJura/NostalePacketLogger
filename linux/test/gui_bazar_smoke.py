@@ -420,6 +420,18 @@ def main() -> int:
                 label = getattr(row, "name_label", None)
                 return None if label is None else label.get_text()
 
+            def catalog_label(item_name):
+                store = app.bazar_items_store
+                for position in range(store.get_n_items()):
+                    candidate = store.get_item(position)
+                    if (
+                        candidate is not None
+                        and candidate.item is not None
+                        and candidate.item.name == item_name
+                    ):
+                        return candidate.display_name
+                return None
+
             # Configuration -> Reload names must drop the one-shot latch and
             # start a fresh lookup (a stale non-empty database otherwise stays
             # cached until a restart).
@@ -449,7 +461,7 @@ def main() -> int:
             app.bazar_relist_form["min"].set_value(9876)
             late_cell = first_item_cell()
             late_before = None if late_cell is None else late_cell.get_text()
-            items_before = row_name(app.bazar_items_list.get_first_child())
+            items_before = catalog_label("bubbl")
             relist_before = row_name(
                 app.bazar_relist_list.get_first_child()
             )
@@ -458,7 +470,7 @@ def main() -> int:
             )
             late_cell = first_item_cell()
             late_after = None if late_cell is None else late_cell.get_text()
-            items_after = row_name(app.bazar_items_list.get_first_child())
+            items_after = catalog_label("bubbl")
             relist_after = row_name(
                 app.bazar_relist_list.get_first_child()
             )

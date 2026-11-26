@@ -70,19 +70,20 @@ and **NPC resale** (gold markup over the NPC price).
 
 #### Items
 
-![NosBazar Items: every available item with Monitor/Relist ticks and the editor](docs/assets/gui-bazar-items.png)
+![NosBazar Items: the Item.dat catalog with Monitor/Relist ticks and the editor](docs/assets/gui-bazar-items.png)
 
-One searchable list of every item available to you: the configured bazaar
-rows plus every slot the client reports (Main/Etc, Equip, bags 6/7), with the
-Item.dat name, bag/slot, vnum and stack. Each row has a **Monitor** tick
-(search it) and a **Relist** tick (put it in the relist set; a new inventory
-row is added with its tab/stack and floor 1). Select a row to edit Name,
-Search vnums, raw `c_blist`, Item vnum, Tab, Amount, Min price, the cost type
-(which chooses the Monitor view) and the advanced `c_reg` constants.
-**Add to Monitor / Add to Relist** apply to the Ctrl+click selection;
-**Import…** opens the NosMall catalog or the full Item.dat database; **⋯**
-holds Rescan/Price all/Add whole inventory, the bulk Monitor/Relist switches
-and the selection actions.
+One searchable catalog of **every item in the local Item.dat database**
+(about 7,805), plus configured rows the database does not know and
+inventory-only vnums. Each row shows the real name, vnum, where the item is
+in your bags and its known cost, with a **Monitor** tick (search it) and a
+**Relist** tick (put it in the relist set; a new row gets its vnum/tab/stack
+and floor 1). Select a row to edit Name, Search vnums, raw `c_blist`, Item
+vnum, Tab, Amount, Min price, the cost type (which chooses the Monitor
+view) and the advanced `c_reg` constants. **Add to Monitor / Add to Relist**
+apply to the Ctrl+click selection; **Import…** opens the NosMall catalog,
+the full Item.dat picker, or imports a saved bazar config (add or replace);
+**⋯** holds Rescan/Price all/Add whole inventory, the bulk Monitor/Relist
+switches and the selection actions.
 
 #### Relist
 
@@ -241,7 +242,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-Host **0.7.6** (Linux): 374 unit tests, 6 GTK4 window smokes and 45
+Host **0.7.7** (Linux): 374 unit tests, 6 GTK4 window smokes and 46
 fake-server bot smokes pass, and the real injector has been run against the
 live NosTale client under Wine 11 — both hooks `ACTIVE`, movement through the
 client's own MoveTo, auto-attack confirmed by the server's `su`, and the

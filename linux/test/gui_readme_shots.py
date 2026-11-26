@@ -479,6 +479,10 @@ def main() -> int:
             return True
         app._bazar_set_items(demo_items())
         app._bazar_show_section("items")
+        # The catalog holds all 7,805 DB rows; filter to the demo item so
+        # the selected row is on screen for the capture.
+        if app._inventory_search is not None:
+            app._inventory_search.set_text("Wings of Friendship")
         app._bazar_select_item("Wings of Friendship")
         form = app.bazar_form
         if form:

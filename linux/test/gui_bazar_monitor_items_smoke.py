@@ -169,23 +169,44 @@ def main() -> int:
         return False
 
     def item_rows() -> dict[str, object]:
-        """Unified Items rows keyed by item name or ``vnum N``."""
+        """Catalog rows keyed by item name or ``vnum N``."""
         found: dict[str, object] = {}
-        listbox = app.bazar_items_list
-        child = listbox.get_first_child() if listbox is not None else None
-        while child is not None:
-            key = getattr(child, "item_name", None) or (
-                f"vnum {getattr(child, 'slot_vnum', 0)}"
+        store = app.bazar_items_store
+        for position in range(store.get_n_items()):
+            row = store.get_item(position)
+            if row is None:
+                continue
+            key = (
+                row.item.name
+                if row.item is not None
+                else f"vnum {row.vnum}"
             )
-            found[key] = child
-            child = child.get_next_sibling()
+            found[key] = row
         return found
 
     def select_item_rows(*keys: str) -> None:
-        app.bazar_items_list.unselect_all()
-        found = item_rows()
+        selection = app.bazar_items_selection
+        store = app.bazar_items_store
+        selection.unselect_all()
         for key in keys:
-            app.bazar_items_list.select_row(found[key])
+            for position in range(store.get_n_items()):
+                row = store.get_item(position)
+                if row is None:
+                    continue
+                row_key = (
+                    row.item.name
+                    if row.item is not None
+                    else f"vnum {row.vnum}"
+                )
+                if row_key == key:
+                    selection.select_item(position, False)
+                    break
+
+    def toggle_row(row, field: str, active: bool) -> None:
+        config_field = "enabled" if field == "monitor" else "relist"
+        app._bazar_apply_row_flags(
+            [(row.item, row.vnum, row.slot)], config_field, active
+        )
 
     def check_panel() -> bool:
         try:
@@ -201,10 +222,10 @@ def main() -> int:
             )
             result["panel"] = panel_ok
 
-            # The ticks live in the Items list: ticking enables the
+            # The ticks live in the Items catalog: ticking enables the
             # searches, unticking removes the row from the Monitor list.
-            getattr(items["stone"], "monitor_check").set_active(True)
-            getattr(items["bubbl"], "monitor_check").set_active(False)
+            toggle_row(items["stone"], "monitor", True)
+            toggle_row(items["bubbl"], "monitor", False)
             GLib.timeout_add(250, check_toggles)
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"panel exception: {exc!r}"
@@ -233,7 +254,7 @@ def main() -> int:
             # A Relist tick on an unconfigured inventory row creates the
             # item with the slot's tab/stack and floor 1.
             found = item_rows()
-            getattr(found["vnum 2282"], "relist_check").set_active(True)
+            toggle_row(found["vnum 2282"], "relist", True)
             GLib.timeout_add(250, check_relist_tick)
         except Exception as exc:  # noqa: BLE001
             result["detail"] = f"toggle exception: {exc!r}"

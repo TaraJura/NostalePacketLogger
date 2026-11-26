@@ -53,23 +53,24 @@ full-width section: **Items**, **Relist**, **Monitor** and
    pass. A visible Bibi wins over the medal; a stale unknown NPC id is only
    tried when no medal is in the inventory, and the medal is never used a
    second time before the refresh interval.
-3. Open the **Items** section. It is the one searchable list of every item
-   available to you: each configured bazaar row plus every inventory
-   template from the live `inv`/`ivn` stream (backfilled from the DLL log
-   after a late attach), with the real Item.dat name, vnum, bag/slot and
-   stack. Each row has two ticks:
+3. Open the **Items** section. It is a searchable catalog of **every item
+   in the local Item.dat database** (about 7,805), plus configured rows the
+   database does not know and inventory-only vnums. Each row shows the real
+   name, vnum, where it is in your bags and its known cost, and has two
+   ticks:
    - **Monitor** searches the item during Monitor Start;
-   - **Relist** puts it in the relist set (a new inventory row is created
-     with its vnum/tab/stack and a floor of 1).
-   Ticking an inventory row that is not configured yet adds it first.
-   Select a row to edit it in the editor on the right; **Add to Monitor** /
-   **Add to Relist** apply to a Ctrl+click selection. **Import…** adds
-   NosMall catalog groups or opens the full Item.dat picker; **⋯** holds
-   **Rescan inventory**, **Price all inventory**, **Add whole inventory**,
-   the bulk Monitor/Relist switches and the selection actions. If the list
-   is empty or marked **partial**, the login dump was missed: relog once
-   with the window open and it fills automatically (then it is cached for
-   later attaches).
+   - **Relist** puts it in the relist set (a new row is created with its
+     vnum/tab/stack and a floor of 1).
+   Ticking a DB row that is not configured yet adds it first. Select a row
+   to edit it in the editor on the right; **Add to Monitor** / **Add to
+   Relist** apply to a Ctrl+click selection. **Import…** adds NosMall
+   catalog groups, opens the full Item.dat picker, or imports a saved bazar
+   config (add or replace — see [Monitoring config](#monitoring-config)).
+   **⋯** holds **Rescan inventory**, **Price all inventory**, **Add whole
+   inventory**, the bulk Monitor/Relist switches and the selection actions.
+   If the inventory is missing or marked **partial**, the login dump was
+   missed: relog once with the window open and it fills automatically (then
+   it is cached for later attaches).
 4. In **Relist**, the list shows only the relist set by default (turn
    **Only relisting** off to browse every configured item). Untick a row to
    stop changing that listing while the Monitor keeps watching it;
@@ -213,11 +214,13 @@ The bazaar/entity state lives in `WorldState.bazar`; inventory slots are
 
 ## Items list
 
-![NosBazar Items: every available item with Monitor/Relist ticks and the editor](assets/gui-bazar-items.png)
+![NosBazar Items: the Item.dat catalog with Monitor/Relist ticks and the editor](assets/gui-bazar-items.png)
 
-The **Items** section is one list: the configured bazaar rows plus every
-distinct inventory template, filtered by the search box. The engine keeps
-**every** bag the server sends, not only the Main/Etc bags relisting uses.
+The **Items** section is a virtualized catalog of **every Item.dat row**
+(about 7,805) plus configured rows the database does not know and
+inventory-only vnums, filtered by the search box. The Where column annotates
+a row from the live inventory; the engine keeps **every** bag the server
+sends, not only the Main/Etc bags relisting uses.
 Live captures (2026-11-20) show:
 
 ```
@@ -247,22 +250,46 @@ ivn 0 30.885.0.0.0.0.0                     # one equipment slot
   item already configured with a cost. A row still reading `item 1092` means
   neither source had it: run
   `PYTHONPATH=linux/host python3 -m ntpl db build` or set `NTPL_NSGTD`.
-- Rows are grouped by `abs(vnum)`: one row per template, never a duplicate
-  of an item already configured. The representative slot is Main, then Etc,
-  then Equip; its quantity becomes the listing `amount` (clamped to 1,000),
-  and its bag becomes `inv_tab` when it is 0/1/2 with a positive vnum. A
-  negative-only group is monitor-only (no tab, amount 1).
-- The **Monitor** tick of an unconfigured row adds the item (monitor-only);
-  the **Relist** tick adds it with its vnum/tab/amount, enables it and sets
-  floor 1. Bound negative vnums and bags 6/7 have the Relist tick disabled
-  (their Monitor tick still works). A configured row's ticks only switch
-  `enabled`/`relist`, keeping the rest of its settings.
+- Catalog rows follow the database: one row per Item.dat vnum, sorted by the
+  real name. A configured row's search vnums map its ticks onto those rows;
+  an inventory slot only annotates the row with Where and supplies the
+  tab/amount when a tick creates the item. Configured rows whose vnums the
+  database lacks (and DB-less inventory vnums) get their own rows.
+- The **Monitor** tick of an unconfigured row creates a monitor-only item
+  from the DB (name, vnum, known cost); the **Relist** tick also sets floor
+  1 and, when the item is in a bag, its vnum/tab/amount. Bound negative
+  vnums and bags 6/7 have the Relist tick disabled (their Monitor tick still
+  works). A configured row's ticks only switch `enabled`/`relist`, keeping
+  the rest of its settings.
 - A new item gets a known ND cost when the curated map or the configured list
   has one; otherwise a positive Item.dat NPC price becomes **NPC gold** cost,
   so the profit column still works. Both can be cleared in the editor.
 - **Price all inventory** (in the ⋯ menu) adds every distinct inventory item
   and starts **Monitor** (search only). It never changes listings; use
   **Relist Start** for that.
+
+## Monitoring config
+
+The monitored set **is** the bazar config: an item is searched when
+`enabled` is true and relisted when `relist` is true. **Items → Import…**
+has two config entries:
+
+- **Import config (add)…** merges the file's items into this window,
+  skipping duplicates by name or vnum; the current items and their relist
+  floors stay.
+- **Replace with config…** swaps the whole list after a confirmation — use
+  it to switch to a pure monitoring set.
+
+An old file without the `relist` flag loads as monitor-only (a positive
+`min_price` still infers relisting). The Bibi id, character and refresh stay
+this client's; the import writes this window's `bazar-<pid>.json` and never
+modifies the source file.
+
+A curated monitoring config from the earlier Nostale-NB set (17 profitable
+NosMall items, Monitor on, Relist off) is at
+`~/.config/ntpl/bazar-monitor-15.json` (visible copy
+`~/bazar-monitor-15.json`). The full 1,184-group NosMall export remains at
+`~/bazar-nosmall-all.json` for a whole-catalog profile.
 
 ## Item names
 
@@ -570,8 +597,11 @@ for and requires the automatic name load started by opening the NosBazar page
 (DB first), and checks that a complete snapshot is saved/restored while a
 partial list is marked and never cached. `gui_smoke.py` enforces the help
 popover on every frame, including the new section frames.
-`gui_bazar_monitor_items_smoke.py` drives the unified Items list and the
+`gui_bazar_monitor_items_smoke.py` drives the Items catalog and the
 Monitor set: row Monitor/Relist ticks, the filtered Monitor list, the
-inventory-row Relist tick creating an item with floor 1, selection and
-group actions, Add from Items, the full Item.dat picker in Relist mode, the
-bulk switches and the saved config.
+DB-row Relist tick creating an item with floor 1, selection and group
+actions, Add from Items, the full Item.dat picker in Relist mode, the
+bulk switches and the saved config. `gui_bazar_config_import_smoke.py`
+imports a saved config in add mode (duplicate names/vnums skipped, old
+files monitor-only) and replace mode, asserts the catalog ticks and the
+saved file, and checks that a broken file changes nothing.
