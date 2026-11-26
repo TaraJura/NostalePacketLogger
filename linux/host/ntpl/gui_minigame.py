@@ -13,6 +13,7 @@ from .client import ConnectionLost
 from .engine import Entity
 from .guicommon import MINIGAME_FOCUS_INTERVAL_S
 from .guicommon import MINIGAME_FOCUS_REFRESH_S
+from .guicommon import MINIGAME_RAID_FRESH_S
 from .guicommon import MINIGAME_RENDER_INTERVAL_S
 from .guicommon import MINIGAME_TICK_MS
 from .minigame import DEFAULT_TARGET_LEVEL
@@ -278,8 +279,12 @@ class MinigamePageMixin:
                 "normally; the label shows the last known amount, refilled "
                 "daily). This is a packet shortcut, not a visual "
                 "play-through: the server can reject it, and it violates "
-                "the game rules with a high ban risk. The Minigame page's "
-                "Sheep Farm tools are separate and need the bot off."
+                "the game rules with a high ban risk. The game refuses the "
+                "minigame while you are in a raid team (\"You cannot use it "
+                "when you are already a member of a raid team\"); the tab "
+                "checks the last raid list and tells you to leave it first. "
+                "The Minigame page's Sheep Farm tools are separate and need "
+                "the bot off."
             ),
         )
 
@@ -309,19 +314,36 @@ class MinigamePageMixin:
         if css is not None:
             self.quarry_status.add_css_class(css)
 
+    def _quarry_in_raid(self) -> bool:
+        """True while the local character is in a fresh raid/party list.
+
+        The game refuses the production minigames inside a raid team
+        ("You cannot use it when you are already a member of a raid team"),
+        so the tab checks the last `rdlst` before sending anything.
+        """
+        world = self.engine.world
+        if not world.raid_members:
+            return False
+        if time.monotonic() - world.raid_at > MINIGAME_RAID_FRESH_S:
+            return False
+        own = self._char_id()
+        return own is not None and own in world.raid_members
+
     def _quarry_points_tick(self) -> bool:
         if self._closing:
             return False
         if self.quarry_points_label is not None:
             points = self.engine.world.minigame.points
             if points is None:
-                self.quarry_points_label.set_text(
-                    "production points: — (open the minigame window)"
-                )
+                text = "production points: — (open the minigame window)"
             else:
-                self.quarry_points_label.set_text(
-                    f"production points: {points:,}"
+                text = f"production points: {points:,}"
+            if self._quarry_in_raid():
+                text += (
+                    f" · in a raid team ({len(self.engine.world.raid_members)})"
+                    " — leave it to play"
                 )
+            self.quarry_points_label.set_text(text)
         return True
 
     def _quarry_play(self) -> None:
@@ -330,6 +352,13 @@ class MinigamePageMixin:
         if self.client is None or not self.client.connected:
             self._quarry_set_status(
                 "Not connected to a game client.", "bazar-bad"
+            )
+            return
+        if self._quarry_in_raid():
+            self._quarry_set_status(
+                "You are in a raid team — the minigame cannot be used. "
+                "Leave the raid team, then press Play.",
+                "bazar-bad",
             )
             return
         world = self.engine.world

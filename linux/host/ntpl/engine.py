@@ -281,6 +281,13 @@ class WorldState:
     #: `mlo_info` carries its vnum, slot, production points and the reward
     #: tiers; `mlo_mg`/`mlpt` update the points after a claimed reward.
     minigame: MinigameInfo = field(default_factory=MinigameInfo)
+    #: `rdlst`: every character id in the current raid/party list (the local
+    #: player included), and the monotonic time of that list. The game
+    #: refuses the production minigames while the character is in a raid
+    #: team ("You cannot use it when you are already a member of a raid
+    #: team"), so the Minigame tab checks this before sending a result.
+    raid_members: set[int] = field(default_factory=set)
+    raid_at: float = 0.0
 
     @property
     def position(self) -> tuple[int, int] | None:
@@ -890,19 +897,25 @@ def _on_party_list(world: WorldState, packet: Packet) -> None:
     typed).  Player names carry no dots, so the dot fields are unambiguous.
     """
     parts = packet.text.split(None, 4)
-    if len(parts) < 5:
+    if len(parts) < 4:
         return
-    for token in parts[4].split():
-        fields = token.split(".")
-        if len(fields) < 7:
-            continue
-        name = fields[4].strip()
-        try:
-            char_id = int(fields[6])
-        except ValueError:
-            continue
-        if char_id > 0 and name and name != "-":
-            world.player_names[char_id] = name
+    members: set[int] = set()
+    if len(parts) >= 5:
+        for token in parts[4].split():
+            fields = token.split(".")
+            if len(fields) < 7:
+                continue
+            name = fields[4].strip()
+            try:
+                char_id = int(fields[6])
+            except ValueError:
+                continue
+            if char_id > 0:
+                members.add(char_id)
+            if char_id > 0 and name and name != "-":
+                world.player_names[char_id] = name
+    world.raid_members = members
+    world.raid_at = time.monotonic()
 
 
 def _on_family_index(world: WorldState, packet: Packet) -> None:

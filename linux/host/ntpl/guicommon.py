@@ -73,6 +73,10 @@ MINIGAME_FOCUS_INTERVAL_S = 0.5
 #: a selection that the client never reported.
 MINIGAME_FOCUS_REFRESH_S = 5.0
 MINIGAME_RENDER_INTERVAL_S = 0.5
+#: How long a raid/party list (`rdlst`) counts as current. The server sends
+#: it every ~10 s while in a raid; after leaving, it stops, so a stale list
+#: must not keep the production minigame blocked forever.
+MINIGAME_RAID_FRESH_S = 60.0
 #: Click-to-walk tick; the next leg is handed to the client before the
 #: character reaches the end of the current one, so the walk never stops at a
 #: leg boundary. POS is polled faster while travelling to see the real cell.

@@ -136,6 +136,10 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(world.player_names[22], "SleepyIRL")
         self.assertEqual(world.player_names[7001], "root1")
         self.assertEqual(world.self_name, "root1")
+        # The same list is the raid-team membership: the local player is in
+        # it, which is what blocks the production minigames in the game.
+        self.assertEqual(world.raid_members, {22, 7001, 2035})
+        self.assertGreater(world.raid_at, 0.0)
 
     def test_player_spawn_reads_family(self):
         # Live map 20 line: family id 70.918 and family name at the end.

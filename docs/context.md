@@ -56,8 +56,10 @@ the data layer in [database.md](database.md).
   `mg 4 <slot> 3125 <mlo_lv level>` (the server's level is 0-based: 4 =
   5x), confirmed by `mlpt`/`mlo_rw`; under 100
   points it refuses. The Great Quarry window must be open in the game (it
-  sends `mlo_info`). Packet shortcut, high ban risk; the `mlo_info`/tiers are
-  live-captured, the result/claim is smoke-tested only.
+  sends `mlo_info`). The game refuses the minigame inside a raid team, so
+  `rdlst` membership (`WorldState.raid_members`/`raid_at`) blocks Play with
+  a clear hint. Packet shortcut, high ban risk; the natural flow is
+  live-captured, the automated result is smoke-tested only.
 - **Linux host**: 385 unittest cases, 6 GTK4 smokes, 47 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
   linux all test-host`, tests above. The host is **0.9.1**; the GTK4 window

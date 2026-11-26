@@ -156,6 +156,15 @@ need to reopen it: the attach-time seed reads the last `mlo_info`/`mlo_mg`/
 `mlpt` from the attached client's own DLL log, exactly like the bazaar NPC and
 inventory seeds, and logs `minigame: Great Quarry from the client log`.
 
+**Raid team:** the game refuses the production minigame while the character is
+in a raid team — the client shows "You cannot use it when you are already a
+member of a raid team" and the server ignores the `mg` packets. The engine
+records every `rdlst` (raid/party list) into `WorldState.raid_members`
+(including the local character); the tab refuses to start while the local id
+is in a list younger than 60 s and says so, both in the points label
+(`· in a raid team (15) — leave it to play`) and on Play. Leave the raid team
+in the game, then press Play.
+
 This is a packet shortcut, not a visual play-through: the server may reject
 the fabricated result, and it is a game-rule violation with a **high ban
 risk**. The account risk is the owner's.

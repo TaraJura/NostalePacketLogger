@@ -94,6 +94,12 @@ class QuarryServer:
                     except OSError:
                         return
 
+    def send(self, text: str) -> None:
+        try:
+            self.connection.sendall(text.encode())
+        except OSError:
+            pass
+
     def close(self) -> None:
         self.stop.set()
         for sock in (self.connection, self.listener):
@@ -189,18 +195,51 @@ def main() -> int:
                 and app.quarry_running is False
                 and "needs at least 100" in status
             )
-            result["ok"] = bool(result.get("claimed") and result["guard"])
+            # The game refuses the minigame inside a raid team. Feed the live
+            # rdlst shape with the local player and check both the refusal and
+            # the hint in the points label.
+            app.engine.world.minigame.points = 1900
+            server.send(
+                "RECV|rdlst 85 99 17 89.14.3.0.Tester.0.14881134.30\n"
+            )
+            GLib.timeout_add(500, check_raid)
+        except Exception as exc:  # noqa: BLE001
+            result["ok"] = False
+            result["detail"] = f"guard exception: {exc!r}"
+            app.quit()
+        return False
+
+    def check_raid() -> bool:
+        try:
+            before = len(sent_mg())
+            app._quarry_play()
+            app._quarry_points_tick()
+            status = app.quarry_status.get_text()
+            label = app.quarry_points_label.get_text()
+            result["raid_guard"] = (
+                len(sent_mg()) == before
+                and app.quarry_running is False
+                and "raid team" in status
+                and "raid team" in label
+            )
+            result["ok"] = bool(
+                result.get("claimed")
+                and result.get("guard")
+                and result["raid_guard"]
+            )
             result["detail"] = (
                 f"packets={result.get('packets')} "
                 f"status={result.get('status')!r} "
                 f"label={result.get('label')!r} "
                 f"claimed={result.get('claimed')} "
                 f"guard={result.get('guard')} "
+                f"raid_guard={result.get('raid_guard')} "
+                f"raid_label={label!r} "
                 f"running={app.quarry_running}"
             )
         except Exception as exc:  # noqa: BLE001
             result["ok"] = False
-            result["detail"] = f"guard exception: {exc!r}"
+            result["detail"] = f"raid exception: {exc!r}"
         app.quit()
         return False
 
