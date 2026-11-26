@@ -181,6 +181,15 @@ def main() -> int:
             )
             result["replace_ticks"] = catalog_ticked()
             result["info"] = app.bazar_items_info.get_text()
+            # The catalog filter narrows the 8,000-row list by state.
+            app.bazar_items_filter.set_selected(1)
+            result["monitored_rows"] = app.bazar_items_store.get_n_items()
+            result["monitored_info"] = app.bazar_items_info.get_text()
+            app.bazar_items_filter.set_selected(2)
+            result["relist_rows"] = app.bazar_items_store.get_n_items()
+            result["relist_info"] = app.bazar_items_info.get_text()
+            app.bazar_items_filter.set_selected(0)
+            result["all_rows"] = app.bazar_items_store.get_n_items()
             # A broken file leaves the replace result alone.
             before = len(app.bazar.config.items)
             bad = app._bazar_import_config_path(bad_path, "replace")
@@ -206,6 +215,11 @@ def main() -> int:
                 and result["replace_ticks"].get(1362) is True
                 and result["replace_ticks"].get(2282) is True
                 and "2 monitored" in result["info"]
+                and result["monitored_rows"] == 2
+                and "monitored only" in result["monitored_info"]
+                and result["relist_rows"] == 1
+                and "relisting only" in result["relist_info"]
+                and result["all_rows"] == 3
                 and result["bad_ok"] is True
                 and result["bad_kept"] is True
                 and result["saved"]
@@ -222,6 +236,8 @@ def main() -> int:
                 f"names={result['replace_names']} "
                 f"relist={result['replace_relist']} "
                 f"ticks={result['replace_ticks']} "
+                f"filter={result['monitored_rows']}/"
+                f"{result['relist_rows']}/{result['all_rows']} "
                 f"bad={result['bad_ok']}/{result['bad_kept']} "
                 f"saved={result['saved']} info={result['info']!r}"
             )

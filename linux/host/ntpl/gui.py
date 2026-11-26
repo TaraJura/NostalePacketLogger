@@ -744,6 +744,7 @@ class Application(Gtk.Application):
         self.bazar_items_view = None
         self.bazar_items_store = None
         self.bazar_items_selection = None
+        self.bazar_items_filter = None
         self.bazar_items_scroll = None
         self.bazar_items_info = None
         self.bazar_only_priced = None
@@ -2445,12 +2446,24 @@ class Application(Gtk.Application):
         if row is not None:
             self._bazar_edit_row(row)
 
+    def _bazar_items_filter_mode(self) -> str:
+        """The Items view filter: all rows, monitored only, or relist only."""
+        dropdown = self.bazar_items_filter
+        if dropdown is None:
+            return "all"
+        return {
+            0: "all",
+            1: "monitored",
+            2: "relist",
+        }.get(dropdown.get_selected(), "all")
+
     def _bazar_catalog_rows(self, needle: str) -> tuple[list, int]:
         """Build the filtered catalog rows; returns ``(rows, total)``."""
         items = list(self.bazar.config.items)
         names = self._item_name_map()
         groups = self._bazar_inventory_groups()
         costs = self._nosmall_costs()
+        mode = self._bazar_items_filter_mode()
         lookup: dict[int, BazarItem] = {}
         for item in items:
             for vnum in tracked_vnums([item], names):
@@ -2465,6 +2478,14 @@ class Application(Gtk.Application):
         def add_row(item, vnum, slot, group) -> None:
             nonlocal total
             total += 1
+            if mode == "monitored" and not (
+                item is not None and item.enabled
+            ):
+                return
+            if mode == "relist" and not (
+                item is not None and item.enabled and item.relist
+            ):
+                return
             if item is not None:
                 display = self._bazar_item_label(item)
                 tooltip = self._bazar_item_tooltip(item)
@@ -2643,9 +2664,15 @@ class Application(Gtk.Application):
             f"{len(slots)} slot(s) · {len(groups)} owned · "
             f"{monitored} monitored · {relisting} relisting"
         )
+        mode = self._bazar_items_filter_mode()
+        narrowed = bool(needle) or mode != "all"
         text += (
-            f" · {shown}/{total} items" if needle else f" · {total} items"
+            f" · {shown}/{total} items" if narrowed else f" · {total} items"
         )
+        if mode == "monitored":
+            text += " · monitored only"
+        elif mode == "relist":
+            text += " · relisting only"
         if not slots:
             text += (
                 " · inventory not received: relog or change channel with "
@@ -6574,6 +6601,17 @@ class Application(Gtk.Application):
         delete_item.set_tooltip_text("Delete the selected configured item")
         delete_item.connect("clicked", lambda *_: self._bazar_delete_item())
         select_row.append(delete_item)
+        self.bazar_items_filter = Gtk.DropDown.new_from_strings(
+            ["All items", "Monitored", "Relisting"]
+        )
+        self.bazar_items_filter.set_tooltip_text(
+            "Show the whole Item.dat catalog, only monitored items, or only "
+            "the relist set."
+        )
+        self.bazar_items_filter.connect(
+            "notify::selected", lambda *_: self._bazar_render_items()
+        )
+        select_row.append(self.bazar_items_filter)
         items_box.append(select_row)
 
         items_frame = self._frame(
@@ -6589,7 +6627,10 @@ class Application(Gtk.Application):
                 "to edit its label, search, vnum, tab/amount, floor, cost "
                 "and c_reg fields; a tick or a saved draft creates the "
                 "item. Add to Monitor / Add to Relist apply to the selected "
-                "rows. Import… adds NosMall catalog groups, searches the "
+                "rows. The filter under the list shows the whole catalog, "
+                "only monitored items, or only the relist set, so the "
+                "8,000-row list is quickly narrowed. Import… adds NosMall "
+                "catalog groups, searches the "
                 "whole Item.dat database, or imports a saved bazar config "
                 "(add keeps the current items and skips duplicates; replace "
                 "swaps the whole list after a confirmation). ⋯ holds "

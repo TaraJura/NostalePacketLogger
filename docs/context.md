@@ -29,7 +29,9 @@ the data layer in [database.md](database.md).
   **Items** is a searchable catalog of every Item.dat row (about 7,805)
   plus configured rows the DB lacks and inventory-only vnums; each row has
   a Monitor/Relist tick (a DB row is created on the first tick; Relist
-  fills vnum/tab/stack and floor 1), the selection opens the full editor,
+  fills vnum/tab/stack and floor 1), an **All items / Monitored /
+  Relisting** filter narrows the catalog, the selection opens the full
+  editor,
   **Add to Monitor/Relist** applies to a Ctrl+click selection, Import…
   covers NosMall, the full Item.dat picker and saved config files (add or
   replace), and ⋯ holds rescan/price-all/bulk switches. A curated 17-item
@@ -41,7 +43,7 @@ the data layer in [database.md](database.md).
   config is a 25-item relist list for char `root1` (see the handoff).
 - **Linux host**: 374 unittest cases, 6 GTK4 smokes, 46 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
-  linux all test-host`, tests above. The host is **0.7.7**: it opens the
+  linux all test-host`, tests above. The host is **0.7.8**: it opens the
   bazaar with the client's own shortcut (`c_skill` → `wopen 32`, FrosTale)
   when no Bibi or medal is available, and charges the bazaar's **50-gold
   minimum listing fee** in `c_reg` (the server silently drops a registration

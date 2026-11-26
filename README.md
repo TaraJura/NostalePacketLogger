@@ -80,10 +80,12 @@ in your bags and its known cost, with a **Monitor** tick (search it) and a
 and floor 1). Select a row to edit Name, Search vnums, raw `c_blist`, Item
 vnum, Tab, Amount, Min price, the cost type (which chooses the Monitor
 view) and the advanced `c_reg` constants. **Add to Monitor / Add to Relist**
-apply to the Ctrl+click selection; **Import…** opens the NosMall catalog,
-the full Item.dat picker, or imports a saved bazar config (add or replace);
-**⋯** holds Rescan/Price all/Add whole inventory, the bulk Monitor/Relist
-switches and the selection actions.
+apply to the Ctrl+click selection; the **All items / Monitored / Relisting**
+filter under the list narrows the 8,000-row catalog to the items you care
+about. **Import…** opens the NosMall catalog, the full Item.dat picker, or
+imports a saved bazar config (add or replace); **⋯** holds Rescan/Price
+all/Add whole inventory, the bulk Monitor/Relist switches and the selection
+actions.
 
 #### Relist
 
@@ -242,7 +244,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-Host **0.7.7** (Linux): 374 unit tests, 6 GTK4 window smokes and 46
+Host **0.7.8** (Linux): 374 unit tests, 6 GTK4 window smokes and 46
 fake-server bot smokes pass, and the real injector has been run against the
 live NosTale client under Wine 11 — both hooks `ACTIVE`, movement through the
 client's own MoveTo, auto-attack confirmed by the server's `su`, and the

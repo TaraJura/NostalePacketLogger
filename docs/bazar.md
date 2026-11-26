@@ -63,7 +63,9 @@ full-width section: **Items**, **Relist**, **Monitor** and
      vnum/tab/stack and a floor of 1).
    Ticking a DB row that is not configured yet adds it first. Select a row
    to edit it in the editor on the right; **Add to Monitor** / **Add to
-   Relist** apply to a Ctrl+click selection. **Import…** adds NosMall
+   Relist** apply to a Ctrl+click selection. The filter under the list
+   (**All items / Monitored / Relisting**) narrows the catalog to the
+   monitored items or the relist set. **Import…** adds NosMall
    catalog groups, opens the full Item.dat picker, or imports a saved bazar
    config (add or replace — see [Monitoring config](#monitoring-config)).
    **⋯** holds **Rescan inventory**, **Price all inventory**, **Add whole
@@ -264,6 +266,9 @@ ivn 0 30.885.0.0.0.0.0                     # one equipment slot
 - A new item gets a known ND cost when the curated map or the configured list
   has one; otherwise a positive Item.dat NPC price becomes **NPC gold** cost,
   so the profit column still works. Both can be cleared in the editor.
+- The filter under the catalog (**All items / Monitored / Relisting**)
+  renders only the monitored items or only the relist set; the info line
+  then reads `shown/total items · monitored only` (or `relisting only`).
 - **Price all inventory** (in the ⋯ menu) adds every distinct inventory item
   and starts **Monitor** (search only). It never changes listings; use
   **Relist Start** for that.
