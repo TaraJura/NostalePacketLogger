@@ -143,7 +143,9 @@ database rebuild).
 Each game window keeps its own configuration at
 `~/.config/ntpl/bazar-<winpid>.json`; prices, packet formats and the relist
 state machine are documented in [docs/bazar.md](docs/bazar.md) and
-[docs/protocol/bazaar.md](docs/protocol/bazaar.md).
+[docs/protocol/bazaar.md](docs/protocol/bazaar.md). The monitoring set, the
+add/replace config import and the prepared 17-item profitable-NosMall profile
+are in [docs/monitoring-config.md](docs/monitoring-config.md).
 
 ### Family
 

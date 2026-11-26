@@ -6,14 +6,16 @@
 | [engine.md](engine.md) | you are writing a host, bot or automation: Python API, `WorldState`, handlers, CLI commands, confirmations |
 | [map.md](map.md) | maps, walkability, A*, the Map/Bot tab, path loop and auto-attack |
 | [bot-config.md](bot-config.md) | monster target filters, conditional spell rules, JSON export/import |
-| [bazar.md](bazar.md) | the NosBazar tab: two-view (NosMall / NPC resale) cheapest-listing monitor, gold/ND profit and markup, floor-protected relisting, per-client JSON |
+| [bazar.md](bazar.md) | the NosBazar tab: the full Item.dat Items catalog with Monitor/Relist ticks and filters, two-view (NosMall / NPC resale) cheapest-listing monitor, gold/ND profit and markup, floor-protected relisting, per-client JSON |
+| [monitoring-config.md](monitoring-config.md) | the monitoring set as a bazar config: JSON fields, add/replace import, the prepared 17-item profitable-NosMall profile, the full 1,184-group export, regeneration and verification |
 | [minigame.md](minigame.md) | the Minigame tab: Sheep Farm key spam, player-only focus, `KEY\|` DLL command and its requirements |
 | [stats.md](stats.md) | the Stats tab: player DPS meter built from the decoded `su` damage, windows, totals and limits |
 | [database.md](database.md) | local SQLite game/packet database: client Item/monster/skill/map/NosMall data, protocol wiki, public GitHub packet projects, CLI queries and NosMall export |
 | [context.md](context.md) | quick map of the current state, user config/database paths and next likely work |
 | [mcp.md](mcp.md) | expose the engine to an AI agent over MCP: tools, the DLL broker, Claude Code config, security |
 | [autonomous-play.md](autonomous-play.md) | the policy for driving a live character: observe → decide → act → survive, resync, log entity seeding, target/HP/survival thresholds, handover, failure modes |
-| [handoff-2026-11-19.md](handoff-2026-11-19.md) | **latest handoff**: multi-client logs and window numbering, follow mode (loot/attack), strict focus, recovery priority and configured thresholds, route resume/click behavior, the 96 MB log freeze fix |
+| [handoff-2026-11-26.md](handoff-2026-11-26.md) | **latest handoff**: client 0.9.3.3262/DLL 0.3.1, the NosBazar Items catalog (all 7,805 DB rows, Monitor/Relist ticks, filters), config import, name-aware pricing, relist by owner id, and the 17-item monitoring profile |
+| [handoff-2026-11-19.md](handoff-2026-11-19.md) | previous session: multi-client logs and window numbering, follow mode (loot/attack), strict focus, recovery priority and configured thresholds, route resume/click behavior, the 96 MB log freeze fix |
 | [handoff-2026-11-06.md](handoff-2026-11-06.md) | **read after a reboot**: current state, why Gameforge shows "Ve hře", exact reinjection + auto-attack test procedure |
 | [live-session-2026-11-06.md](live-session-2026-11-06.md) | what was verified on the running client, the bugs fixed, the mechanics learned, open items |
 | [feature-review-2026-11-06.md](feature-review-2026-11-06.md) | feature inventory, automated coverage and the live combination-test matrix |
@@ -35,7 +37,7 @@ the host differ, the game's packets do not.
 - **Windows tree (`windows/`)** — the original working implementation. Injector
   + DLL + WinForms GUI, named pipes.
 - **Linux tree (`linux/`)** — MinGW DLL + TCP loopback + Python CLI + GTK4 GUI
-  + state engine. Builds cleanly, **363 host tests pass**, the GTK4 window
+  + state engine. Builds cleanly, **374 host tests pass**, the GTK4 window
   passes six headless smokes (packet window, client picker, multi-client
   locks, Family, Family auto-invite, Minigame), and the DLL has
   been verified against the **live NosTale client** under Wine 11: both hooks
@@ -64,13 +66,16 @@ the host differ, the game's packets do not.
   monster names, monster target filters and ordered conditional spell rules
   scanned from `NSgtdData.NOS` → `Skill.dat` (Always/HP/MP conditions, MP,
   range, cast time, cooldown); the whole configuration can be saved/loaded as
-  JSON. The fourth **NosBazar** tab monitors the player auction house with
+  JSON. The fourth **NosBazar** tab has an **Items** catalog of the whole
+  Item.dat database with Monitor/Relist ticks, Monitored/Relisting filters
+  and saved-config import, then monitors the player auction house with
   third-level **NosMall** and **NPC resale** views and can relist with a
   floor, ported from Nostale-NB. The seventh **Minigame** tab
   spams a key and keeps the nearest other player selected for the Sheep Farm
-  raid. `make gui-test` and `make bot-test` pass (44 bot smokes, including the
+  raid. `make gui-test` and `make bot-test` pass (46 bot smokes, including the
   spell rotation, HP/MP recovery, finish-kill-before-recovery, loot approach,
   the NosBazar monitor and relist, the speed-boost control, and cross-client
   Follow packet mirroring). See [map.md](map.md),
-  [bot-config.md](bot-config.md), [bazar.md](bazar.md) and
+  [bot-config.md](bot-config.md), [bazar.md](bazar.md),
+  [monitoring-config.md](monitoring-config.md) and
   [minigame.md](minigame.md).

@@ -4,6 +4,7 @@ Quick map for the next session. The detailed history is in
 [handoff-2026-11-26.md](handoff-2026-11-26.md) and
 [handoff-2026-11-19.md](handoff-2026-11-19.md); packet formats in
 [protocol/](protocol/README.md); the market feature in [bazar.md](bazar.md);
+the monitoring set/import in [monitoring-config.md](monitoring-config.md);
 the data layer in [database.md](database.md).
 
 ## Current state
@@ -170,10 +171,12 @@ the data layer in [database.md](database.md).
 ## User files
 
 ```
-~/.config/ntpl/bazar.json              fallback, 19 curated Nostale-NB items
-~/.config/ntpl/bazar-<winpid>.json     per attached client (active: 4356)
-~/bazar.json                           visible copy of the 19-item config
-~/bazar-nosmall-all.json               1,184-group catalog export
+~/.config/ntpl/bazar.json              fallback, 25-item NPC-resale list
+~/.config/ntpl/bazar-<winpid>.json     per attached client
+~/.config/ntpl/bazar-monitor-15.json   17 profitable-NosMall monitoring set
+~/bazar-monitor-15.json                visible copy of the 17-item profile
+~/bazar.json                           visible copy of the 25-item list
+~/bazar-nosmall-all.json               1,184-group catalog export (monitor-only)
 ~/.config/ntpl/nostale.db              19 MB game/packet SQLite DB
 ~/.cache/ntpl/sources/                  cloned public packet projects
 ~/.cache/ntpl/mirror/                   cross-client Follow mirror bus (JSON lines)

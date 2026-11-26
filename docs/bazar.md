@@ -294,7 +294,9 @@ A curated monitoring config from the earlier Nostale-NB set (17 profitable
 NosMall items, Monitor on, Relist off) is at
 `~/.config/ntpl/bazar-monitor-15.json` (visible copy
 `~/bazar-monitor-15.json`). The full 1,184-group NosMall export remains at
-`~/bazar-nosmall-all.json` for a whole-catalog profile.
+`~/bazar-nosmall-all.json` for a whole-catalog profile. The config format,
+the import modes, the profiles and the regeneration snippet are in
+[monitoring-config.md](monitoring-config.md).
 
 ## Item names
 
