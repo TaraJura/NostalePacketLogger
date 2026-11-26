@@ -411,6 +411,19 @@ def main() -> int:
                 and saved["Red Magician Specialist Card"].relist is True
             )
             result["saved"] = saved_ok
+
+            # Loading a config file must also fill the Monitor items panel.
+            # It used to stay at the initial "0 shown · 0 monitored" until
+            # some other action forced a render, while the pass was already
+            # searching the loaded items.
+            app._bazar_load_config(config_path)
+            loaded_info = app.bazar_monitor_items_info.get_text()
+            result["config_load_panel"] = (
+                len(rows()) == 4
+                and "4 monitored" in loaded_info
+                and "4 configured" in loaded_info
+            )
+
             ok = all(
                 bool(result.get(key))
                 for key in (
@@ -425,6 +438,7 @@ def main() -> int:
                     "database",
                     "group_actions",
                     "saved",
+                    "config_load_panel",
                 )
             )
             result["ok"] = ok
@@ -437,7 +451,8 @@ def main() -> int:
                 f"selection={result['selection']} "
                 f"from_items={result['from_items']} "
                 f"database={result['database']} "
-                f"group={result['group_actions']} saved={result['saved']}"
+                f"group={result['group_actions']} saved={result['saved']} "
+                f"load_panel={result['config_load_panel']}"
             )
         except Exception as exc:  # noqa: BLE001
             result["ok"] = False

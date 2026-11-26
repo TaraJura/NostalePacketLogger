@@ -49,7 +49,7 @@ the data layer in [database.md](database.md).
   config is a 25-item relist list for char `root1` (see the handoff).
 - **Linux host**: 376 unittest cases, 6 GTK4 smokes, 46 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
-  linux all test-host`, tests above. The host is **0.8.0**; the GTK4 window
+  linux all test-host`, tests above. The host is **0.8.1**; the GTK4 window
   is split into `gui.py` (core) plus one mixin per page (`gui_bazar.py`,
   `gui_map.py`, `gui_bot.py`, `gui_family.py`, `gui_minigame.py`,
   `gui_stats.py`, `guicommon.py`), and a handler exception is logged and

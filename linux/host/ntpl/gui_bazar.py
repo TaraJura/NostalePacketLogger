@@ -143,6 +143,10 @@ class BazarPageMixin:
             self._bazar_render_items()
             self._bazar_render_results()
             self._bazar_render_relist_items()
+            # The Monitor panel must follow the loaded set as well; missing
+            # this left "0 shown · 0 monitored · 0 configured" beside a
+            # running pass that was searching the loaded items.
+            self._bazar_render_monitor_items()
             self._update_bazar_inventory_info()
             self._bazar_update_relist_info()
             if self._inventory_list is not None:
