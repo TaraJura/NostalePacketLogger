@@ -1,4 +1,8 @@
-"""The Minigame page: Sheep Farm key spam and focus.
+"""The Minigame page: Sheep Farm and Miniland production minigames.
+
+Sheep Farm spams a key and focuses the nearest player. The Miniland
+production section plays (Great Quarry first) by sending the client's own
+`mg` result/claim packets for the chosen reward tier.
 
 Extracted from gui.py; every method still runs on the Application
 instance, so it uses self state exactly like the core methods.
@@ -11,16 +15,25 @@ from .guicommon import MINIGAME_FOCUS_INTERVAL_S
 from .guicommon import MINIGAME_FOCUS_REFRESH_S
 from .guicommon import MINIGAME_RENDER_INTERVAL_S
 from .guicommon import MINIGAME_TICK_MS
+from .minigame import DEFAULT_TARGET_LEVEL
 from .minigame import MAX_INTERVAL_MS
 from .minigame import MAX_RADIUS
 from .minigame import MIN_INTERVAL_MS
 from .minigame import MIN_RADIUS
+from .minigame import PRODUCTION_GAMES
+from .minigame import QUARRY_VNUM
+from .minigame import TARGET_LEVELS
 from .minigame import MinigameConfig
+from .minigame import build_production_gift_packet
+from .minigame import build_production_result_packet
+from .minigame import build_production_start_packet
 from .minigame import load_config as load_minigame_config
 from .minigame import nearby_players
+from .spawnlog import load_minigame_info
 from .minigame import nearest_player
 from .minigame import normalize_key
 from .minigame import save_config as save_minigame_config
+from .minigame import tier_minimum
 from gi.repository import GLib
 from gi.repository import Gtk
 from pathlib import Path
@@ -29,7 +42,7 @@ import time
 
 class MinigamePageMixin:
     def _build_minigame_page(self) -> Gtk.Widget:
-        """Sheep Farm helper: key spam plus a players-only focus target."""
+        """Sheep Farm tools plus the Miniland production minigame."""
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         page.set_margin_top(18)
         page.set_margin_bottom(18)
@@ -60,7 +73,10 @@ class MinigamePageMixin:
                 "bot off: both change the client's target. The key press "
                 "needs DLL 0.3.0: after updating the build, restart the game "
                 "client and inject again (the GUI alone is not enough), then "
-                "press Start. This is automation; the account risk is yours.",
+                "press Start. The Miniland production section below is "
+                "separate: it sends a production minigame result and claims "
+                "the chosen reward box (Great Quarry first). This is "
+                "automation; the account risk is yours.",
             )
         )
         page.append(header)
@@ -171,7 +187,302 @@ class MinigamePageMixin:
         self.minigame_status.add_css_class("dim-label")
         page.append(self.minigame_status)
         self._minigame_render_status()
+
+        page.append(self._build_production_section())
+        GLib.timeout_add(1000, self._quarry_points_tick)
         return page
+
+    # -- Miniland production (Great Quarry) -----------------------------
+
+    def _build_production_section(self) -> Gtk.Widget:
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_top(4)
+        box.set_margin_bottom(4)
+        box.set_margin_start(4)
+        box.set_margin_end(4)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.set_halign(Gtk.Align.START)
+        row.append(Gtk.Label(label="Game"))
+        self.quarry_game_drop = Gtk.DropDown.new_from_strings(
+            [f"{name} ({vnum})" for vnum, name in PRODUCTION_GAMES[:1]]
+        )
+        self.quarry_game_drop.set_tooltip_text(
+            "Production object. Great Quarry is the live-verified game; the "
+            "others share the packet flow and are added after a live test."
+        )
+        row.append(self.quarry_game_drop)
+        row.append(Gtk.Label(label="Play until"))
+        self.quarry_level_drop = Gtk.DropDown.new_from_strings(
+            [
+                f"{level}x · {tier_minimum(level):,} pts"
+                for level in TARGET_LEVELS
+            ]
+        )
+        self.quarry_level_drop.set_selected(DEFAULT_TARGET_LEVEL - 1)
+        self.quarry_level_drop.set_tooltip_text(
+            "Reward box to claim; the result reports the minimum score of "
+            "that box."
+        )
+        row.append(self.quarry_level_drop)
+        box.append(row)
+
+        self.quarry_points_label = Gtk.Label(
+            label="production points: — (open the minigame window)"
+        )
+        self.quarry_points_label.set_xalign(0)
+        self.quarry_points_label.add_css_class("dim-label")
+        box.append(self.quarry_points_label)
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        buttons.set_halign(Gtk.Align.START)
+        self.quarry_play_button = Gtk.Button(label="Play")
+        self.quarry_play_button.add_css_class("suggested-action")
+        self.quarry_play_button.set_tooltip_text(
+            "Send the minigame result and claim the chosen box."
+        )
+        self.quarry_play_button.connect(
+            "clicked", lambda *_: self._quarry_play()
+        )
+        buttons.append(self.quarry_play_button)
+        self.quarry_stop_button = Gtk.Button(label="Stop")
+        self.quarry_stop_button.set_tooltip_text(
+            "Cancel the running start → result → claim sequence."
+        )
+        self.quarry_stop_button.connect(
+            "clicked", lambda *_: self._quarry_stop()
+        )
+        buttons.append(self.quarry_stop_button)
+        box.append(buttons)
+
+        self.quarry_status = Gtk.Label(label="")
+        self.quarry_status.set_xalign(0)
+        self.quarry_status.set_wrap(True)
+        self.quarry_status.set_max_width_chars(80)
+        self.quarry_status.add_css_class("dim-label")
+        box.append(self.quarry_status)
+
+        return self._frame(
+            "Miniland production",
+            box,
+            help_text=(
+                "Plays a Miniland production game (Great Quarry 3125) by "
+                "sending the client's own packets: mg 1 starts, mg 3 carries "
+                "the score, mg 4 claims the box. 'Play until' picks the "
+                "reward box, and the score is that box's minimum (the "
+                "default 5x is 16,000 points; the server's own mlo_info "
+                "tier table wins when it sent one). Open the Great Quarry "
+                "window in the game first and keep it open: that is what "
+                "tells the host the object, your production points and the "
+                "live tiers. Each claim spends production points (100 "
+                "normally; the label shows the last known amount, refilled "
+                "daily). This is a packet shortcut, not a visual "
+                "play-through: the server can reject it, and it violates "
+                "the game rules with a high ban risk. The Minigame page's "
+                "Sheep Farm tools are separate and need the bot off."
+            ),
+        )
+
+    def _quarry_selected_level(self) -> int:
+        if self.quarry_level_drop is None:
+            return DEFAULT_TARGET_LEVEL
+        index = int(self.quarry_level_drop.get_selected())
+        if 0 <= index < len(TARGET_LEVELS):
+            return TARGET_LEVELS[index]
+        return DEFAULT_TARGET_LEVEL
+
+    def _quarry_selected_vnum(self) -> int:
+        if self.quarry_game_drop is None:
+            return QUARRY_VNUM
+        index = int(self.quarry_game_drop.get_selected())
+        games = PRODUCTION_GAMES[:1]
+        if 0 <= index < len(games):
+            return games[index][0]
+        return QUARRY_VNUM
+
+    def _quarry_set_status(self, text: str, css: str | None = None) -> None:
+        if self.quarry_status is None:
+            return
+        self.quarry_status.set_text(text)
+        for name in ("bazar-ok", "bazar-bad", "bazar-warn"):
+            self.quarry_status.remove_css_class(name)
+        if css is not None:
+            self.quarry_status.add_css_class(css)
+
+    def _quarry_points_tick(self) -> bool:
+        if self._closing:
+            return False
+        if self.quarry_points_label is not None:
+            points = self.engine.world.minigame.points
+            if points is None:
+                self.quarry_points_label.set_text(
+                    "production points: — (open the minigame window)"
+                )
+            else:
+                self.quarry_points_label.set_text(
+                    f"production points: {points:,}"
+                )
+        return True
+
+    def _quarry_play(self) -> None:
+        if self.quarry_running:
+            return
+        if self.client is None or not self.client.connected:
+            self._quarry_set_status(
+                "Not connected to a game client.", "bazar-bad"
+            )
+            return
+        world = self.engine.world
+        level = self._quarry_selected_level()
+        vnum = self._quarry_selected_vnum()
+        target = tier_minimum(level, world.minigame.tiers)
+        if target is None:
+            self._quarry_set_status(
+                "Cannot resolve the reward tiers.", "bazar-bad"
+            )
+            return
+        if (
+            world.minigame.points is not None
+            and world.minigame.points < 100
+        ):
+            self._quarry_set_status(
+                f"Production points {world.minigame.points:,} — the claim "
+                "needs at least 100.",
+                "bazar-bad",
+            )
+            return
+        name = dict(PRODUCTION_GAMES).get(vnum, str(vnum))
+        self.quarry_running = True
+        self.quarry_step = 0
+        self.quarry_vnum = vnum
+        self.quarry_level = level
+        self.quarry_target = target
+        self.quarry_points_before = world.minigame.points
+        self.quarry_seen = world.minigame.update_count
+        self.quarry_deadline = time.monotonic() + 1.2
+        self._quarry_set_status(
+            f"{name}: starting · target {level}x at {target:,} points…",
+            "bazar-warn",
+        )
+        self._log_line(
+            f"minigame: {name} start, target {level}x ({target:,} pts)"
+        )
+        if not self._send(build_production_start_packet(vnum)):
+            self._quarry_finish()
+            self._quarry_set_status(
+                "Could not send the start packet.", "bazar-bad"
+            )
+            return
+        if self.quarry_timer is None:
+            self.quarry_timer = GLib.timeout_add(
+                100, self._quarry_tick
+            )
+
+    def _quarry_finish(self) -> None:
+        self.quarry_running = False
+        self.quarry_timer = None
+
+    def _quarry_stop(self, quiet: bool = False) -> None:
+        self.quarry_running = False
+        if self.quarry_timer is not None:
+            GLib.source_remove(self.quarry_timer)
+            self.quarry_timer = None
+        if not quiet:
+            self._quarry_set_status("stopped.")
+
+    def _quarry_tick(self) -> bool:
+        if not self.quarry_running:
+            self.quarry_timer = None
+            return False
+        if self.client is None or not self.client.connected:
+            self._quarry_finish()
+            self._quarry_set_status(
+                "Minigame stopped: not connected.", "bazar-bad"
+            )
+            return False
+        now = time.monotonic()
+        world = self.engine.world
+        if self.quarry_step == 2:
+            # The server's answer can arrive at any moment; do not wait out
+            # the whole deadline before showing a confirmed claim.
+            answered = world.minigame.update_count > self.quarry_seen
+            after = world.minigame.points
+            if answered and after != self.quarry_points_before:
+                self._quarry_finish()
+                before_text = (
+                    f"{self.quarry_points_before:,}"
+                    if self.quarry_points_before is not None
+                    else "?"
+                )
+                after_text = f"{after:,}" if after is not None else "?"
+                self._quarry_set_status(
+                    f"{self.quarry_level}x claimed · production points "
+                    f"{before_text} → {after_text}",
+                    "bazar-ok",
+                )
+                self._log_line(
+                    f"minigame: {self.quarry_level}x claimed, production "
+                    f"points {before_text} -> {after_text}"
+                )
+                return False
+            if now >= self.quarry_deadline:
+                self._quarry_finish()
+                if answered:
+                    message = (
+                        "server answered but the production points did not "
+                        "change; the claim may have been refused"
+                    )
+                else:
+                    message = (
+                        "no answer from the server; the minigame window may "
+                        "be closed or the result rejected"
+                    )
+                self._quarry_set_status(message, "bazar-bad")
+                self._log_line(f"minigame: {message}")
+                return False
+            return True
+        if now < self.quarry_deadline:
+            return True
+        if self.quarry_step == 0:
+            if not self._send(
+                build_production_result_packet(
+                    self.quarry_vnum, self.quarry_target
+                )
+            ):
+                self._quarry_finish()
+                self._quarry_set_status(
+                    "Could not send the result packet.", "bazar-bad"
+                )
+                return False
+            self.quarry_step = 1
+            self.quarry_deadline = now + 0.6
+            self._quarry_set_status(
+                f"result sent ({self.quarry_target:,} points) · "
+                "claiming…",
+                "bazar-warn",
+            )
+            return True
+        if self.quarry_step == 1:
+            # Only a response after the claim counts as confirmation.
+            self.quarry_seen = world.minigame.update_count
+            self.quarry_points_before = world.minigame.points
+            if not self._send(
+                build_production_gift_packet(
+                    self.quarry_vnum, self.quarry_level
+                )
+            ):
+                self._quarry_finish()
+                self._quarry_set_status(
+                    "Could not send the claim packet.", "bazar-bad"
+                )
+                return False
+            self.quarry_step = 2
+            self.quarry_deadline = now + 5.0
+            self._quarry_set_status(
+                f"claiming the {self.quarry_level}x box…", "bazar-warn"
+            )
+            return True
+        return True
 
     @staticmethod
     def _minigame_path_for(winpid: int | None) -> Path:
@@ -266,9 +577,48 @@ class MinigamePageMixin:
         self._minigame_save_config()
         self._minigame_render_status()
 
+    def _minigame_seed_from_log(self) -> None:
+        """Seed the production object/points from the attached client's log.
+
+        The Great Quarry window is often opened before the host attaches (or
+        before a GUI restart), and the server does not repeat `mlo_info` when
+        the window is already open. Without this seed the production-points
+        label and the live tier table stay empty until the window is closed
+        and reopened.
+        """
+        world = self.engine.world
+        if world.minigame.vnum is not None or world.minigame.points is not None:
+            return
+        try:
+            info = load_minigame_info(self.log_file)
+        except Exception:  # noqa: BLE001 - the seed is optional
+            info = None
+        if not info:
+            return
+        state = world.minigame
+        state.vnum = info.get("vnum")
+        state.slot = info.get("slot")
+        state.points = info.get("points")
+        tiers = info.get("tiers")
+        if isinstance(tiers, list) and tiers:
+            state.tiers = list(tiers)
+        elif isinstance(tiers, tuple) and tiers:
+            state.tiers = list(tiers)
+        state.update_count += 1
+        state.updated_at = time.monotonic()
+        if state.vnum is not None:
+            name = dict(PRODUCTION_GAMES).get(state.vnum, str(state.vnum))
+            points = (
+                f" · production points {state.points:,}"
+                if state.points is not None
+                else ""
+            )
+            self._log_line(f"minigame: {name} from the client log{points}")
+
     def _minigame_reset_for_attach(self, winpid: int) -> None:
         """Load this client's settings; a new client never auto-starts."""
         self._minigame_stop(quiet=True)
+        self._quarry_stop(quiet=True)
         self.dll_key_supported = True
         self.minigame_config_path = self._minigame_path_for(winpid)
         self.minigame_config = load_minigame_config(

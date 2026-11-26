@@ -31,6 +31,76 @@ DEFAULT_RADIUS = 15
 MIN_RADIUS = 1
 MAX_RADIUS = 50
 
+# -- Miniland production minigames -------------------------------------
+#: Miniland object vnums. `mlo_info` names the object and its reward tiers;
+#: the client plays with `mg 1 1 <vnum>`, reports the score with
+#: `mg 3 1 <vnum> <points> <points>` and claims the box with
+#: `mg 4 1 <vnum> <level>` (level 1..5). Great Quarry is live-observed
+#: (2026-11-26); the other three share the same protocol.
+QUARRY_VNUM = 3125
+SAW_MILL_VNUM = 3126
+SHOOTING_RANGE_VNUM = 3127
+FISH_POND_VNUM = 3128
+PRODUCTION_GAMES = (
+    (QUARRY_VNUM, "Great Quarry"),
+    (SAW_MILL_VNUM, "Saw Mill"),
+    (SHOOTING_RANGE_VNUM, "Shooting Range"),
+    (FISH_POND_VNUM, "Fish Pond"),
+)
+
+#: Reward ranges of a production object: (minimum, maximum). Index 0 has no
+#: reward, indexes 1..5 are the 1x..5x boxes. This is the fallback when the
+#: server has not sent `mlo_info`; the live packet's own table wins.
+PRODUCTION_TIERS = (
+    (0, 999),
+    (1000, 4999),
+    (5000, 7999),
+    (8000, 11999),
+    (12000, 15999),
+    (16000, 1_000_000),
+)
+#: The user's default target: the minimum score of the 5x box (16,000).
+DEFAULT_TARGET_LEVEL = 5
+TARGET_LEVELS = (1, 2, 3, 4, 5)
+
+
+def tier_minimum(level: int, tiers: object = None) -> int | None:
+    """Minimum score for reward level ``level`` (1..5) on this object.
+
+    ``tiers`` is the server's ``mlo_info`` table (``[(min, max), ...]``);
+    the built-in :data:`PRODUCTION_TIERS` is used when it is missing or
+    too short, so the UI and the packet always agree on the target score.
+    """
+    pairs: list[tuple[int, int]] = []
+    if isinstance(tiers, (list, tuple)):
+        for pair in tiers:
+            if (
+                isinstance(pair, (list, tuple))
+                and len(pair) >= 2
+                and isinstance(pair[0], int)
+                and isinstance(pair[1], int)
+            ):
+                pairs.append((pair[0], pair[1]))
+    if not (1 <= int(level) < len(pairs)):
+        pairs = list(PRODUCTION_TIERS)
+    index = int(level)
+    if 0 <= index < len(pairs):
+        return pairs[index][0]
+    return None
+
+
+def build_production_start_packet(vnum: int = QUARRY_VNUM) -> str:
+    return f"mg 1 1 {int(vnum)}"
+
+
+def build_production_result_packet(vnum: int, points: int) -> str:
+    points = int(points)
+    return f"mg 3 1 {int(vnum)} {points} {points}"
+
+
+def build_production_gift_packet(vnum: int, level: int) -> str:
+    return f"mg 4 1 {int(vnum)} {int(level)}"
+
 #: Key names the DLL understands besides a single letter or digit.
 _KEY_ALIASES = {
     "return": "enter",

@@ -55,7 +55,7 @@ from .mapdata import (
     load_portals as load_saved_portals,
     normalize_portals,
 )
-from .minigame import MinigameConfig
+from .minigame import DEFAULT_TARGET_LEVEL, QUARRY_VNUM, MinigameConfig
 from .mirror import MirrorReader, MirrorWriter
 from .nosmall import ItemInfo
 from .spawnlog import client_log_path
@@ -617,6 +617,17 @@ class Application(
         self.minigame_config_path: Path | None = None
         self.minigame_running = False
         self.minigame_timer: int | None = None
+        # Miniland production minigame (Great Quarry): a short start → result
+        # → gift packet sequence, confirmed by the server's mlo_mg.
+        self.quarry_running = False
+        self.quarry_timer: int | None = None
+        self.quarry_step = 0
+        self.quarry_vnum = QUARRY_VNUM
+        self.quarry_level = DEFAULT_TARGET_LEVEL
+        self.quarry_target = 0
+        self.quarry_seen = 0
+        self.quarry_points_before: int | None = None
+        self.quarry_deadline = 0.0
         self.minigame_guard = False
         self.minigame_focus_id: int | None = None
         self.minigame_focus_name = ""
@@ -2402,6 +2413,9 @@ class Application(
         self._bazar_seed_from_log()
         self._family_reset_for_attach(client.winpid)
         self._minigame_reset_for_attach(client.winpid)
+        # The minigame window is often open before this host attaches (or
+        # before a GUI restart); seed its object and points from the log.
+        self._minigame_seed_from_log()
         # A new client has its own DLL; the old "not supported" latches do
         # not apply to it.
         self.dll_target_supported = True
@@ -2866,6 +2880,10 @@ class Application(
         self._sync_portal_block()
         self._sync_speed_boost(quiet=True)
         self._restore_client_cooldowns(quiet=True)
+        # The direct --port path has no attach-time reset, so seed the
+        # production minigame object here too; the picker path already did,
+        # and the method returns immediately when the state is known.
+        self._minigame_seed_from_log()
         self._request_position()
         return False
 

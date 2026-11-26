@@ -266,6 +266,13 @@ def start_fake_client(scene) -> int:
             ]
         )
     late_lines: list[str] = []
+    if MODE == "minigame":
+        # The live Great Quarry line: production points and the reward
+        # ranges for the Miniland production screenshot.
+        lines.append(
+            "RECV|mlo_info 0 3125 5 2000 0 0 0 999 1000 4999 5000 7999 "
+            "8000 11999 12000 15999 16000 1000000"
+        )
     if MODE == "stats":
         # Two more players spawn with the scene; their hits arrive a few
         # seconds later so the default 10 s window still shows them at
@@ -552,9 +559,12 @@ def main() -> int:
         app.minigame_interval_spin.set_value(120)
         app.minigame_focus_switch.set_active(True)
         app.minigame_radius_spin.set_value(12)
+        app._quarry_set_status(
+            "Great Quarry · 5x · 16,000 points · production points 2,000"
+        )
         app._set_status(
-            "minigame · Sheep Farm · key y every 120 ms · focus players "
-            "within 12 tiles"
+            "minigame · Sheep Farm key y every 120 ms · focus players "
+            "within 12 tiles · production Great Quarry 5x"
         )
         return False
 

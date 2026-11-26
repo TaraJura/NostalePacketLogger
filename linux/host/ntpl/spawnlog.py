@@ -50,6 +50,9 @@ _CBLIST_MARKER = "[SEND] c_blist "
 _CSLIST_MARKER = "[SEND] c_slist "
 _CSKILL_MARKER = "[SEND] c_skill"
 _WOPEN32_MARKER = "[RECV] wopen 32 "
+_MLO_INFO_MARKER = "[RECV] mlo_info "
+_MLO_MG_MARKER = "[RECV] mlo_mg "
+_MLPT_MARKER = "[RECV] mlpt "
 _LINE_STAMP = re.compile(r"^(\d{1,2}):(\d{2}):(\d{2})\.(\d{3}) ")
 _INV_MARKER = "[RECV] inv "
 _IVN_MARKER = "[RECV] ivn "
@@ -896,6 +899,76 @@ def load_bazaar_skill(path: str | Path | None = None) -> bool:
                 if 0.0 <= stamp - skill_at <= BAZAR_SKILL_WINDOW_S:
                     return True
     return False
+
+
+def load_minigame_info(
+    path: str | Path | None = None,
+) -> dict[str, object] | None:
+    """The last Miniland production object from the client's DLL log.
+
+    A GUI that attaches (or restarts) while the minigame window is already
+    open never sees the server's ``mlo_info``; the log still has it, together
+    with any later ``mlo_mg``/``mlpt`` point updates. Returns
+    ``{"vnum", "slot", "points", "tiers"}`` (fields may be None/empty) or
+    None when the log has no minigame lines.
+    """
+    source = Path(path) if path is not None else default_log_path()
+    if source is None:
+        return None
+    try:
+        log = _open_log_tail(source)
+    except OSError:
+        return None
+    state: dict[str, object] = {
+        "vnum": None,
+        "slot": None,
+        "points": None,
+        "tiers": [],
+    }
+    seen = False
+    with log:
+        for line in log:
+            if _MLO_INFO_MARKER in line:
+                start = line.find(_MLO_INFO_MARKER) + len(_MLO_INFO_MARKER)
+                try:
+                    values = [int(token) for token in line[start:].split()]
+                except ValueError:
+                    continue
+                if len(values) < 6:
+                    continue
+                state["vnum"] = values[1]
+                state["slot"] = values[2]
+                state["points"] = values[3]
+                state["tiers"] = [
+                    (values[index], values[index + 1])
+                    for index in range(6, len(values) - 1, 2)
+                ]
+                seen = True
+                continue
+            if _MLO_MG_MARKER in line:
+                start = line.find(_MLO_MG_MARKER) + len(_MLO_MG_MARKER)
+                values = _ints_tokens(line[start:])
+                if values is None or len(values) < 2:
+                    continue
+                state["vnum"] = values[0]
+                state["points"] = values[1]
+                seen = True
+                continue
+            if _MLPT_MARKER in line:
+                start = line.find(_MLPT_MARKER) + len(_MLPT_MARKER)
+                values = _ints_tokens(line[start:])
+                if values:
+                    state["points"] = values[0]
+                    seen = True
+    return state if seen else None
+
+
+def _ints_tokens(text: str) -> list[int] | None:
+    """Every whitespace-separated token as an int, or None on a bad token."""
+    try:
+        return [int(token) for token in text.split()]
+    except ValueError:
+        return None
 
 
 def log_inventory_bags(path: str | Path | None = None) -> set[int]:

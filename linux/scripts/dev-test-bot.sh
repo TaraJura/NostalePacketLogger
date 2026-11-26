@@ -88,3 +88,4 @@ run gui_bazar_monitor_items_smoke.py
 run gui_bazar_config_import_smoke.py
 run gui_relist_track_smoke.py
 run gui_stats_smoke.py
+run gui_quarry_smoke.py

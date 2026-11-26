@@ -1,4 +1,4 @@
-# Minigame tab — Sheep Farm
+# Minigame tab — Sheep Farm and Miniland production
 
 The seventh GUI page automates the **Sheep Farm** mini-raid: it spams a key
 press at the game window and keeps another **player** selected, because the
@@ -84,6 +84,74 @@ secondary-weapon attack; the German/English lists bind the same action to `Z`.
 That is the QWERTY/QWERTZ difference. If `y` does nothing, try `z`; the entry
 accepts both.
 
+## Miniland production (Great Quarry)
+
+The **Miniland production** frame plays a Miniland production game and claims
+the reward box you choose. **Great Quarry** (object vnum 3125) is implemented
+first; Saw Mill (3126), Shooting Range (3127) and Fish Pond (3128) use the same
+packet flow and will be added after a live test.
+
+In the game, the object's window shows **My production points** (account-wide,
+capped at 2000 and refilled daily) and the reward ranges:
+
+| Score | Reward |
+|---|---|
+| 0–999 | no item |
+| 1,000–4,999 | 1x box |
+| 5,000–7,999 | 2x box |
+| 8,000–11,999 | 3x box |
+| 12,000–15,999 | 4x box |
+| 16,000–1,000,000 | 5x box |
+
+The minigame itself is played with the arrow keys: **←/→** attacks a bug on
+that side, **↑** digs (a normal dig is ~50–60 points, a glowing stone ~300),
+and a bug reaching the character costs a life. The tab does **not** play that
+visual game; it sends the result the client sends at the end of a game.
+
+| Control | Meaning |
+|---|---|
+| **Game** | Great Quarry (3125). |
+| **Play until** | Reward box to claim, 1x–5x. Default **5x**, whose minimum score is **16,000**. The result is the box's minimum from the server's own `mlo_info` tier table; the built-in table is the fallback. |
+| **production points** | The last `mlo_info`/`mlo_mg`/`mlpt` balance. The label says how to learn it when it is unknown. |
+| **Play** | Sends the sequence below. |
+| **Stop** | Cancels the sequence. |
+
+The sequence (the same three client packets the game sends):
+
+```text
+mg 1 1 3125                            start
+mg 3 1 3125 <points> <points>           result (both fields equal)
+mg 4 1 3125 <level>                     claim the 1x..5x box
+```
+
+The server answers with `mlo_mg <vnum> <new points> ...`; the tab shows
+`5x claimed · production points 2,000 → 1,900` when the balance changed, or a
+warning when the server stayed silent (the window may be closed or the result
+rejected). A claim spends production points — **100** normally, less with the
+game's stacking discounts; when the last known balance is below 100 the tab
+refuses to start. The live `mlo_info` line observed on 2026-11-26 was:
+
+```text
+mlo_info 0 3125 5 2000 0 0 0 999 1000 4999 5000 7999 8000 11999 12000 15999 16000 1000000
+```
+
+Fields: owner flag, object vnum, slot, production points, two flags, then
+`(minimum, maximum)` reward ranges.
+
+**Open the Great Quarry window in the game first and keep it open.** That is
+what sends `mlo_info`, so the host knows the object, your production points and
+the server's exact tiers. Without it the tab still uses the fallback tiers,
+but it cannot show the balance and the claim is likely to be refused.
+
+A GUI that attaches — or restarts — while the window is already open does not
+need to reopen it: the attach-time seed reads the last `mlo_info`/`mlo_mg`/
+`mlpt` from the attached client's own DLL log, exactly like the bazaar NPC and
+inventory seeds, and logs `minigame: Great Quarry from the client log`.
+
+This is a packet shortcut, not a visual play-through: the server may reject
+the fabricated result, and it is a game-rule violation with a **high ban
+risk**. The account risk is the owner's.
+
 ## Requirements
 
 - **DLL 0.3.0** for the `KEY|<name>` command. Updating
@@ -91,7 +159,7 @@ accepts both.
   the running client. Restart the game client and inject again (the picker's
   **Inject & connect**), then the window title/status shows `DLL 0.3.0`
   or newer (`0.3.1` is the current build).
-- Host **0.6.0 or newer** for the tab (0.8.1 today). Only a GUI restart is
+- Host **0.6.0 or newer** for the tab (0.9.0 today). Only a GUI restart is
   needed for host changes.
 - The game window attached to this GUI window. The tab is per client, like the
   Family and NosBazar pages.
@@ -100,11 +168,18 @@ accepts both.
 
 - `linux/host/tests/test_minigame.py` — key names, settings round-trip and
   clamping, player-only nearest selection, NPC/pet/monster/self exclusion,
-  Chebyshev radius, tie-breaks.
+  Chebyshev radius, tie-breaks; the production helpers (default 5x target,
+  the server's tier table winning over the fallback, the three `mg` packet
+  shapes) and the engine's `mlo_info`/`mlo_mg`/`mlpt` parsing.
 - `linux/test/gui_minigame_smoke.py` — a fake map with two players, an NPC and
   a monster: `KEY|y` is spammed, only the nearest player is targeted, focus
   switches when that player leaves, settings are saved per client, Stop sends
   nothing further, and an old DLL's `unknown command: KEY` stops the loop.
+- `linux/test/gui_quarry_smoke.py` — the fake server sends the live Great
+  Quarry `mlo_info` (2,000 points, the six ranges): Play sends `mg 1 1 3125`,
+  `mg 3 1 3125 16000 16000` and `mg 4 1 3125 5` in order, the `mlo_mg` reply
+  changes the label to 1,900 and the status to `5x claimed`, and a balance
+  below 100 refuses to start.
 - `make -C linux key-test` — the native C++ check of the DLL's key parser.
 
 Live status: the raid itself and player targeting through the client's own
@@ -112,6 +187,11 @@ Live status: the raid itself and player targeting through the client's own
 `KEY|` press and the `TARGET|` selection of a player have **not** been
 live-verified yet. The first live run should watch the Bot log for
 `minigame keyboard ready`, `minigame focus -> …` and the raid's Wolves column.
+
+The Great Quarry `mlo_info` line and the tier table are live-captured
+(2026-11-26, 2,000 production points), but the result/claim sequence has only
+been verified against the fake server; the first live claim should watch the
+Bot log for `minigame: 5x claimed` or the no-answer warning.
 
 ## Troubleshooting
 

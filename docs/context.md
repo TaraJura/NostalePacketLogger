@@ -47,9 +47,19 @@ the data layer in [database.md](database.md).
   and Relist shows only the relist set by default.
   The Character frame shows the detected name above HP/MP. The active user
   config is a 25-item relist list for char `root1` (see the handoff).
-- **Linux host**: 376 unittest cases, 6 GTK4 smokes, 46 fake-server bot
+- **Minigame — Great Quarry (2026-11-26, host 0.9.0)**: the Minigame tab's
+  **Miniland production** frame plays a production minigame (Great Quarry
+  3125 first). **Play until** picks the reward box 1x–5x, default 5x whose
+  minimum score is 16,000; the production-points label comes from
+  `mlo_info` (engine `WorldState.minigame`). **Play** sends the client's own
+  sequence `mg 1 1 3125` → `mg 3 1 3125 <points> <points>` → `mg 4 1 3125
+  <level>` and confirms the claim from the new `mlo_mg` balance; under 100
+  points it refuses. The Great Quarry window must be open in the game (it
+  sends `mlo_info`). Packet shortcut, high ban risk; the `mlo_info`/tiers are
+  live-captured, the result/claim is smoke-tested only.
+- **Linux host**: 384 unittest cases, 6 GTK4 smokes, 47 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
-  linux all test-host`, tests above. The host is **0.8.1**; the GTK4 window
+  linux all test-host`, tests above. The host is **0.9.0**; the GTK4 window
   is split into `gui.py` (core) plus one mixin per page (`gui_bazar.py`,
   `gui_map.py`, `gui_bot.py`, `gui_family.py`, `gui_minigame.py`,
   `gui_stats.py`, `guicommon.py`), and a handler exception is logged and

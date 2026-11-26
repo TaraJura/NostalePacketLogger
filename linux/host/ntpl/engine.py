@@ -30,6 +30,25 @@ from .protocol import Kind, Packet
 
 
 @dataclass
+class MinigameInfo:
+    """The last Miniland production minigame the server described.
+
+    ``mlo_info`` is sent when a miniland object (Great Quarry 3125, Saw Mill
+    3126, Shooting Range 3127, Fish Pond 3128) is opened: object vnum, slot,
+    the account's production points and the reward tiers as
+    ``(minimum, maximum)`` pairs (the first pair is the no-reward range).
+    ``mlo_mg``/``mlpt`` update the points after a result is claimed.
+    """
+
+    vnum: int | None = None
+    slot: int | None = None
+    points: int | None = None
+    tiers: list[tuple[int, int]] = field(default_factory=list)
+    updated_at: float = 0.0
+    update_count: int = 0
+
+
+@dataclass
 class Entity:
     entity_id: int
     kind: int = 0          # 1 = player, 2 = pet/partner/NPC, 3 = monster/NPC
@@ -247,6 +266,10 @@ class WorldState:
     player_names: dict[int, str] = field(default_factory=dict)
     #: NosBazar window/NPC state (see ntpl.bazar.BazarState).
     bazar: BazarState = field(default_factory=BazarState)
+    #: The last Miniland production object (Great Quarry etc.):
+    #: `mlo_info` carries its vnum, slot, production points and the reward
+    #: tiers; `mlo_mg`/`mlpt` update the points after a claimed reward.
+    minigame: MinigameInfo = field(default_factory=MinigameInfo)
 
     @property
     def position(self) -> tuple[int, int] | None:
@@ -356,6 +379,63 @@ def _on_gold(world: WorldState, packet: Packet) -> None:
     values = packet.ints(1)
     if values and values[0] >= 0:
         world.gold = values[0]
+
+
+def _on_minigame_info(world: WorldState, packet: Packet) -> None:
+    """`mlo_info`: the open Miniland production object and its tiers.
+
+    Live 2026-11-26 (Great Quarry):
+    ``mlo_info 0 3125 5 2000 0 0 0 999 1000 4999 ... 16000 1000000``.
+    Fields: owner flag, object vnum, slot, production points, two flags, then
+    (minimum, maximum) reward-tier pairs (the first pair has no reward).
+    """
+    if packet.direction is not Kind.RECV:
+        return
+    args = packet.args
+    if len(args) < 6:
+        return
+    try:
+        values = [int(value) for value in args]
+    except ValueError:
+        return
+    state = world.minigame
+    state.vnum = values[1]
+    state.slot = values[2]
+    state.points = values[3]
+    tiers = [
+        (values[index], values[index + 1])
+        for index in range(6, len(values) - 1, 2)
+    ]
+    if tiers:
+        state.tiers = tiers
+    state.updated_at = time.monotonic()
+    state.update_count += 1
+
+
+def _on_minigame_result(world: WorldState, packet: Packet) -> None:
+    """`mlo_mg <minigameVnum> <points> ...`: the result was accepted."""
+    if packet.direction is not Kind.RECV:
+        return
+    values = packet.ints(2)
+    if values is None:
+        return
+    state = world.minigame
+    state.vnum = values[0]
+    state.points = values[1]
+    state.updated_at = time.monotonic()
+    state.update_count += 1
+
+
+def _on_miniland_points(world: WorldState, packet: Packet) -> None:
+    """`mlpt <points> <cap>`: the account's Miniland production points."""
+    if packet.direction is not Kind.RECV:
+        return
+    values = packet.ints(1)
+    if values is None:
+        return
+    world.minigame.points = values[0]
+    world.minigame.updated_at = time.monotonic()
+    world.minigame.update_count += 1
 
 
 def _learn_bazar_open(world: WorldState, packet: Packet) -> None:
@@ -1092,6 +1172,9 @@ class Engine:
                 "inv": _on_inventory,   # RECV: whole bag contents
                 "ivn": _on_inventory_update,  # RECV: one bag slot
                 "gold": _on_gold,       # RECV: own gold
+                "mlo_info": _on_minigame_info,  # RECV: miniland object
+                "mlo_mg": _on_minigame_result,  # RECV: minigame result
+                "mlpt": _on_miniland_points,  # RECV: production points
                 "rc_blist": _on_bazar_response,  # RECV: bazaar search answer
                 "rc_reg": _on_bazar_register_ack,  # RECV: c_reg accepted
                 "rc_slist": _on_bazar_sellers,  # RECV: our seller listings
