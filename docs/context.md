@@ -47,7 +47,7 @@ the data layer in [database.md](database.md).
   and Relist shows only the relist set by default.
   The Character frame shows the detected name above HP/MP. The active user
   config is a 25-item relist list for char `root1` (see the handoff).
-- **Minigame — Great Quarry (2026-11-26, host 0.9.0)**: the Minigame tab's
+- **Minigame — Great Quarry (2026-11-26, host 0.9.9)**: the Minigame tab's
   **Miniland production** frame plays a production minigame (Great Quarry
   3125 first). **Play until** picks the reward box 1x–5x, default 5x whose
   minimum score is 16,000; the production-points label comes from
@@ -58,12 +58,15 @@ the data layer in [database.md](database.md).
   points it refuses. The Great Quarry window must be open in the game (it
   sends `mlo_info`). The game refuses the minigame inside a raid team, so
   `rdlst` membership (`WorldState.raid_members`/`raid_at`) blocks Play with
-  a clear hint. **Play** loops: it claims, sends `mg 2 -1 -1` (Stop/Storno), waits **40 s**
-  (`every`, live minimum ≈30 s) and starts the next run until the points
-  fall below 100; an ignored run is retried 3×, a live next-claim countdown
-  is shown, and a raid team or missing answer stops it.
-  Packet shortcut, high ban risk; the natural flow is live-captured, the
-  automated result is smoke-tested only.
+  a clear hint. **Play** loops: it claims, sends `mg 2 -1 -1` (the client's
+  Stop/Storno; `mg 2 <slot> <vnum>` is the window close and desyncs the
+  dialog), waits **40 s** (`every`, the live reward cooldown — 35–38 s was
+  refused) and starts the next run until the points fall below 100; an
+  ignored run is retried 3×, a live next-claim countdown is shown, and a
+  raid team or missing answer stops it. The wait is driven by the 1 s
+  Minigame tick (a one-shot GLib timer stalled live). Packet shortcut, high
+  ban risk; the natural flow, the automated claim and the 40 s Play loop
+  are live-verified.
 - **Linux host**: 385 unittest cases, 6 GTK4 smokes, 47 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
   linux all test-host`, tests above. The host is **0.9.9**; the GTK4 window

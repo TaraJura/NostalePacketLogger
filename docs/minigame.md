@@ -229,11 +229,12 @@ live-verified yet. The first live run should watch the Bot log for
 The Great Quarry natural flow was live-verified on 2026-11-26: GAMESTART
 (`mg 1 4 3125`), a played game ending with score 16,124 (`mg 3 4 3125 16124
 16124`), the server's `mlo_lv 4`, the client's claim `mg 4 4 3125 4`, and the
-`mlpt 1900 100` + `mlo_rw 2193 2` reward. The tab's **automated** result was live-verified once (20:08:14:
-`mlpt 1800`, `mlo_rw 2213 ×1`); the Play loop's repeat pacing is verified
-against the fake server only, with the 40 s gap: the first live repeat should
-watch the Bot log for `auto 2 · 5x claimed … reward …` or the no-answer
-warning.
+`mlpt 1900 100` + `mlo_rw 2193 2` reward. The tab's **automated** result was
+live-verified once (20:08:14: `mlpt 1800`, `mlo_rw 2213 ×1`). The whole
+**Play loop** was live-verified on 2026-11-26 and confirmed working at the
+40 s default: claim, `mg 2 -1 -1` (Stop), the countdown, the next run, and
+the stop when the production points fall below 100. Attempts 35–38 s after
+a reward were refused, which is what set the 40 s default.
 
 ## Troubleshooting
 

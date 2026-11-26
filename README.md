@@ -191,12 +191,12 @@ Quarry** first — by sending the client's own result and claim packets.
 **Play until** chooses the reward box (default 5x, the 16,000-point minimum),
 the tab shows your production points from the game's own `mlo_info`, claims
 with the server's `mlo_lv` reward level and shows the reward item from
-`mlo_rw`. **Play** keeps going: it claims, clicks the client's **Stop** (Storno), waits 40 s
-(the server's cooldown between rewards) and starts the next one until the
-production points run out, retrying an ignored run and showing a live
-**next claim in N s** countdown; **Stop** ends the loop. Open the Great Quarry window in the game first. It is a packet
-shortcut, not a visual play-through: high ban risk. See
-[docs/minigame.md](docs/minigame.md).
+`mlo_rw`. **Play** keeps going: it claims, clicks the client's **Stop**
+(Storno), waits 40 s (the server's reward cooldown) and starts the next one
+until the production points run out, retrying an ignored run and showing a
+live **next claim in N s** countdown; **Stop** ends the loop. Open the Great
+Quarry window in the game first. It is a packet shortcut, not a visual
+play-through: high ban risk. See [docs/minigame.md](docs/minigame.md).
 
 ### Stats
 
@@ -266,7 +266,11 @@ fake-server bot smokes pass, and the real injector has been run against the
 live NosTale client under Wine 11 — both hooks `ACTIVE`, movement through the
 client's own MoveTo, auto-attack confirmed by the server's `su`, and the
 bazaar open/relist/registration verified live (2026-11-23); the DPS meter
-decodes the same live `su` damage. The original Windows tree is unchanged.
+decodes the same live `su` damage. The Great Quarry minigame was verified
+live on 2026-11-26: the natural start/play/claim flow, the automated claim
+(a reward without playing) and the Play loop with its 40 s reward cooldown,
+the Stop between runs and the points-exhaustion stop. The original Windows
+tree is unchanged.
 
 Gameforge's terms of service prohibit automation and client manipulation.
 This is a tool for the account owner's own client; using it on a live account
