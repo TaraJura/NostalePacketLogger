@@ -291,6 +291,10 @@ class MinigamePageMixin:
         self.quarry_status.set_max_width_chars(80)
         self.quarry_status.add_css_class("dim-label")
         box.append(self.quarry_status)
+        self.quarry_countdown_label = Gtk.Label(label="")
+        self.quarry_countdown_label.set_xalign(0)
+        self.quarry_countdown_label.add_css_class("dim-label")
+        box.append(self.quarry_countdown_label)
 
         return self._frame(
             "Miniland production",
@@ -377,6 +381,28 @@ class MinigamePageMixin:
                     " — leave it to play"
                 )
             self.quarry_points_label.set_text(text)
+        if self.quarry_countdown_label is not None:
+            if (
+                self.quarry_auto_running
+                and self.quarry_auto_next_at > 0.0
+            ):
+                remaining = max(
+                    0,
+                    int(
+                        self.quarry_auto_next_at
+                        - time.monotonic()
+                        + 0.999
+                    ),
+                )
+                self.quarry_countdown_label.set_text(
+                    f"auto: next claim in {remaining} s"
+                )
+            elif self.quarry_auto_running:
+                self.quarry_countdown_label.set_text(
+                    "auto: claim in progress…"
+                )
+            else:
+                self.quarry_countdown_label.set_text("")
         return True
 
     def _quarry_play(self) -> None:
@@ -458,6 +484,7 @@ class MinigamePageMixin:
     def _quarry_stop(self, quiet: bool = False) -> None:
         self.quarry_running = False
         self.quarry_auto_running = False
+        self.quarry_auto_next_at = 0.0
         if self.quarry_timer is not None:
             GLib.source_remove(self.quarry_timer)
             self.quarry_timer = None
@@ -544,12 +571,14 @@ class MinigamePageMixin:
             "bazar-warn",
         )
         if self.quarry_auto_timer is None:
+            self.quarry_auto_next_at = time.monotonic() + gap
             self.quarry_auto_timer = GLib.timeout_add_seconds(
                 gap, self._quarry_auto_next
             )
 
     def _quarry_auto_next(self) -> bool:
         self.quarry_auto_timer = None
+        self.quarry_auto_next_at = 0.0
         if not self.quarry_auto_running:
             return False
         if self.quarry_running:
@@ -602,12 +631,14 @@ class MinigamePageMixin:
             f"{gap} s: {message}"
         )
         if self.quarry_auto_timer is None:
+            self.quarry_auto_next_at = time.monotonic() + gap
             self.quarry_auto_timer = GLib.timeout_add_seconds(
                 gap, self._quarry_auto_next
             )
 
     def _quarry_auto_finish(self, text: str) -> None:
         self.quarry_auto_running = False
+        self.quarry_auto_next_at = 0.0
         if self.quarry_auto_timer is not None:
             GLib.source_remove(self.quarry_auto_timer)
             self.quarry_auto_timer = None
@@ -616,6 +647,7 @@ class MinigamePageMixin:
 
     def _quarry_auto_abort(self, text: str) -> None:
         self.quarry_auto_running = False
+        self.quarry_auto_next_at = 0.0
         if self.quarry_auto_timer is not None:
             GLib.source_remove(self.quarry_auto_timer)
             self.quarry_auto_timer = None

@@ -240,11 +240,24 @@ def main() -> int:
             app._quarry_gap = lambda: 5
             state["auto_before"] = len(sent_mg())
             app._quarry_auto_start()
+            GLib.timeout_add(2500, check_countdown)
             GLib.timeout_add(12000, check_auto)
         except Exception as exc:  # noqa: BLE001
             result["ok"] = False
             result["detail"] = f"raid exception: {exc!r}"
             app.quit()
+        return False
+
+    def check_countdown() -> bool:
+        try:
+            text = app.quarry_countdown_label.get_text()
+            result["countdown"] = (
+                "next claim in" in text
+                and any(ch.isdigit() for ch in text)
+            )
+        except Exception as exc:  # noqa: BLE001
+            result["countdown"] = False
+            result["detail"] = f"countdown exception: {exc!r}"
         return False
 
     def check_auto() -> bool:
@@ -272,6 +285,8 @@ def main() -> int:
                 and app.quarry_auto_running is False
                 and "auto complete: 2 claim(s)" in status
                 and "1,700" in label
+                and result.get("countdown") is True
+                and app.quarry_countdown_label.get_text() == ""
             )
             result["ok"] = bool(
                 result.get("claimed")
@@ -285,6 +300,7 @@ def main() -> int:
                 f"guard={result.get('guard')} "
                 f"raid_guard={result.get('raid_guard')} "
                 f"auto={result.get('auto')} "
+                f"countdown={result.get('countdown')} "
                 f"auto_packets={auto_packets} "
                 f"auto_status={status!r} "
                 f"auto_label={label!r}"

@@ -640,6 +640,9 @@ class Application(
         #: Consecutive runs the server ignored (a reward cooldown); reset on
         #: a confirmed claim.
         self.quarry_auto_retries = 0
+        #: Monotonic time of the next Auto claim (0 while a claim is
+        #: running or Auto is idle); drives the UI countdown.
+        self.quarry_auto_next_at = 0.0
         self.quarry_points_before: int | None = None
         self.quarry_deadline = 0.0
         self.minigame_guard = False
