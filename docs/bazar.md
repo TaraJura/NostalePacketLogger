@@ -124,6 +124,34 @@ the configured label or a vnum; with hundreds of scanned inventory items this is
 row. The info line counts the matches and how many the Only priced filter
 hides; a search with no priced match says so instead of an empty table.
 
+### Monitor item set
+
+The left side of the **Monitor** section is the set that **Monitor Start**
+searches: every configured item with a **Monitor** tick.
+
+- Ticking a row enables the item's searches; unticking keeps the item, its
+  relist flag and its floor but removes it from every pass (and from
+  `relist_items()`, so a relist pass stops touching it too). Both Monitor
+  tables show only enabled items, so an unticked item's last price
+  disappears instead of looking live.
+- **Only monitored** hides the unticked rows; the info line reads
+  `N shown · N monitored · N configured`.
+- **Add from Items** enables the item selected in the Items section.
+  **Add from Inventory** takes the rows ticked in the Inventory section,
+  enables the configured rows it covers and creates a monitor-only row
+  (with the inventory tab and stack) for new items. **Add whole inventory**
+  does the same for every distinct bag item after a second-click
+  confirmation. **Item database…** searches all of Item.dat (7,805 rows) by
+  name or vnum and adds the picks to Monitor or Relist; **Add all matching**
+  confirms a list over 50, and a new Relist row is ticked with floor 1.
+- **Select all** / **Unselect all** build a row selection; **Group actions…**
+  ticks or unticks every shown row or the selection. **Open full editor**
+  selects the row in Items.
+- The **Items** section has its own **Group actions…** over every configured
+  item: Monitor all / Stop monitoring all / Relist all / Stop relisting all.
+  Relist all re-enables disabled items (a relist pass skips them) and sets
+  floor 1 wherever no floor is set.
+
 ## What the controller does
 
 `ntpl.bazar.BazarController` is a tick-driven state machine; the GUI calls
@@ -552,3 +580,7 @@ for and requires the automatic name load started by opening the NosBazar page
 (DB first), and checks that a complete snapshot is saved/restored while a
 partial list is marked and never cached. `gui_smoke.py` enforces the help
 popover on every frame, including the new section frames.
+`gui_bazar_monitor_items_smoke.py` drives the Monitor item set: row ticks,
+the Only monitored filter, Select all / group actions, Add from Items and
+Inventory, the full Item.dat picker in Relist mode, the Items group actions
+and the saved config.

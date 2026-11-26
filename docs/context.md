@@ -26,9 +26,15 @@ the data layer in [database.md](database.md).
   (`rc_blist` owner id, `self_id`, or the seller-list owner id) and the name
   is learned from the self `in 1` spawn (whole DLL log) or `rdlst`; standalone
   **Select all** / **Unselect all** buttons feed the selection group actions.
+  The Monitor section's left panel is the monitored item set: a tick per
+  configured item, Only monitored filter, Add from Items/Inventory/whole
+  inventory, a full Item.dat picker (search by name or vnum, Monitor or
+  Relist mode), Select all and group actions; the Items section has its own
+  group actions (Monitor/Relist all). Both Monitor tables show enabled items
+  only.
   The Character frame shows the detected name above HP/MP. The active user
   config is a 25-item relist list for char `root1` (see the handoff).
-- **Linux host**: 374 unittest cases, 6 GTK4 smokes, 44 fake-server bot
+- **Linux host**: 374 unittest cases, 6 GTK4 smokes, 45 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
   linux all test-host`, tests above. The host is **0.7.5**: it opens the
   bazaar with the client's own shortcut (`c_skill` → `wopen 32`, FrosTale)

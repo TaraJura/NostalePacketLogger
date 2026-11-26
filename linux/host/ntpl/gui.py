@@ -27,6 +27,7 @@ from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango
 
 from . import __version__
 from .bazar import (
+    MAX_ITEMS,
     MONITOR_SOURCES,
     BIBI_VNUM,
     BazarController,
@@ -36,6 +37,8 @@ from .bazar import (
     build_search_packet,
     default_config_path as default_bazar_config_path,
     inventory_search_items,
+    item_identity_name,
+    item_search_vnums,
     load_config as load_bazar_config,
     monitor_source,
     normalize_search_packet,
@@ -684,6 +687,27 @@ class Application(Gtk.Application):
         self.bazar_only_priced_checks: dict[str, Gtk.CheckButton] = {}
         self.bazar_monitor_notebook = None
         self.bazar_monitor_search = None
+        self.bazar_monitor_items_list = None
+        self.bazar_monitor_items_scroll = None
+        self.bazar_monitor_items_info = None
+        self.bazar_monitor_filter = None
+        self.bazar_monitor_group_button = None
+        self.bazar_monitor_select_all_button = None
+        self.bazar_monitor_unselect_all_button = None
+        self._bazar_monitor_selected: set[str] = set()
+        self.bazar_monitor_selected_name: str | None = None
+        self._bazar_monitor_render_version = -1
+        self.item_db_window = None
+        self._item_db_list = None
+        self._item_db_search = None
+        self._item_db_status = None
+        self._item_db_matches: list = []
+        self._item_db_mode = "monitor"
+        self._item_db_add_all_button = None
+        self._item_db_armed_at = 0.0
+        self._item_db_armed_count = 0
+        self._bazar_relist_inventory_armed_at = 0.0
+        self._bazar_monitor_inventory_armed_at = 0.0
         self._bazar_monitor_sources = MONITOR_SOURCES
         self.bazar_items_list = None
         self.bazar_items_info = None
@@ -1405,6 +1429,7 @@ class Application(Gtk.Application):
         self._bazar_render_items()
         self._bazar_render_results()
         self._bazar_render_relist_items()
+        self._bazar_render_monitor_items()
         self._bazar_update_relist_info()
         return False
 
@@ -2104,6 +2129,68 @@ class Application(Gtk.Application):
         self._inventory_checks.clear()
         self._inventory_render()
 
+    def _inventory_select_tracked(self, tracked: bool) -> None:
+        """Tick every shown row already covered by (or not in) the config."""
+        known = tracked_vnums(
+            self.bazar.config.items, self._item_name_map()
+        )
+        for slot in self._inventory_matches:
+            if (abs(int(slot.vnum)) in known) == tracked:
+                self._inventory_checks.add((slot.bag, slot.index))
+        self._inventory_render()
+
+    def _inventory_add_shown(self) -> None:
+        slots = list(self._inventory_matches)
+        if not slots:
+            self._bazar_log("no inventory row shown")
+            return
+        self._inventory_add(slots, start=False)
+
+    def _build_inventory_group_button(self) -> Gtk.MenuButton:
+        """Bulk selection/action menu for the Inventory scan list."""
+        button = Gtk.MenuButton(label="Group actions…")
+        button.set_tooltip_text(
+            "Select every shown row, select tracked or untracked rows, add "
+            "the shown rows to Monitor, or add the ticked rows to Relist."
+        )
+        popover = Gtk.Popover()
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+        box.set_margin_start(6)
+        box.set_margin_end(6)
+        entries = (
+            ("Select all shown", self._inventory_select_shown),
+            ("Unselect all", self._inventory_clear_selection),
+            ("Select tracked", lambda: self._inventory_select_tracked(True)),
+            (
+                "Select untracked",
+                lambda: self._inventory_select_tracked(False),
+            ),
+            None,
+            ("Add all shown to Monitor", self._inventory_add_shown),
+            (
+                "Add ticked to Relist",
+                self._bazar_relist_add_from_inventory,
+            ),
+        )
+        for entry in entries:
+            if entry is None:
+                box.append(Gtk.Separator())
+                continue
+            label, callback = entry
+            item_button = Gtk.Button(label=label)
+            item_button.add_css_class("flat")
+            item_button.set_halign(Gtk.Align.FILL)
+            item_button.connect(
+                "clicked",
+                lambda _button, cb=callback: (popover.popdown(), cb()),
+            )
+            box.append(item_button)
+        popover.set_child(box)
+        button.set_popover(popover)
+        return button
+
     def _inventory_schedule_render(self) -> None:
         if self._inventory_render_pending:
             return
@@ -2368,7 +2455,11 @@ class Application(Gtk.Application):
         and tooltips keeps the editors and scroll state intact.
         """
         items = {item.name: item for item in self.bazar.config.items}
-        for listbox in (self.bazar_items_list, self.bazar_relist_list):
+        for listbox in (
+            self.bazar_items_list,
+            self.bazar_relist_list,
+            self.bazar_monitor_items_list,
+        ):
             if listbox is None:
                 continue
             child = listbox.get_first_child()
@@ -2871,6 +2962,90 @@ class Application(Gtk.Application):
         self._bazar_select_relist_item(item.name)
         return [item]
 
+    def _bazar_relist_add_whole_inventory(self) -> None:
+        """Put every distinct inventory item into the relist set."""
+        slots = self._inventory_slots()
+        if not slots:
+            self._bazar_log(
+                "inventory is empty; relog or change channel with this "
+                "window open"
+            )
+            return
+        valid = [
+            slot
+            for slot in slots
+            if slot.vnum > 0 and slot.bag in (0, 1, 2)
+        ]
+        skipped = len(slots) - len(valid)
+        if not valid:
+            self._bazar_log(
+                "no relistable inventory item (bound vnums and bags 6/7 "
+                "cannot be relisted)"
+            )
+            return
+        distinct = len({abs(slot.vnum) for slot in valid})
+        if skipped:
+            self._bazar_log(
+                f"{skipped} slot(s) cannot be relisted (bound vnum or "
+                "bag 6/7); skipped"
+            )
+        now = time.monotonic()
+        armed = (
+            self._bazar_relist_inventory_armed_at > 0.0
+            and now - self._bazar_relist_inventory_armed_at <= 5.0
+        )
+        if not armed:
+            self._bazar_relist_inventory_armed_at = now
+            self._bazar_log(
+                f"click Add whole inventory again to put {distinct} item(s) "
+                "into the relist set with a floor of 1 where unset"
+            )
+            return
+        self._bazar_relist_inventory_armed_at = 0.0
+        if not self.item_info_loaded:
+            self._ensure_item_info_loaded(
+                self._bazar_relist_add_whole_inventory
+            )
+            return
+        created = self._inventory_add(valid, start=False)
+        # Representative slot per template: Main, then Etc, then Equip.
+        groups: dict[int, object] = {}
+        for bag in (1, 2, 0):
+            for slot in valid:
+                if slot.bag == bag:
+                    groups.setdefault(abs(slot.vnum), slot)
+        changed = bool(created)
+        for vnum, slot in groups.items():
+            item = self._bazar_item_by_vnum(vnum)
+            if item is None:
+                continue
+            quantity = int(getattr(slot, "amount", slot.quantity) or 0)
+            amount = min(1000, max(1, quantity))
+            for attribute, value in (
+                ("relist", True),
+                ("enabled", True),
+                ("vnum", vnum),
+                ("inv_tab", slot.bag),
+                ("amount", amount),
+            ):
+                if getattr(item, attribute) != value:
+                    setattr(item, attribute, value)
+                    changed = True
+            if item.min_price <= 0:
+                item.min_price = 1
+                changed = True
+        if changed:
+            self._bazar_save_config(quiet=True)
+        self._bazar_render_items()
+        self._bazar_render_relist_items()
+        self._bazar_render_monitor_items()
+        self._bazar_render_results()
+        self._bazar_update_relist_info()
+        self._bazar_log(
+            f"relist: whole inventory imported · {len(groups)} item(s), "
+            f"{len(created)} new · floor 1 where unset"
+        )
+
     def _bazar_relist_add_from_inventory(self) -> list[BazarItem]:
         """Add the Inventory section's ticked rows to the relist set."""
         slots = self._inventory_checked_slots()
@@ -2951,6 +3126,296 @@ class Application(Gtk.Application):
                 "in Items or use the exact inventory vnum"
             )
         return f"ready · floor {item.min_price:,} per unit"
+
+    # -- Monitor item set -------------------------------------------------
+
+    @staticmethod
+    def _bazar_monitor_detail(item: BazarItem) -> str:
+        search = " ".join(str(vnum) for vnum in item.vnums) or "no search"
+        text = f"{search} · {item.cost_text()}"
+        if item.relist:
+            text += " · relisting"
+        return text
+
+    def _bazar_render_monitor_items(self) -> None:
+        listbox = self.bazar_monitor_items_list
+        if listbox is None:
+            return
+        adjustment = None
+        scroll = 0.0
+        if self.bazar_monitor_items_scroll is not None:
+            adjustment = self.bazar_monitor_items_scroll.get_vadjustment()
+            scroll = adjustment.get_value()
+        selected = set(self._bazar_monitor_selected)
+        child = listbox.get_first_child()
+        while child is not None:
+            listbox.remove(child)
+            child = listbox.get_first_child()
+        items = list(self.bazar.config.items)
+        if (
+            self.bazar_monitor_filter is not None
+            and self.bazar_monitor_filter.get_active()
+        ):
+            items = [item for item in items if item.enabled]
+        present: set[str] = set()
+        for item in items:
+            present.add(item.name)
+            row = Gtk.ListBoxRow()
+            row.item_name = item.name  # type: ignore[attr-defined]
+            content = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=6
+            )
+            check = Gtk.CheckButton()
+            check.set_valign(Gtk.Align.START)
+            check.set_active(bool(item.enabled))
+            check.set_tooltip_text(
+                "Search this item during Monitor Start. Unticking keeps it "
+                "configured and its floor, but stops monitoring and relisting."
+            )
+            handler = check.connect(
+                "toggled",
+                lambda button, name=item.name: (
+                    self._bazar_monitor_tracked_toggled(
+                        name, button.get_active()
+                    )
+                ),
+            )
+            row.monitor_check = check  # type: ignore[attr-defined]
+            row.monitor_handler = handler  # type: ignore[attr-defined]
+            labels = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=1
+            )
+            name = Gtk.Label(label=self._bazar_item_label(item))
+            name.set_xalign(0)
+            name.set_hexpand(True)
+            name.set_wrap(True)
+            name.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            name.set_max_width_chars(32)
+            name.set_tooltip_text(self._bazar_item_tooltip(item))
+            row.name_label = name  # type: ignore[attr-defined]
+            detail = Gtk.Label(label=self._bazar_monitor_detail(item))
+            detail.set_xalign(0)
+            detail.add_css_class("dim-label")
+            detail.set_wrap(True)
+            detail.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            detail.set_max_width_chars(38)
+            labels.append(name)
+            labels.append(detail)
+            content.append(check)
+            content.append(labels)
+            row.set_child(content)
+            listbox.append(row)
+        selected &= present
+        self._bazar_monitor_selected = selected
+        child = listbox.get_first_child()
+        while child is not None:
+            if getattr(child, "item_name", None) in selected:
+                listbox.select_row(child)
+            child = child.get_next_sibling()
+        self._bazar_update_monitor_items_info()
+        if adjustment is not None:
+            GLib.idle_add(
+                self._inventory_restore_scroll, adjustment, scroll
+            )
+
+    def _bazar_update_monitor_items_info(self) -> None:
+        if self.bazar_monitor_items_info is None:
+            return
+        monitored = sum(
+            1 for item in self.bazar.config.items if item.enabled
+        )
+        rows = 0
+        child = (
+            self.bazar_monitor_items_list.get_first_child()
+            if self.bazar_monitor_items_list is not None
+            else None
+        )
+        while child is not None:
+            rows += 1
+            child = child.get_next_sibling()
+        self.bazar_monitor_items_info.set_text(
+            f"{rows} shown · {monitored} monitored · "
+            f"{len(self.bazar.config.items)} configured"
+        )
+
+    def _bazar_monitor_tracked_toggled(
+        self, name: str, active: bool
+    ) -> None:
+        item = self._bazar_item_by_name(name)
+        if item is None or item.enabled == active:
+            return
+        item.enabled = active
+        self._bazar_save_config(quiet=True)
+        self._bazar_update_info()
+        self._bazar_render_results()
+        self._bazar_update_monitor_items_info()
+        if (
+            self.bazar_monitor_filter is not None
+            and self.bazar_monitor_filter.get_active()
+            and not active
+        ):
+            GLib.idle_add(self._bazar_render_monitor_items)
+        self._bazar_log(
+            f"{self._bazar_item_label(item)}: monitoring "
+            f"{'on' if active else 'off'}"
+            + ("" if active else " (also out of relisting)")
+        )
+
+    def _bazar_monitor_selection_changed(
+        self, listbox: Gtk.ListBox, row: Gtk.ListBoxRow | None
+    ) -> None:
+        if row is not None and getattr(row, "item_name", None):
+            self.bazar_monitor_selected_name = row.item_name
+        self._bazar_monitor_selected = {
+            getattr(selected, "item_name", "")
+            for selected in listbox.get_selected_rows()
+        }
+        self._bazar_monitor_selected.discard("")
+
+    def _bazar_monitor_shown_names(self) -> list[str]:
+        names: list[str] = []
+        if self.bazar_monitor_items_list is None:
+            return names
+        child = self.bazar_monitor_items_list.get_first_child()
+        while child is not None:
+            name = getattr(child, "item_name", None)
+            if name:
+                names.append(name)
+            child = child.get_next_sibling()
+        return names
+
+    def _bazar_monitor_selected_names(self) -> list[str]:
+        shown = set(self._bazar_monitor_shown_names())
+        return [
+            name for name in shown if name in self._bazar_monitor_selected
+        ]
+
+    def _bazar_monitor_select_shown(self) -> None:
+        if self.bazar_monitor_items_list is None:
+            return
+        self.bazar_monitor_items_list.select_all()
+        self._bazar_monitor_selected = set(
+            self._bazar_monitor_shown_names()
+        )
+
+    def _bazar_monitor_unselect_all(self) -> None:
+        if self.bazar_monitor_items_list is not None:
+            self.bazar_monitor_items_list.unselect_all()
+        self._bazar_monitor_selected.clear()
+
+    def _bazar_monitor_set_many(
+        self, names: list[str], active: bool
+    ) -> None:
+        wanted = set(names)
+        changed = 0
+        for item in self.bazar.config.items:
+            if item.name in wanted and item.enabled != active:
+                item.enabled = active
+                changed += 1
+        if not changed:
+            return
+        self._bazar_save_config(quiet=True)
+        self._bazar_render_monitor_items()
+        self._bazar_render_results()
+        self._bazar_update_info()
+        self._bazar_log(
+            f"monitor: {changed} item(s) "
+            f"{'on' if active else 'off'}"
+        )
+
+    def _bazar_monitor_set_all_shown(self, active: bool) -> None:
+        self._bazar_monitor_set_many(
+            self._bazar_monitor_shown_names(), active
+        )
+
+    def _bazar_monitor_set_selected(self, active: bool) -> None:
+        self._bazar_monitor_set_many(
+            self._bazar_monitor_selected_names(), active
+        )
+
+    def _bazar_monitor_add_from_items(self) -> None:
+        item = self._bazar_item_by_name(self.bazar_selected_name)
+        if item is None:
+            self._bazar_log("select an item in the Items section first")
+            return
+        self._bazar_monitor_set_many([item.name], True)
+
+    def _bazar_monitor_add_from_inventory(self) -> None:
+        slots = self._inventory_checked_slots()
+        if not slots:
+            self._bazar_log(
+                "tick one or more inventory rows in the Inventory section "
+                "first"
+            )
+            return
+        self._bazar_monitor_add_slots(slots, "selected inventory rows")
+
+    def _bazar_monitor_add_whole_inventory(self) -> None:
+        slots = self._inventory_slots()
+        if not slots:
+            self._bazar_log(
+                "inventory is empty; relog or change channel with this "
+                "window open"
+            )
+            return
+        distinct = len(
+            {abs(slot.vnum) for slot in slots if slot.vnum != 0}
+        )
+        now = time.monotonic()
+        armed = (
+            self._bazar_monitor_inventory_armed_at > 0.0
+            and now - self._bazar_monitor_inventory_armed_at <= 5.0
+        )
+        if not armed:
+            self._bazar_monitor_inventory_armed_at = now
+            self._bazar_log(
+                f"click Add whole inventory again to add and monitor "
+                f"{distinct} inventory item(s)"
+            )
+            return
+        self._bazar_monitor_inventory_armed_at = 0.0
+        self._bazar_monitor_add_slots(slots, "whole inventory")
+
+    def _bazar_monitor_add_slots(
+        self, slots: list, why: str
+    ) -> None:
+        if not self.item_info_loaded:
+            self._ensure_item_info_loaded(
+                lambda: self._bazar_monitor_add_slots(slots, why)
+            )
+            return
+        created = self._inventory_add(slots, start=False)
+        inventory_vnums = {
+            abs(int(slot.vnum)) for slot in slots if int(slot.vnum) != 0
+        }
+        names = self._item_name_map()
+        enabled_more = 0
+        for item in self.bazar.config.items:
+            if item.enabled:
+                continue
+            if tracked_vnums([item], names) & inventory_vnums:
+                item.enabled = True
+                enabled_more += 1
+        if enabled_more:
+            self._bazar_save_config(quiet=True)
+        self._bazar_render_monitor_items()
+        self._bazar_render_results()
+        self._bazar_update_info()
+        self._bazar_update_monitor_items_info()
+        self._bazar_log(
+            f"monitor: {len(created)} item(s) added, {enabled_more} "
+            f"existing row(s) enabled from {why}"
+        )
+
+    def _bazar_monitor_open_editor(self) -> None:
+        name = self.bazar_monitor_selected_name
+        if not name:
+            name = next(iter(self._bazar_monitor_selected), None)
+        if not name:
+            self._bazar_log("select a Monitor row first")
+            return
+        self._bazar_show_section("items")
+        self._bazar_select_item(name)
 
     def _bazar_relist_pressed(
         self, _gesture, _n_press: int, _x: float, y: float
@@ -3401,6 +3866,7 @@ class Application(Gtk.Application):
         self._bazar_render_items()
         self._bazar_render_results()
         self._bazar_render_relist_items()
+        self._bazar_render_monitor_items()
         self._update_bazar_inventory_info()
         self._bazar_update_relist_info()
         if self._inventory_list is not None:
@@ -3763,6 +4229,386 @@ class Application(Gtk.Application):
         self._nosmall_prune_count = 0
         return False
 
+    # -- full item database picker ---------------------------------------
+
+    def _open_item_database_picker(self, mode: str = "monitor") -> None:
+        """Search all Item.dat rows and add them to Monitor or Relist.
+
+        Unlike the NosMall catalog picker (only priced groups), this lists
+        every item in the local database (7,805 rows), filtered by name or
+        vnum.  Adding fills the vnum/search packet and, when the item is in
+        the inventory, its tab and stack; Relist mode also ticks the row and
+        sets a floor of 1 so the set is immediately usable.
+        """
+        mode = mode if mode in ("monitor", "relist") else "monitor"
+        self._item_db_mode = mode
+        if self.item_db_window is not None:
+            if self._item_db_search is not None:
+                self._item_db_render(self._item_db_search.get_text())
+            self.item_db_window.present()
+            return
+        if not self.item_info_loaded:
+            self._ensure_item_info_loaded(
+                lambda: self._open_item_database_picker(mode)
+            )
+            return
+        window = Gtk.Window(
+            title=(
+                "Item database — add to monitor"
+                if mode == "monitor"
+                else "Item database — add to relist"
+            )
+        )
+        window.set_application(self)
+        window.set_transient_for(self.window)
+        window.set_modal(True)
+        window.set_default_size(760, 620)
+        window.connect("close-request", self._close_item_db_picker)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_top(8)
+        box.set_margin_bottom(8)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        search = Gtk.SearchEntry()
+        search.set_placeholder_text("search all items by name or vnum")
+        search.set_hexpand(True)
+        search.connect(
+            "search-changed",
+            lambda entry: self._item_db_render(entry.get_text()),
+        )
+        self._item_db_search = search
+        top.append(search)
+        top.append(
+            self._help_button(
+                "Item database",
+                "Every item in the local Item.dat database, not just the "
+                "NosMall catalog. Adding creates a Monitor or Relist row with "
+                "the exact vnum as its search packet; a new row takes its "
+                "inventory tab and stack when the item is in the bag. Relist "
+                "mode also ticks the row and sets a floor of 1. Add all "
+                "matching has a second-click confirmation for large lists.",
+            )
+        )
+        box.append(top)
+        self._item_db_status = Gtk.Label(label="")
+        self._item_db_status.set_xalign(0)
+        self._item_db_status.set_wrap(True)
+        self._item_db_status.add_css_class("dim-label")
+        box.append(self._item_db_status)
+        self._item_db_list = Gtk.ListBox()
+        self._item_db_list.set_activate_on_single_click(True)
+        self._item_db_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self._item_db_list.connect(
+            "row-activated", self._item_db_row_activated
+        )
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_child(self._item_db_list)
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_vexpand(True)
+        box.append(scrolled)
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        add = Gtk.Button(label="Add selected")
+        add.connect("clicked", lambda *_: self._item_db_add_selected())
+        buttons.append(add)
+        self._item_db_add_all_button = Gtk.Button(
+            label="Add all matching"
+        )
+        self._item_db_add_all_button.connect(
+            "clicked", lambda *_: self._item_db_add_all()
+        )
+        buttons.append(self._item_db_add_all_button)
+        close = Gtk.Button(label="Close")
+        close.connect("clicked", lambda *_: window.close())
+        buttons.append(close)
+        box.append(buttons)
+        window.set_child(box)
+        self.item_db_window = window
+        self._item_db_render("")
+        window.present()
+
+    def _item_db_render(self, query: str) -> None:
+        if self._item_db_list is None:
+            return
+        child = self._item_db_list.get_first_child()
+        while child is not None:
+            self._item_db_list.remove(child)
+            child = self._item_db_list.get_first_child()
+        needle = query.strip().casefold()
+        matches = []
+        for vnum, info in self.item_info.items():
+            if vnum <= 0:
+                continue
+            if needle and needle not in info.name.casefold() and needle not in str(vnum):
+                continue
+            matches.append((vnum, info))
+        matches.sort(key=lambda pair: (pair[1].name.casefold(), pair[0]))
+        self._item_db_matches = matches
+        shown = matches[:300]
+        costs = self._nosmall_costs()
+        for vnum, info in shown:
+            row = Gtk.ListBoxRow()
+            row.db_vnum = vnum  # type: ignore[attr-defined]
+            content = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=8
+            )
+            name = Gtk.Label(label=info.name)
+            name.set_xalign(0)
+            name.set_hexpand(True)
+            name.set_ellipsize(Pango.EllipsizeMode.END)
+            name.set_max_width_chars(52)
+            detail = Gtk.Label(
+                label=(
+                    f"vnum {vnum}"
+                    + (
+                        f" · NPC {info.npc_price:,} g"
+                        if info.npc_price > 0
+                        else ""
+                    )
+                    + (
+                        f" · {costs[vnum]:g} ND"
+                        if vnum in costs
+                        else ""
+                    )
+                )
+            )
+            detail.set_xalign(1)
+            detail.add_css_class("dim-label")
+            detail.set_ellipsize(Pango.EllipsizeMode.END)
+            detail.set_max_width_chars(40)
+            content.append(name)
+            content.append(detail)
+            row.set_child(content)
+            self._item_db_list.append(row)
+        extra = (
+            f" · showing first {len(shown)}"
+            if len(matches) > len(shown)
+            else ""
+        )
+        if self._item_db_status is not None:
+            self._item_db_status.set_text(
+                f"{len(matches)} matching item(s){extra} · adding to "
+                f"{'Monitor' if self._item_db_mode == 'monitor' else 'Relist'}"
+            )
+        if getattr(self, "_item_db_add_all_button", None) is not None:
+            self._item_db_add_all_button.set_label(
+                f"Add all matching ({len(matches)})"
+            )
+            self._item_db_add_all_button.set_sensitive(bool(matches))
+
+    def _item_db_row_activated(
+        self, _listbox: Gtk.ListBox, row: Gtk.ListBoxRow
+    ) -> None:
+        vnum = getattr(row, "db_vnum", None)
+        if vnum:
+            self._item_db_add_selected(vnum)
+
+    def _item_db_add_selected(self, vnum: int | None = None) -> None:
+        if vnum is None:
+            row = self._item_db_list.get_selected_row() if self._item_db_list else None
+            vnum = getattr(row, "db_vnum", None) if row is not None else None
+        if not vnum:
+            if self._item_db_status is not None:
+                self._item_db_status.set_text("select an item first")
+            return
+        added, enabled = self._bazar_add_items_from_db(
+            [vnum], self._item_db_mode
+        )
+        if self._item_db_status is not None:
+            self._item_db_status.set_text(
+                f"{'added' if added else 'already configured; enabled'} "
+                f"vnum {vnum}"
+            )
+
+    def _item_db_add_all(self) -> None:
+        matches = list(self._item_db_matches)
+        if not matches:
+            return
+        remaining = MAX_ITEMS - len(self.bazar.config.items)
+        if remaining <= 0:
+            if self._item_db_status is not None:
+                self._item_db_status.set_text(
+                    f"the config is full ({MAX_ITEMS} items)"
+                )
+            return
+        vnums = [vnum for vnum, _info in matches[:remaining]]
+        if len(vnums) > 50:
+            now = time.monotonic()
+            armed = (
+                self._item_db_armed_at > 0.0
+                and self._item_db_armed_count == len(vnums)
+                and now - self._item_db_armed_at <= 5.0
+            )
+            if not armed:
+                self._item_db_armed_at = now
+                self._item_db_armed_count = len(vnums)
+                if self._item_db_status is not None:
+                    self._item_db_status.set_text(
+                        f"Click 'Add all matching' again to add "
+                        f"{len(vnums)} item(s)"
+                    )
+                return
+            self._item_db_armed_at = 0.0
+            self._item_db_armed_count = 0
+        added, enabled = self._bazar_add_items_from_db(
+            vnums, self._item_db_mode
+        )
+        if self._item_db_status is not None:
+            self._item_db_status.set_text(
+                f"Added {added} item(s) · {enabled} configured/enabled"
+            )
+
+    def _close_item_db_picker(self, _window=None) -> bool:
+        self.item_db_window = None
+        self._item_db_list = None
+        self._item_db_search = None
+        self._item_db_status = None
+        self._item_db_matches = []
+        self._item_db_add_all_button = None
+        self._item_db_armed_at = 0.0
+        self._item_db_armed_count = 0
+        return False
+
+    def _bazar_add_items_from_db(
+        self, vnums: list[int], mode: str
+    ) -> tuple[int, int]:
+        """Add/update items from the full Item.dat database in one save.
+
+        ``mode`` is ``monitor`` (enabled, monitor-only for new rows) or
+        ``relist`` (enabled + relist, floor 1 when unset, inventory tab and
+        stack when the item is in the bag).
+        """
+        items = list(self.bazar.config.items)
+        by_vnum: dict[int, BazarItem] = {}
+        for item in items:
+            if item.vnum:
+                by_vnum.setdefault(abs(int(item.vnum)), item)
+        names = self._item_name_map()
+        effective: dict[int, BazarItem] = {}
+        for item in items:
+            for vnum in tracked_vnums([item], names):
+                effective.setdefault(abs(int(vnum)), item)
+        used = {item.name for item in items}
+        costs = self._nosmall_costs()
+        added = 0
+        enabled = 0
+        touched = False
+        for raw_vnum in vnums:
+            vnum = abs(int(raw_vnum))
+            if vnum <= 0:
+                continue
+            info = self.item_info.get(vnum)
+            slot = None
+            for bag in (1, 2, 0):
+                slot = self.engine.world.find_inventory(bag, vnum)
+                if slot is not None:
+                    break
+            item = by_vnum.get(vnum) or effective.get(vnum)
+            if item is not None:
+                changed = False
+                if not item.enabled:
+                    item.enabled = True
+                    changed = True
+                if mode == "relist":
+                    if not item.relist:
+                        item.relist = True
+                        changed = True
+                    if item.min_price <= 0:
+                        item.min_price = 1
+                        changed = True
+                    if slot is not None:
+                        amount = min(
+                            1000,
+                            max(1, int(getattr(slot, "amount", slot.quantity) or 1)),
+                        )
+                        for attribute, value in (
+                            ("vnum", vnum),
+                            ("inv_tab", slot.bag),
+                            ("amount", amount),
+                        ):
+                            if getattr(item, attribute) != value:
+                                setattr(item, attribute, value)
+                                changed = True
+                cost = costs.get(vnum)
+                if cost is not None and item.nos_cost is None and item.npc_cost is None:
+                    item.nos_cost = float(cost)
+                    changed = True
+                elif (
+                    cost is None
+                    and item.nos_cost is None
+                    and item.npc_cost is None
+                    and info is not None
+                    and info.npc_price > 0
+                ):
+                    item.npc_cost = float(info.npc_price)
+                    changed = True
+                if changed:
+                    touched = True
+                enabled += 1
+                continue
+            name = (info.name if info is not None else None) or f"item {vnum}"
+            candidate = name[:80]
+            base = name[:72]
+            counter = 2
+            while candidate in used:
+                candidate = (
+                    f"{base} [{vnum}]"
+                    if counter == 2
+                    else f"{base[:64]} [{vnum}/{counter}]"
+                )[:80]
+                counter += 1
+            used.add(candidate)
+            index0 = info.index0 if info is not None else 0
+            amount = 5
+            inv_tab = None
+            if slot is not None:
+                inv_tab = slot.bag
+                amount = min(
+                    1000,
+                    max(1, int(getattr(slot, "amount", slot.quantity) or 1)),
+                )
+            cost = costs.get(vnum)
+            npc = info.npc_price if info is not None else 0
+            new_item = BazarItem(
+                name=candidate,
+                search_packet=build_search_packet([vnum]),
+                vnum=vnum,
+                inv_tab=inv_tab,
+                amount=amount,
+                min_price=1 if mode == "relist" else 0,
+                nos_cost=float(cost) if cost is not None else None,
+                npc_cost=(
+                    float(npc)
+                    if cost is None and npc > 0
+                    else None
+                ),
+                unk1=min(1000, 8 + index0) if index0 > 0 else 9,
+                unk2=3 if index0 >= 2 else 4,
+                durability=1,
+                medal=2,
+                enabled=True,
+                relist=(mode == "relist"),
+            )
+            items.append(new_item)
+            by_vnum[vnum] = new_item
+            effective[vnum] = new_item
+            added += 1
+            enabled += 1
+            touched = True
+        if touched:
+            self._bazar_set_items(items)
+            self._bazar_save_config(quiet=True)
+            self._bazar_render_items()
+            self._bazar_render_relist_items()
+            self._bazar_render_monitor_items()
+        label = "monitor" if mode == "monitor" else "relist"
+        self._bazar_log(
+            f"item database: {added} item(s) added, {enabled} enabled "
+            f"for {label}"
+        )
+        return added, enabled
+
     def _bazar_render_results(self) -> None:
         if not self.bazar_results_boxes:
             return
@@ -3783,10 +4629,12 @@ class Application(Gtk.Application):
             box.remove(child)
             child = box.get_first_child()
 
+        # Only monitored items belong in a Monitor view: unticking a row
+        # stops its searches, so its last quote would be stale.
         items = [
             quote
             for quote in quotes
-            if monitor_source(quote.item) == source
+            if monitor_source(quote.item) == source and quote.item.enabled
         ]
         needle = ""
         if self.bazar_monitor_search is not None:
@@ -4090,6 +4938,8 @@ class Application(Gtk.Application):
         """Reset the tab together with the engine when another client attaches."""
         self._bazar_stop("client changed")
         self.bazar_selected_name = None
+        self._bazar_monitor_selected.clear()
+        self.bazar_monitor_selected_name = None
         self._bazar_config_loaded = False
         self._inventory_seeded = False
         self._inventory_cache_loaded = False
@@ -4188,6 +5038,7 @@ class Application(Gtk.Application):
         self._bazar_render_items()
         self._bazar_render_results()
         self._bazar_render_relist_items()
+        self._bazar_render_monitor_items()
         self._update_bazar_inventory_info()
         if self._inventory_list is not None:
             self._inventory_render()
@@ -4284,6 +5135,7 @@ class Application(Gtk.Application):
             "clicked", lambda *_: self._inventory_clear_selection()
         )
         buttons.append(clear)
+        buttons.append(self._build_inventory_group_button())
         self._inventory_add_button = Gtk.Button(label="Add selected (0)")
         self._inventory_add_button.add_css_class("suggested-action")
         self._inventory_add_button.set_sensitive(False)
@@ -4328,7 +5180,10 @@ class Application(Gtk.Application):
                 "bazaar item per distinct item; Set up relist adds the "
                 "checked item and opens its relist settings; Add all adds "
                 "every inventory item; Price all adds every item and "
-                "starts Monitor. The server sends the inventory only at "
+                "starts Monitor. Group actions… selects every shown row, "
+                "selects tracked or untracked rows, adds the shown rows to "
+                "the Monitor set, or adds the ticked rows to Relist. The "
+                "server sends the inventory only at "
                 "login: if it is "
                 "missing or marked partial, relog or change channel with "
                 "this window open. The last complete inventory is cached "
@@ -4434,7 +5289,10 @@ class Application(Gtk.Application):
                     "Monitor keeps watching it. Add from Items takes the "
                     "selection in the Items section; Add from Inventory "
                     "takes the rows ticked in the Inventory section and "
-                    "fills vnum, tab and amount from the slot. Remove from "
+                    "fills vnum, tab and amount from the slot; Add whole "
+                    "inventory puts every distinct bag item into the set "
+                    "(second click confirms); Item database… searches all "
+                    "of Item.dat and adds the picks. Remove from "
                     "relisting (or the row tick) keeps the item and its "
                     "floor, only out of the relist set. Only relisting "
                     "hides the rest of the list. Group actions… covers "
@@ -4499,6 +5357,29 @@ class Application(Gtk.Application):
         )
         add_row.append(self.bazar_relist_add_inventory_button)
         box.append(add_row)
+        import_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6
+        )
+        whole = Gtk.Button(label="Add whole inventory")
+        whole.set_tooltip_text(
+            "Put every distinct inventory item into the relist set with its "
+            "tab and stack, and a floor of 1 where none is set. A second "
+            "click confirms."
+        )
+        whole.connect(
+            "clicked", lambda *_: self._bazar_relist_add_whole_inventory()
+        )
+        import_row.append(whole)
+        database = Gtk.Button(label="Item database…")
+        database.set_tooltip_text(
+            "Search all items in the local database and add them to the "
+            "relist set."
+        )
+        database.connect(
+            "clicked", lambda *_: self._open_item_database_picker("relist")
+        )
+        import_row.append(database)
+        box.append(import_row)
         manage_row = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL, spacing=6
         )
@@ -4723,7 +5604,13 @@ class Application(Gtk.Application):
                 Gtk.Label(label=titles[source]),
             )
         monitors.connect("switch-page", self._bazar_monitor_switched)
-        content.append(monitors)
+        body = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
+        body.set_vexpand(True)
+        body.set_wide_handle(True)
+        body.set_start_child(self._build_bazar_monitor_items_panel())
+        body.set_end_child(monitors)
+        content.append(body)
+        self._bazar_render_monitor_items()
         self._bazar_monitor_switched(monitors, monitors.get_nth_page(0), 0)
 
         monitor_frame = self._frame(
@@ -4739,15 +5626,214 @@ class Application(Gtk.Application):
                     "example Pet Food or Bell of Sweet Home. The Item column "
                     "is the real Item.dat name; hover it for the configured "
                     "label and search vnums. Only priced hides rows without "
-                    "a current answer; each tab has its own filter. Add and "
-                    "edit searches in Items, and choose the monitor with its "
-                    "Cost type. A pass where every item times out retries "
-                    "after the refresh interval."
+                    "a current answer; each tab has its own filter. The left "
+                    "Monitor items list is the set that Start searches: tick "
+                    "a row to monitor it, add from Items/Inventory, add the "
+                    "whole inventory, or search the entire Item database. "
+                    "Select all / Unselect all and Group actions… switch the "
+                    "visible or selected rows. A pass where every item times "
+                    "out retries after the refresh interval."
                 ),
         )
         monitor_frame.set_vexpand(True)
         page.append(monitor_frame)
         return page
+
+    def _build_bazar_monitor_items_panel(self) -> Gtk.Widget:
+        """The Monitor set: tick rows to search them, bulk add/import."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.set_size_request(370, -1)
+        box.set_vexpand(True)
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        title = Gtk.Label(label="Monitor items")
+        title.set_xalign(0)
+        title.set_hexpand(True)
+        header.append(title)
+        header.append(
+            self._help_button(
+                "Monitor items",
+                "The Monitor set: every configured item with a Monitor tick. "
+                "Ticked rows are searched by Monitor Start; unticking keeps "
+                "the item configured and its saved settings but stops "
+                "searching it. Add from Items uses the Items selection, Add "
+                "from Inventory the ticked Inventory rows, Add whole "
+                "inventory every distinct inventory item, and Item database… "
+                "opens all Item.dat rows with a search. Select all / "
+                "Unselect all build a row selection, and Group actions… "
+                "monitors or stops the selection or every shown row.",
+            )
+        )
+        box.append(header)
+        self.bazar_monitor_items_info = Gtk.Label(label="0 items")
+        self.bazar_monitor_items_info.set_xalign(0)
+        self.bazar_monitor_items_info.add_css_class("dim-label")
+        box.append(self.bazar_monitor_items_info)
+        self.bazar_monitor_items_list = Gtk.ListBox()
+        self.bazar_monitor_items_list.set_selection_mode(
+            Gtk.SelectionMode.MULTIPLE
+        )
+        self.bazar_monitor_items_list.set_activate_on_single_click(True)
+        self.bazar_monitor_items_list.connect(
+            "row-selected", self._bazar_monitor_selection_changed
+        )
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_child(self.bazar_monitor_items_list)
+        scroll.set_policy(
+            Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
+        )
+        scroll.set_vexpand(True)
+        self.bazar_monitor_items_scroll = scroll
+        box.append(scroll)
+
+        row1 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        add_items = Gtk.Button(label="Add from Items")
+        add_items.set_tooltip_text(
+            "Monitor the item selected in the Items section."
+        )
+        add_items.connect(
+            "clicked", lambda *_: self._bazar_monitor_add_from_items()
+        )
+        row1.append(add_items)
+        add_inv = Gtk.Button(label="Add from Inventory")
+        add_inv.set_tooltip_text(
+            "Monitor the rows ticked in the Inventory section."
+        )
+        add_inv.connect(
+            "clicked", lambda *_: self._bazar_monitor_add_from_inventory()
+        )
+        row1.append(add_inv)
+        box.append(row1)
+
+        row2 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        whole = Gtk.Button(label="Add whole inventory")
+        whole.set_tooltip_text(
+            "Add every distinct inventory item to the monitor set. It is a "
+            "second-click confirmation because the list can grow a lot."
+        )
+        whole.connect(
+            "clicked", lambda *_: self._bazar_monitor_add_whole_inventory()
+        )
+        row2.append(whole)
+        database = Gtk.Button(label="Item database…")
+        database.set_tooltip_text(
+            "Search all items in the local database and add them to the "
+            "monitor."
+        )
+        database.connect(
+            "clicked",
+            lambda *_: self._open_item_database_picker("monitor"),
+        )
+        row2.append(database)
+        box.append(row2)
+
+        row3 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        stop = Gtk.Button(label="Stop monitoring")
+        stop.set_tooltip_text(
+            "Untick Monitor for the selected rows; they stay configured."
+        )
+        stop.connect(
+            "clicked", lambda *_: self._bazar_monitor_set_selected(False)
+        )
+        row3.append(stop)
+        self.bazar_monitor_select_all_button = Gtk.Button(label="Select all")
+        self.bazar_monitor_select_all_button.set_tooltip_text(
+            "Select every row shown for the selection group actions."
+        )
+        self.bazar_monitor_select_all_button.connect(
+            "clicked", lambda *_: self._bazar_monitor_select_shown()
+        )
+        row3.append(self.bazar_monitor_select_all_button)
+        self.bazar_monitor_unselect_all_button = Gtk.Button(
+            label="Unselect all"
+        )
+        self.bazar_monitor_unselect_all_button.set_tooltip_text(
+            "Clear the row selection."
+        )
+        self.bazar_monitor_unselect_all_button.connect(
+            "clicked", lambda *_: self._bazar_monitor_unselect_all()
+        )
+        row3.append(self.bazar_monitor_unselect_all_button)
+        self.bazar_monitor_filter = Gtk.CheckButton(label="Only monitored")
+        self.bazar_monitor_filter.set_tooltip_text(
+            "Hide items whose Monitor tick is off."
+        )
+        self.bazar_monitor_filter.connect(
+            "toggled", lambda *_: self._bazar_render_monitor_items()
+        )
+        row3.append(self.bazar_monitor_filter)
+        box.append(row3)
+
+        row4 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self.bazar_monitor_group_button = (
+            self._build_bazar_monitor_group_button()
+        )
+        row4.append(self.bazar_monitor_group_button)
+        open_editor = Gtk.Button(label="Open full editor")
+        open_editor.set_tooltip_text(
+            "Select the item in the Items section and edit its name, search "
+            "vnums and cost."
+        )
+        open_editor.connect(
+            "clicked", lambda *_: self._bazar_monitor_open_editor()
+        )
+        row4.append(open_editor)
+        box.append(row4)
+        return box
+
+    def _build_bazar_monitor_group_button(self) -> Gtk.MenuButton:
+        """Bulk actions for the Monitor set (shown or selected rows)."""
+        button = Gtk.MenuButton(label="Group actions…")
+        button.set_tooltip_text(
+            "Bulk actions: monitor or stop the visible rows, monitor or "
+            "stop the selected rows, and select/clear the selection."
+        )
+        popover = Gtk.Popover()
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+        box.set_margin_start(6)
+        box.set_margin_end(6)
+        entries = (
+            (
+                "Monitor all shown",
+                lambda: self._bazar_monitor_set_all_shown(True),
+            ),
+            (
+                "Stop monitoring all shown",
+                lambda: self._bazar_monitor_set_all_shown(False),
+            ),
+            None,
+            (
+                "Monitor selected",
+                lambda: self._bazar_monitor_set_selected(True),
+            ),
+            (
+                "Stop monitoring selected",
+                lambda: self._bazar_monitor_set_selected(False),
+            ),
+            None,
+            (
+                "Select all shown",
+                self._bazar_monitor_select_shown,
+            ),
+            ("Unselect all", self._bazar_monitor_unselect_all),
+        )
+        for entry in entries:
+            if entry is None:
+                box.append(Gtk.Separator())
+                continue
+            label, callback = entry
+            item_button = Gtk.Button(label=label)
+            item_button.add_css_class("flat")
+            item_button.set_halign(Gtk.Align.FILL)
+            item_button.connect(
+                "clicked",
+                lambda _button, cb=callback: (popover.popdown(), cb()),
+            )
+            box.append(item_button)
+        popover.set_child(box)
+        button.set_popover(popover)
+        return button
 
     def _build_bazar_monitor_view(self, source: str) -> Gtk.Widget:
         view = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -4813,6 +5899,99 @@ class Application(Gtk.Application):
         self.bazar_results_info = self.bazar_results_infos.get(source)
         self.bazar_only_priced = self.bazar_only_priced_checks.get(source)
 
+    def _build_items_group_button(self) -> Gtk.MenuButton:
+        """Bulk Monitor/Relist switches over the whole configured list."""
+        button = Gtk.MenuButton(label="Group actions…")
+        button.set_tooltip_text(
+            "Bulk switches over every configured item: monitor or stop, "
+            "relist or stop."
+        )
+        popover = Gtk.Popover()
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+        box.set_margin_start(6)
+        box.set_margin_end(6)
+        entries = (
+            (
+                "Monitor all",
+                lambda: self._bazar_items_set_all("enabled", True),
+            ),
+            (
+                "Stop monitoring all",
+                lambda: self._bazar_items_set_all("enabled", False),
+            ),
+            None,
+            (
+                "Relist all",
+                lambda: self._bazar_items_set_all("relist", True),
+            ),
+            (
+                "Stop relisting all",
+                lambda: self._bazar_items_set_all("relist", False),
+            ),
+        )
+        for entry in entries:
+            if entry is None:
+                box.append(Gtk.Separator())
+                continue
+            label, callback = entry
+            item_button = Gtk.Button(label=label)
+            item_button.add_css_class("flat")
+            item_button.set_halign(Gtk.Align.FILL)
+            item_button.connect(
+                "clicked",
+                lambda _button, cb=callback: (popover.popdown(), cb()),
+            )
+            box.append(item_button)
+        popover.set_child(box)
+        button.set_popover(popover)
+        return button
+
+    def _bazar_items_set_all(self, attribute: str, active: bool) -> None:
+        if attribute not in ("enabled", "relist"):
+            return
+        changed = 0
+        floors = 0
+        enabled_more = 0
+        for item in self.bazar.config.items:
+            if getattr(item, attribute) != active:
+                setattr(item, attribute, active)
+                changed += 1
+            if (
+                attribute == "relist"
+                and active
+                and item.min_price <= 0
+            ):
+                item.min_price = 1
+                floors += 1
+                changed += 1
+            # The relist set only reaches enabled items; "Relist all" has to
+            # switch the Monitor tick back on or the pass would skip them.
+            if attribute == "relist" and active and not item.enabled:
+                item.enabled = True
+                enabled_more += 1
+                changed += 1
+        if not changed:
+            return
+        self._bazar_save_config(quiet=True)
+        self._bazar_render_items()
+        self._bazar_render_relist_items()
+        self._bazar_render_monitor_items()
+        self._bazar_render_results()
+        self._bazar_update_relist_info()
+        self._bazar_update_monitor_items_info()
+        label = "monitor" if attribute == "enabled" else "relist"
+        text = (
+            f"{label}: {len(self.bazar.config.items)} item(s) "
+            f"{'on' if active else 'off'}"
+        )
+        if floors:
+            text += f" · floor 1 set on {floors} item(s)"
+        if enabled_more:
+            text += f" · monitoring switched on for {enabled_more} item(s)"
+        self._bazar_log(text)
+
     def _build_bazar_items_section(self) -> Gtk.Widget:
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         page.set_margin_top(6)
@@ -4860,6 +6039,7 @@ class Application(Gtk.Application):
         item_buttons.append(import_item)
         item_buttons.append(new_item)
         item_buttons.append(delete_item)
+        item_buttons.append(self._build_items_group_button())
         items_box.append(item_buttons)
         items_frame = self._frame(
             "Items",
@@ -4873,7 +6053,11 @@ class Application(Gtk.Application):
                 "edit this list. Select a row to edit its label, search, "
                 "relist vnum/tab/amount, cost and tracking. Tracking has "
                 "two switches: Monitor searches the item, Relist puts it in "
-                "the relist set that Relist Start may reprice. The Cost "
+                "the relist set that Relist Start may reprice. Group "
+                "actions… applies a switch to every configured item at "
+                "once (Monitor all / Stop monitoring all / Relist all / "
+                "Stop relisting all; Relist all sets floor 1 where unset). "
+                "The Cost "
                 "type chooses the "
                 "Monitor view: NosMall ND → NosMall; NPC gold → NPC resale "
                 "(the Item.dat price fills in when left at 0); No cost → "
