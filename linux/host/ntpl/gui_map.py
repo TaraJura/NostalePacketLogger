@@ -326,9 +326,16 @@ class MapPageMixin:
         self.tame_vnum_spin.set_tooltip_text(
             "Monster template to tame. Chicken = 333."
         )
+        self.tame_vnum_spin.connect(
+            "value-changed", lambda *_: self._update_tame_vnum_label()
+        )
+        self.tame_vnum_name = Gtk.Label(label="Chicken")
+        self.tame_vnum_name.add_css_class("dim-label")
         tame_box.append(
             self._field_row(
-                Gtk.Label(label="Monster vnum"), self.tame_vnum_spin
+                Gtk.Label(label="Monster vnum"),
+                self.tame_vnum_spin,
+                self.tame_vnum_name,
             )
         )
         self.tame_slot_spin = Gtk.SpinButton.new_with_range(1, 9, 1)
@@ -702,9 +709,21 @@ class MapPageMixin:
         self.monster_names_loaded = True
         self.monster_names = load_monster_names()
         self.spell_descriptions = load_skill_descriptions()
+        self._update_tame_vnum_label()
         if self.target_list is not None:
             self._refresh_target_list()
             self._update_target_info()
+
+    def _update_tame_vnum_label(self) -> None:
+        """Show the vnum's real monster name next to the Pet tamer spin."""
+        if self.tame_vnum_spin is None:
+            return
+        name = getattr(self, "tame_vnum_name", None)
+        if name is None:
+            return
+        vnum = int(self.tame_vnum_spin.get_value())
+        resolved = self.monster_names.get(vnum) if self.monster_names else None
+        name.set_text(resolved or "unknown vnum")
 
     def _ensure_spells_loaded(self) -> None:
         if self.spells_loaded or self.spells_loading:

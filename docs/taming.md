@@ -96,6 +96,11 @@ server says.
 - The Pet Trainer card must be equipped and Tame must be on the chosen slot;
   otherwise the server sends no taming result and the tamer stops with
   "Tame got no answer".
+- **DLL 0.3.3 or newer.** Taming uses the DLL's client-side monster selector
+  (`TARGET`). On client 0.9.3.3262 older DLLs answer `client build mismatch`;
+  the host then falls back to injected `ncif`, which does not set the
+  client's own selection, so the server refuses the Whip/Tame casts. Restart
+  the game client to load 0.3.3 (its window/status shows `DLL 0.3.3`).
 - The HP limit only decides when the tamer stops hitting. The server decides
   whether the tame is allowed: the monster must be below 50% HP and the
   character a higher level (Tame = 1-star pets; Advanced Tame 1791 with a

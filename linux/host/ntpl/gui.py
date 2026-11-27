@@ -2541,7 +2541,27 @@ class Application(
                             )
                             > now
                         )
-                        if minigame_refusal and blocked is not None:
+                        if (
+                            "client build mismatch" in reason
+                            or "selection controller not readable" in reason
+                            or "selection global not readable" in reason
+                            or "main module not readable" in reason
+                        ):
+                            # Not the entity's fault: the running DLL's
+                            # hardcoded target addresses are for another
+                            # client build. Use ncif for the rest of the
+                            # session and do not block the monster or pause
+                            # combat.
+                            if self.dll_target_supported:
+                                self.dll_target_supported = False
+                                self.minigame_focus_refresh_at = 0.0
+                                self._log_line(
+                                    "DLL target selection mismatches this "
+                                    "client build; falling back to ncif "
+                                    "(restart the game with DLL 0.3.3)"
+                                )
+                            dirty = True
+                        elif minigame_refusal and blocked is not None:
                             # A player focus refusal is not a combat target:
                             # do not delete the player from the world or
                             # pause the bot. Retry another player instead.

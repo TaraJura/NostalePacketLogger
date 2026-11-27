@@ -58,6 +58,7 @@
 | `Injector` says a logger is already loaded after `QUIT` | the old module stays mapped, and the guard refuses a second injection | reload with a new DLL filename and `Injector.exe --pid <pid> --dll <name>.dll --force` (only after that logger's QUIT and its `C:\ntpl-<pid>.port` file has disappeared; `--force` refuses while the port file exists), or restart the game client |
 | Client crashes after injecting a DLL | a second live logger was injected (two send/recv hooks) | restart the game client; never `--force` while the old logger is still listening. The injector now refuses if the old port file exists |
 | Bot cannot reach a target near a map edge | the only route crosses a warp tile and blocking is on | that is the protection working; walk there manually with blocking off, or fight from range |
+| `TARGET … ERR client build mismatch` in the Bot log | the running DLL's hardcoded selector is for another client build; 0.9.3.3262 needs **DLL 0.3.3** | restart the game client to load 0.3.3. Until then the host disables DLL TARGET and falls back to injected `ncif`, which does not set the client's own selection, so attacks may be refused and the Pet tamer cannot work |
 
 ## Pet tamer
 
@@ -73,7 +74,7 @@
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| **Start** turns itself off, status says this DLL has no `KEY` command | the game client still runs a DLL older than 0.3.0; updating the build or restarting only the GUI does not replace the mapped module | restart the game client, inject again with the picker/injector, and check the window title/status shows `DLL 0.3.0` or newer (current `0.3.2`). The `KEY\|` command needs 0.3.0 |
+| **Start** turns itself off, status says this DLL has no `KEY` command | the game client still runs a DLL older than 0.3.0; updating the build or restarting only the GUI does not replace the mapped module | restart the game client, inject again with the picker/injector, and check the window title/status shows `DLL 0.3.0` or newer (current `0.3.3`). The `KEY\|` command needs 0.3.0 |
 | Keys are sent but the game does nothing | the game window is not focused and the client ignores posted keys, or the key is not bound | click the game window once (the DLL then uses real `SendInput`), check the Bot log for `minigame keyboard ready`; on a QWERTZ layout the secondary attack is `z`, not `y` |
 | `y` does nothing but `z` works (or the reverse) | QWERTY vs QWERTZ keyboard layout | put the other letter in **Key**. The tab accepts `y` and `z` |
 | `Focus refused for player N` | the client would not select that player (dead, out of the client's targetable range, or not targetable) | the tab skips that player for 5 s and tries the next one; the key loop keeps running. Move closer or let the raid respawn them |

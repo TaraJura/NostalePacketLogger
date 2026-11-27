@@ -12,10 +12,15 @@ the data layer in [database.md](database.md).
 - **Client build**: 2026-11-25 Gameforge maintenance updated NosTale to
   **0.9.3.3262 (build 6124)**; 0.3.0's hardcoded player global/MoveTo
   addresses no longer matched and `POS` returned "player object not
-  readable". **DLL 0.3.2** (0.3.1 re-derived them) has the player global
-  `0x007964BC`, MoveTo `0x0056620C` and speed table `0x0078B3C8` and needs a
+  readable". **DLL 0.3.3** (0.3.1 re-derived them) has the player global
+  `0x007964BC`, MoveTo `0x0056620C` and speed table `0x0078B3C8`; 0.3.3
+  re-derives the **TARGET** selector for 3262 (`0x005699D0`, controller at
+  `[0x007944F0]`, one load) — 0.3.1/0.3.2 answered `client build mismatch`,
+  the host then falls back to injected `ncif`, which does not set the
+  client's own selection, so the bot cannot land its attacks. Needs a
   **game-client restart/re-inject**. The host also logs a repeated POS read
-  error only once instead of every poll. The speed extension for 3262 is
+  error only once instead of every poll, and a TARGET build mismatch no
+  longer blocks monsters or pauses combat. The speed extension for 3262 is
   derived but not live-verified above 59.
 - **NosBazar** (2026-11-26): rows report only the listings of the item name
   they display (mixed Nostale-NB groups such as the single/all partner skill
@@ -47,7 +52,7 @@ the data layer in [database.md](database.md).
   and Relist shows only the relist set by default.
   The Character frame shows the detected name above HP/MP. The active user
   config is a 25-item relist list for char `root1` (see the handoff).
-- **Minigame — Great Quarry (2026-11-26, host 0.9.12)**: the Minigame tab's
+- **Minigame — Great Quarry (2026-11-26, host 0.9.13)**: the Minigame tab's
   **Miniland production** frame plays a production minigame (Great Quarry
   3125 first). **Play until** picks the reward box 1x–5x, default 5x whose
   minimum score is 16,000; the production-points label comes from
@@ -71,7 +76,7 @@ the data layer in [database.md](database.md).
   are live-verified.
 - **Linux host**: 389 unittest cases, 6 GTK4 smokes, 48 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
-  linux all test-host`, tests above. The host is **0.9.12**; the GTK4 window
+  linux all test-host`, tests above. The host is **0.9.13**; the GTK4 window
   is split into `gui.py` (core) plus one mixin per page (`gui_bazar.py`,
   `gui_map.py`, `gui_bot.py`, `gui_family.py`, `gui_minigame.py`,
   `gui_stats.py`, `guicommon.py`), and a handler exception is logged and
@@ -127,7 +132,7 @@ the data layer in [database.md](database.md).
   hack, high ban risk; reverts when the GUI disconnects. Needs DLL 0.2.9+
   (a game-client restart/injection), not just a GUI restart — the raised cap
   is DLL-side too.
-- **Pet tamer (2026-11-27, host 0.9.12)**: the Map/Bot **Pet tamer** frame
+- **Pet tamer (2026-11-27, host 0.9.13)**: the Map/Bot **Pet tamer** frame
   runs the Pet Trainer specialist card's loop instead of normal combat:
   nearest monster of the chosen vnum (default **333 Chicken**) within 15
   cells, walk into range, hit it with the card's basic attack (**Whip**,

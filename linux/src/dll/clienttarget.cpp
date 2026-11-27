@@ -31,12 +31,16 @@ extern "C" void ntpl_client_target(void* controller, void* entity,
 
 namespace {
 
-// Client build 2026-11-18 (the FrosTale-patched client). The previous build's
-// values were 0x00795200 / 0x0056964C; the selector prologue signature below
-// still matches, so it can be re-found after a patch by scanning it.
-// The chain is unchanged: [0x798294] -> holder 0x7934D4 -> controller.
-constexpr std::uintptr_t kSelectionGlobal = 0x00798294;
-constexpr std::uintptr_t kSelector = 0x0057A0E4;
+// Client build 2026-11-25 (0.9.3.3262, the Gameforge maintenance update).
+// The previous build's values were 0x00798294 / 0x0057A0E4 (0.9.3.3261,
+// 2026-11-18); the selector prologue signature is unchanged, so it was
+// re-found in the running client at 0x005699D0 by scanning for it.
+//
+// The controller chain also changed: the client's own click handler does
+// `mov eax, [0x007944F0]` and calls the selector with that object, so the
+// global holds the controller directly (one load, not the old two).
+constexpr std::uintptr_t kSelectionGlobal = 0x007944F0;
+constexpr std::uintptr_t kSelector = 0x005699D0;
 
 // 53 56 57 8B F2 8B F8 85 F6 ... (SelectEntity prologue)
 const unsigned char kSelectorSignature[] = {
@@ -136,12 +140,9 @@ bool resolve_controller(std::uintptr_t& controller, std::string& error)
         error = "selection global not readable";
         return false;
     }
-    const std::uintptr_t holder = load_u32(kSelectionGlobal);
-    if (!readable(holder, sizeof(std::uint32_t))) {
-        error = "selection holder not readable";
-        return false;
-    }
-    controller = load_u32(holder);
+    // 0.9.3.3262 stores the controller object itself here (the old build
+    // stored a holder that pointed at it).
+    controller = load_u32(kSelectionGlobal);
     if (!readable(controller, 0x60)) {
         error = "selection controller not readable";
         return false;
