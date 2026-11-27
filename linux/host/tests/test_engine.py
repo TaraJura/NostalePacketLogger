@@ -214,6 +214,25 @@ class EngineTests(unittest.TestCase):
         world = self.engine.feed(packet(Kind.RECV, "p_clear"))
         self.assertEqual(world.pets, {})
 
+    def test_cast_start_is_recorded(self):
+        # ct <casterType> <casterId> <targetType> <targetId> <x> <y> <skill>
+        world = self.engine.feed(
+            packet(Kind.RECV, "ct 1 7001 3 3039 20 8153 1787")
+        )
+        self.assertEqual(world.last_cast, (1, 7001, 3039, 1787))
+        seq = world.cast_seq
+        world = self.engine.feed(
+            packet(Kind.RECV, "ct 1 7001 3 3038 20 8153 1787")
+        )
+        self.assertEqual(world.last_cast, (1, 7001, 3038, 1787))
+        self.assertEqual(world.cast_seq, seq + 1)
+        # A malformed/short line must not change the last cast.
+        world = self.engine.feed(packet(Kind.RECV, "ct 1 7001"))
+        self.assertEqual(world.last_cast, (1, 7001, 3038, 1787))
+        self.assertEqual(world.cast_seq, seq + 1)
+        # The log keeps the sequence so a busy map cannot hide our cast.
+        self.assertEqual(world.cast_log[-1], (seq + 1, 1, 7001, 3038, 1787))
+
     def test_player_spawn_reads_family(self):
         # Live map 20 line: family id 70.918 and family name at the end.
         world = self.engine.feed(

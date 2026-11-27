@@ -310,6 +310,16 @@ class WorldState:
     #: empties it before the server repopulates the list. The tamer shows the
     #: occupancy and stops on the server's max-pet-slots message.
     pets: dict[int, int] = field(default_factory=dict)
+    #: `ct <casterType> <casterId> <targetType> <targetId> <x> <y> <skill>`:
+    #: a cast start. The Pet tamer confirms its `u_s` actually started a cast
+    #: (a refused press, usually the client cooldown, sends no `ct`). The log
+    #: keeps the last few casts with their sequence so a burst of other
+    #: players' casts cannot hide ours between two ticks.
+    last_cast: tuple[int, int, int, int] | None = None
+    cast_seq: int = 0
+    cast_log: list[tuple[int, int, int, int, int]] = field(
+        default_factory=list
+    )
 
     @property
     def position(self) -> tuple[int, int] | None:
@@ -1022,6 +1032,28 @@ def _on_despawn(world: WorldState, packet: Packet) -> None:
         world.entities.pop(values[1], None)
 
 
+def _on_cast_start(world: WorldState, packet: Packet) -> None:
+    # ct <casterType> <casterId> <targetType> <targetId> <x> <y> <skill>
+    # (live 2026-11-27: ct 1 7001 3 3039 20 8153 1787). Only a started cast
+    # produces this; a refused `u_s` (cooldown, range, silence) does not.
+    args = packet.args
+    if len(args) < 7:
+        return
+    try:
+        caster_type = int(args[0])
+        caster_id = int(args[1])
+        target_id = int(args[3])
+        skill = int(args[6])
+    except ValueError:
+        return
+    world.last_cast = (caster_type, caster_id, target_id, skill)
+    world.cast_seq += 1
+    world.cast_log.append(
+        (world.cast_seq, caster_type, caster_id, target_id, skill)
+    )
+    del world.cast_log[:-16]
+
+
 def _on_cancel(world: WorldState, packet: Packet) -> None:
     # cancel 0 0 -1 -- the server dropped the current cast. The bot can try
     # again at once with a live target instead of waiting out the cooldown.
@@ -1361,6 +1393,7 @@ class Engine:
                 "msgi": _on_system_message,  # RECV: Game18N message key
                 "sc_p": _on_pet,        # RECV: one pet/partner slot
                 "p_clear": _on_pet_clear,  # RECV: pet panel repopulation
+                "ct": _on_cast_start,   # RECV: a cast started
                 "gidx": _on_family_index,  # RECV: player family id/name
                 "pairy": _on_fairy_info,  # RECV: player fairy element
                 "out": _on_despawn,     # RECV: entity despawned

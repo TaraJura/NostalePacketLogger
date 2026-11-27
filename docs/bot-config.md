@@ -391,8 +391,9 @@ Pet Trainer specialist card: it hunts the chosen monster template (default
 **333**, Chicken) within 15 cells, walks into range, uses the card's basic
 attack **Whip** (`u_s 0`, skill 1786) until the target's `st` HP is at or
 below the limit (default **25%**), then uses **Tame** from the chosen
-skill-bar slot (default **1**, skill 1787, 15 s cooldown) and waits for the
-server's Game18N answer: `msgi 0 2614` (success), `1887` (max pet slots),
+skill-bar slot (default **1**, skill 1787, 15 s cooldown padded to 16 s) and
+waits for the client's `ct` (a refused press sends none and is retried) and
+the server's Game18N answer: `msgi 0 2614` (success), `1887` (max pet slots),
 `2631` (taming failed) or `2623` (this skill cannot tame the monster). It
 pre-damages the next chicken during the cooldown and stops on a full pet
 list, three failed tames, three casts with no answer or Stop. The live

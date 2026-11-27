@@ -52,7 +52,7 @@ the data layer in [database.md](database.md).
   and Relist shows only the relist set by default.
   The Character frame shows the detected name above HP/MP. The active user
   config is a 25-item relist list for char `root1` (see the handoff).
-- **Minigame — Great Quarry (2026-11-26, host 0.9.13)**: the Minigame tab's
+- **Minigame — Great Quarry (2026-11-26, host 0.9.14)**: the Minigame tab's
   **Miniland production** frame plays a production minigame (Great Quarry
   3125 first). **Play until** picks the reward box 1x–5x, default 5x whose
   minimum score is 16,000; the production-points label comes from
@@ -74,9 +74,9 @@ the data layer in [database.md](database.md).
   Minigame tick (a one-shot GLib timer stalled live). Packet shortcut, high
   ban risk; the natural flow, the automated claim and the 40 s Play loop
   are live-verified.
-- **Linux host**: 389 unittest cases, 6 GTK4 smokes, 48 fake-server bot
+- **Linux host**: 390 unittest cases, 6 GTK4 smokes, 48 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
-  linux all test-host`, tests above. The host is **0.9.13**; the GTK4 window
+  linux all test-host`, tests above. The host is **0.9.14**; the GTK4 window
   is split into `gui.py` (core) plus one mixin per page (`gui_bazar.py`,
   `gui_map.py`, `gui_bot.py`, `gui_family.py`, `gui_minigame.py`,
   `gui_stats.py`, `guicommon.py`), and a handler exception is logged and
@@ -132,13 +132,14 @@ the data layer in [database.md](database.md).
   hack, high ban risk; reverts when the GUI disconnects. Needs DLL 0.2.9+
   (a game-client restart/injection), not just a GUI restart — the raised cap
   is DLL-side too.
-- **Pet tamer (2026-11-27, host 0.9.13)**: the Map/Bot **Pet tamer** frame
+- **Pet tamer (2026-11-27, host 0.9.14)**: the Map/Bot **Pet tamer** frame
   runs the Pet Trainer specialist card's loop instead of normal combat:
   nearest monster of the chosen vnum (default **333 Chicken**) within 15
   cells, walk into range, hit it with the card's basic attack (**Whip**,
   `u_s 0`) until its `st` HP is at or below the limit (default 25%), then
   **Tame** on the configured skill-bar slot (default 1, skill 1787, 15 s
-  cooldown). The server answers with a Game18N `msgi` (2614 success, 1887
+  cooldown padded to 16 s; a press the client refuses sends no `ct` and is
+  retried quickly). The server answers with a Game18N `msgi` (2614 success, 1887
   max pet slots, 2631 failed, 2623 cannot tame); it stops on a full pet list
   or repeated failures. The engine now tracks `Entity.hp`/`hp_max` from
   `st`, `WorldState.pets` from `sc_p`/`p_clear` and the `msgi` key. Live

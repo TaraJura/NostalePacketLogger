@@ -58,6 +58,12 @@ TAME_RANGE_CELLS = 2
 TAME_COOLDOWN_S = 15.0
 TAME_SEARCH_CELLS = 15
 TAME_RESULT_TIMEOUT_S = 4.0
+#: How long a `u_s` may take to produce the client's `ct` before the cast is
+#: treated as refused (usually the client's own Tame cooldown).
+TAME_CAST_START_TIMEOUT_S = 1.5
+#: The server's Tame cooldown is 15 s; casting exactly at the boundary was
+#: refused live (2026-11-27 01:40:34), so pad it.
+TAME_COOLDOWN_PAD_S = 1.0
 TAME_MAX_TRIES = 3
 #: Game18N keys the server answers a Tame attempt with (live 2026-11-27).
 TAME_MSG_SUCCESS = 2614    # "Taming successful."
@@ -529,6 +535,8 @@ class BotPageMixin:
         self.tame_done = 0
         self.tame_target_id = None
         self.tame_cast_target = None
+        self.tame_cast_started = False
+        self.tame_cast_seq = 0
         self.tame_attempts = 0
         self.tame_hit_at = 0.0
         self.tame_step_at = 0.0
@@ -559,6 +567,7 @@ class BotPageMixin:
         self.fight_target_id = None
         self.tame_target_id = None
         self.tame_cast_target = None
+        self.tame_cast_started = False
         self.tame_attempts = 0
         self.pending_casts.clear()
         self.assist_packet = None
@@ -1598,6 +1607,7 @@ class BotPageMixin:
             return False
         target = self.tame_cast_target
         self.tame_cast_target = None
+        self.tame_cast_started = False
         if target is not None:
             # A tamed monster despawns a moment later; do not re-pick it.
             self.target_blocked[target] = time.monotonic() + 3.0
@@ -1681,6 +1691,50 @@ class BotPageMixin:
         # successful, 1887 max pet slots, 2631 taming failed, 2623 this skill
         # cannot tame the monster). Nothing else is a result.
         if self.tame_cast_target is not None:
+            # Did the cast actually start? A press the client refuses (its
+            # own cooldown, usually) sends no `ct`; that is not a failed
+            # tame, so retry soon instead of waiting out the whole cooldown.
+            if not self.tame_cast_started:
+                # Look through the small cast log: a busy map can deliver
+                # another player's `ct` between two ticks.
+                own = next(
+                    (
+                        skill
+                        for seq, caster_type, caster_id, target_id, skill
+                        in world.cast_log
+                        if seq > self.tame_cast_seq
+                        and caster_type == 1
+                        and caster_id == self._char_id()
+                        and target_id == self.tame_cast_target
+                    ),
+                    None,
+                )
+                if own is not None:
+                    info = self.spells.get(own)
+                    if info is not None and "tame" not in info.name.lower():
+                        self.tame_cast_target = None
+                        self._stop_bot()
+                        self._set_status(
+                            f"slot {slot} casts {info.name}, not Tame — set "
+                            "the Tame slot"
+                        )
+                        self._log_line(
+                            f"tamer: stopped, slot {slot} casts "
+                            f"{info.name} (vnum {own})"
+                        )
+                        return False
+                    self.tame_cast_started = True
+                    self.tame_attempts += 1
+                elif now - self.tame_cast_at > TAME_CAST_START_TIMEOUT_S:
+                    self.tame_cast_target = None
+                    self.tame_ready_at = now + 1.0
+                    self._set_status(
+                        "the client did not start the Tame cast (cooldown?); "
+                        "retrying"
+                    )
+                    return True
+                else:
+                    return True
             if (
                 world.message_seq != self.tame_seen_message
                 and now - self.tame_cast_at <= TAME_RESULT_TIMEOUT_S
@@ -1690,6 +1744,7 @@ class BotPageMixin:
                     return True
             if now - self.tame_cast_at > TAME_RESULT_TIMEOUT_S:
                 self.tame_cast_target = None
+                self.tame_cast_started = False
                 self.tame_target_id = None
                 if self.tame_attempts >= TAME_MAX_TRIES:
                     self._stop_bot()
@@ -1702,8 +1757,7 @@ class BotPageMixin:
                     )
                     return False
                 self._set_status(
-                    "Tame got no answer — is it on the chosen slot? "
-                    "Trying again"
+                    "Tame got no answer — retrying"
                 )
             return True
 
@@ -1783,9 +1837,12 @@ class BotPageMixin:
             return False
         self.tame_cast_at = now
         self.tame_cast_target = target.entity_id
+        self.tame_cast_started = False
+        self.tame_cast_seq = world.cast_seq
         self.tame_seen_message = world.message_seq
-        self.tame_ready_at = now + self._tame_cooldown(slot)
-        self.tame_attempts += 1
+        self.tame_ready_at = (
+            now + self._tame_cooldown(slot) + TAME_COOLDOWN_PAD_S
+        )
         self._tame_info_update(world, f"taming {label} (slot {slot})")
         self._set_status(f"Taming {label} at {hp:.0f}% HP (slot {slot})…")
         return True

@@ -82,8 +82,13 @@ Per tick (50 ms) the tamer:
 5. In range, uses **Whip** (slot 0) at the skill's own pace until the
    target's `st` HP is at or below the limit. During the 15 s Tame cooldown
    it pre-damages the next chicken.
-6. Casts **Tame** and waits for the result. The next target can be damaged
-   during the cooldown; only Tame is gated by it.
+6. Casts **Tame** and waits for the client's `ct` (a started cast) and then
+   the server's result. A press the client refuses (no `ct` within 1.5 s,
+   usually its own cooldown) is **not** counted as a failed tame — the bot
+   retries about a second later. The measured 15 s cooldown is padded to
+   **16 s** because a cast exactly at the boundary was refused live
+   (2026-11-27 01:40:34). The next target can be damaged during the cooldown;
+   only Tame is gated by it.
 
 It stops on Stop, the max-pet-slots message, three failed tames, three casts
 with no answer, or a skill that cannot tame the monster (with a message and

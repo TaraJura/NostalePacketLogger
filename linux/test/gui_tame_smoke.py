@@ -110,6 +110,11 @@ class TameServer:
             )
         elif slot == 1 and entity_id not in self.tamed:
             self.tamed.add(entity_id)
+            # The live client answers a started Tame press with `ct`; the
+            # tamer requires it before waiting for the result.
+            self.send(
+                f"RECV|ct 1 {CHAR_ID} 3 {entity_id} 20 8153 1787\n"
+            )
             if entity_id == CHICKEN_A:
                 self.send(
                     f"RECV|ctl 2 {PET_A} 3 0\n"

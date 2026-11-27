@@ -222,7 +222,7 @@ DLL version.
 
 ```bash
 sudo apt install g++-mingw-w64-i686 xvfb          # once
-make -C linux all test-host                       # DLL + injector + 389 unit tests
+make -C linux all test-host                       # DLL + injector + 390 unit tests
 make -C linux gui-test bot-test                   # 6 GTK4 smokes, 48 fake-server smokes
 
 linux/scripts/inject.sh        # optional: the GUI picker can inject too
@@ -262,7 +262,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-Host **0.9.13** (Linux), DLL **0.3.3**: 389 unit tests, 6 GTK4 window smokes
+Host **0.9.14** (Linux), DLL **0.3.3**: 390 unit tests, 6 GTK4 window smokes
 and 48 fake-server bot smokes pass, and the real injector has been run against
 the live NosTale client under Wine 11 — both hooks `ACTIVE`, movement through
 the client's own MoveTo, auto-attack confirmed by the server's `su`, and the
