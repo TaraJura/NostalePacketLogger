@@ -74,6 +74,10 @@ class Entity:
     family_id: int = -1
     family_name: str = ""
     family_known: bool = False
+    # Last `st` HP/max for a monster/pet (kind 2/3). -1 = unknown. The Pet
+    # Trainer tamer uses the ratio to decide when to stop hitting and Tame.
+    hp: int = -1
+    hp_max: int = 0
     # Fairy presence: the equipment sub-packet carries the fairy item vnum;
     # `pairy` carries the element and confirms a fairy. No-fairy players are
     # the fresh/alt accounts the family auto-invite filter excludes.
@@ -296,6 +300,16 @@ class WorldState:
     #: cannot show that the team ended.
     raid_active: bool | None = None
     raid_leader: int = -1
+    #: `msgi 0 <id> ...`: the server's last Game18N system message key and a
+    #: counter, so a feature can react to a specific message. The Pet Trainer
+    #: tamer watches 2614 (taming successful), 1887 (max pet slots) and 2631
+    #: (taming failed).
+    last_message_id: int = 0
+    message_seq: int = 0
+    #: `sc_p <slot> <vnum> <entityId> ...`: the pet/partner slots; `p_clear`
+    #: empties it before the server repopulates the list. The tamer shows the
+    #: occupancy and stops on the server's max-pet-slots message.
+    pets: dict[int, int] = field(default_factory=dict)
 
     @property
     def position(self) -> tuple[int, int] | None:
@@ -1041,10 +1055,49 @@ def _on_status(world: WorldState, packet: Packet) -> None:
         kind = int(args[0])
         entity_id = int(args[1])
         hp = int(args[6])
+        hp_max = int(args[8])
     except (ValueError, IndexError):
         return
-    if kind in (2, 3) and hp == 0:
-        world.entities.pop(entity_id, None)
+    if kind in (2, 3):
+        if hp == 0:
+            world.entities.pop(entity_id, None)
+            return
+        entity = world.entities.get(entity_id)
+        if entity is not None:
+            entity.hp = hp
+            entity.hp_max = hp_max
+
+
+def _on_system_message(world: WorldState, packet: Packet) -> None:
+    # msgi <type> <id> ... -- a Game18N message key (2614 taming successful,
+    # 1887 max pet slots, 2631 taming failed, ...). The client shows the
+    # localized text; the key is what a feature can key off.
+    values = packet.ints(2)
+    if not values:
+        return
+    world.last_message_id = values[1]
+    world.message_seq += 1
+
+
+def _on_pet(world: WorldState, packet: Packet) -> None:
+    # sc_p <slot> <vnum> <entityId> ... -- one pet/partner slot (live
+    # 2026-11-27: slots 0-7, the tamed Chicken vnum 333 included).
+    args = packet.args
+    if len(args) < 2:
+        return
+    try:
+        slot = int(args[0])
+        vnum = int(args[1])
+    except ValueError:
+        return
+    if slot < 0:
+        return
+    world.pets[slot] = vnum
+
+
+def _on_pet_clear(world: WorldState, packet: Packet) -> None:
+    # p_clear -- the server sends it before repopulating the pet panel.
+    world.pets.clear()
 
 
 def _on_teleport(world: WorldState, packet: Packet) -> None:
@@ -1305,6 +1358,9 @@ class Engine:
                 "in": _on_spawn,        # RECV: entity spawned
                 "rdlst": _on_party_list,  # RECV: party/raid list (names)
                 "raid": _on_raid,       # RECV: joined/left a raid team
+                "msgi": _on_system_message,  # RECV: Game18N message key
+                "sc_p": _on_pet,        # RECV: one pet/partner slot
+                "p_clear": _on_pet_clear,  # RECV: pet panel repopulation
                 "gidx": _on_family_index,  # RECV: player family id/name
                 "pairy": _on_fairy_info,  # RECV: player fairy element
                 "out": _on_despawn,     # RECV: entity despawned

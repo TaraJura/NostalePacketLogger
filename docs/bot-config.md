@@ -384,6 +384,23 @@ stops it) and `gui_cast_ready_smoke.py` (bot: +0.05 s on `sr`, then a
 different spell 0.06 s after the previous send while the fake server is
 still "casting" — the overlap the live server allows).
 
+## Pet tamer — the Pet Trainer card's Whip + Tame loop
+
+The **Pet tamer** frame (Map/Bot) turns **Start** into a taming loop for the
+Pet Trainer specialist card: it hunts the chosen monster template (default
+**333**, Chicken) within 15 cells, walks into range, uses the card's basic
+attack **Whip** (`u_s 0`, skill 1786) until the target's `st` HP is at or
+below the limit (default **25%**), then uses **Tame** from the chosen
+skill-bar slot (default **1**, skill 1787, 15 s cooldown) and waits for the
+server's Game18N answer: `msgi 0 2614` (success), `1887` (max pet slots),
+`2631` (taming failed) or `2623` (this skill cannot tame the monster). It
+pre-damages the next chicken during the cooldown and stops on a full pet
+list, three failed tames, three casts with no answer or Stop. The live
+protocol (2026-11-27, PID 836) is in [taming.md](taming.md).
+
+Saved as `tame`, `tame_vnum`, `tame_slot` (1–9) and `tame_hp_pct` (5–50).
+The fake-server proof is `gui_tame_smoke.py`.
+
 ## Follow a player — trail a character
 
 Type a player's name (or their char id) in the **Follow** frame and turn
@@ -479,6 +496,10 @@ Example:
   "follow_player": "Follower Friend",
   "follow_attack": false,
   "follow_mirror": false,
+  "tame": false,
+  "tame_vnum": 333,
+  "tame_slot": 1,
+  "tame_hp_pct": 25.0,
   "draw_path": false,
   "map_id": 20,
   "waypoints": [[25, 118], [30, 120]],

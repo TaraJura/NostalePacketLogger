@@ -312,6 +312,70 @@ class MapPageMixin:
             )
         )
 
+        # Pet tamer: the Pet Trainer card's Whip + Tame loop.
+        tame_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.tame_toggle = Gtk.ToggleButton(label="Tame monsters")
+        self.tame_toggle.set_tooltip_text(
+            "Bot mode: hit the monster down to the HP limit, then Tame it."
+        )
+        self._bind_toggle_color(self.tame_toggle)
+        tame_box.append(self.tame_toggle)
+        self.tame_vnum_spin = Gtk.SpinButton.new_with_range(1, 1000000000, 1)
+        self.tame_vnum_spin.set_value(333)
+        self.tame_vnum_spin.set_width_chars(8)
+        self.tame_vnum_spin.set_tooltip_text(
+            "Monster template to tame. Chicken = 333."
+        )
+        tame_box.append(
+            self._field_row(
+                Gtk.Label(label="Monster vnum"), self.tame_vnum_spin
+            )
+        )
+        self.tame_slot_spin = Gtk.SpinButton.new_with_range(1, 9, 1)
+        self.tame_slot_spin.set_value(1)
+        self.tame_slot_spin.set_tooltip_text(
+            "Skill-bar slot with Tame. Slot 0 is the card's basic attack."
+        )
+        tame_box.append(
+            self._field_row(
+                Gtk.Label(label="Tame slot"), self.tame_slot_spin
+            )
+        )
+        self.tame_hp_spin = Gtk.SpinButton.new_with_range(5, 50, 5)
+        self.tame_hp_spin.set_value(25)
+        self.tame_hp_spin.set_tooltip_text(
+            "Hit the monster until its HP is at most this, then Tame."
+        )
+        tame_box.append(
+            self._field_row(
+                Gtk.Label(label="Hit until HP ≤"),
+                self.tame_hp_spin,
+                Gtk.Label(label="%"),
+            )
+        )
+        self.tame_info = Gtk.Label(label="pet slots: — · tamed: 0")
+        self.tame_info.set_xalign(0)
+        self.tame_info.set_wrap(True)
+        self.tame_info.set_max_width_chars(38)
+        self.tame_info.add_css_class("dim-label")
+        tame_box.append(self.tame_info)
+        sidebar.append(
+            self._frame(
+                "Pet tamer",
+                tame_box,
+                help_text=(
+                    "Automates the Pet Trainer specialist card: the bot finds "
+                    "the monster template (Chicken = 333) within 15 cells, "
+                    "walks into range, hits it with the card's basic attack "
+                    "(slot 0) until its HP is at or below the limit, then uses "
+                    "Tame from the chosen skill-bar slot. It keeps going until "
+                    "Stop, the server's max pet slots message, or three failed "
+                    "tames. Equip the Pet Trainer card first. Taming is normal "
+                    "gameplay, but automation violates the game rules."
+                ),
+            )
+        )
+
         # Targets: restrict auto-attack to selected monster templates.
         target_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.target_mode = Gtk.DropDown.new_from_strings(
@@ -1751,6 +1815,25 @@ class MapPageMixin:
                 self.follow_mirror_check is not None
                 and self.follow_mirror_check.get_active()
             ),
+            tame=bool(
+                self.tame_toggle is not None
+                and self.tame_toggle.get_active()
+            ),
+            tame_vnum=(
+                int(self.tame_vnum_spin.get_value())
+                if self.tame_vnum_spin is not None
+                else 333
+            ),
+            tame_slot=(
+                int(self.tame_slot_spin.get_value())
+                if self.tame_slot_spin is not None
+                else 1
+            ),
+            tame_hp_pct=(
+                float(self.tame_hp_spin.get_value())
+                if self.tame_hp_spin is not None
+                else 25.0
+            ),
             draw_path=bool(
                 self.draw_path_toggle is not None
                 and self.draw_path_toggle.get_active()
@@ -1799,6 +1882,14 @@ class MapPageMixin:
             self.follow_attack_check.set_active(config.follow_attack)
         if self.follow_mirror_check is not None:
             self.follow_mirror_check.set_active(config.follow_mirror)
+        if self.tame_toggle is not None:
+            self.tame_toggle.set_active(config.tame)
+        if self.tame_vnum_spin is not None:
+            self.tame_vnum_spin.set_value(config.tame_vnum)
+        if self.tame_slot_spin is not None:
+            self.tame_slot_spin.set_value(config.tame_slot)
+        if self.tame_hp_spin is not None:
+            self.tame_hp_spin.set_value(config.tame_hp_pct)
         if self.draw_path_toggle is not None:
             self.draw_path_toggle.set_active(config.draw_path)
 

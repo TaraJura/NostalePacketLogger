@@ -29,6 +29,10 @@ Schema (version 1)::
       "follow_player": "Name",    # player name, or char id as text
       "follow_attack": false,     # attack the monster the player hits
       "follow_mirror": false,     # replay the player's walks and spells
+      "tame": false,              # Pet Trainer: hit then Tame a monster
+      "tame_vnum": 333,           # Chicken
+      "tame_slot": 1,             # skill-bar slot with Tame
+      "tame_hp_pct": 25.0,        # hit until the target HP is at most this
       "draw_path": false,
       "map_id": 20,                 # map the route belongs to
       "waypoints": [[25, 118], [30, 120]],
@@ -142,6 +146,10 @@ class BotConfig:
     follow_player: str = ""
     follow_attack: bool = False
     follow_mirror: bool = False
+    tame: bool = False
+    tame_vnum: int = 333
+    tame_slot: int = 1
+    tame_hp_pct: float = 25.0
     draw_path: bool = False
     map_id: int | None = None
     waypoints: list[tuple[int, int]] = field(default_factory=list)
@@ -175,6 +183,10 @@ class BotConfig:
             "follow_player": self.follow_player,
             "follow_attack": self.follow_attack,
             "follow_mirror": self.follow_mirror,
+            "tame": self.tame,
+            "tame_vnum": self.tame_vnum,
+            "tame_slot": self.tame_slot,
+            "tame_hp_pct": self.tame_hp_pct,
             "draw_path": self.draw_path,
             "map_id": self.map_id,
             "waypoints": [[x, y] for x, y in self.waypoints],
@@ -264,6 +276,12 @@ class BotConfig:
             follow_player=_as_text(data.get("follow_player"), "")[:40],
             follow_attack=_as_bool(data.get("follow_attack"), False),
             follow_mirror=_as_bool(data.get("follow_mirror"), False),
+            tame=_as_bool(data.get("tame"), False),
+            tame_vnum=_as_int(data.get("tame_vnum"), 333, 1, 10**9),
+            tame_slot=_as_int(data.get("tame_slot"), 1, 1, 9),
+            tame_hp_pct=_as_float(
+                data.get("tame_hp_pct"), 25.0, 5.0, 50.0
+            ),
             draw_path=_as_bool(data.get("draw_path"), False),
             map_id=map_id,
             waypoints=waypoints,

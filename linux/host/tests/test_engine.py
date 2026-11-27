@@ -170,6 +170,50 @@ class EngineTests(unittest.TestCase):
         world = self.engine.feed(packet(Kind.RECV, "raid 2 -1"))
         self.assertEqual(world.raid_leader, -1)
 
+    def test_status_tracks_monster_hp(self):
+        # Live 2026-11-27: st 3 <id> <level> <unknown> <state> <unknown>
+        # <hp> <unknown> <hpMax> ... The Pet Trainer tamer stops hitting at
+        # the HP limit; HP 0 is the death notice and removes the entity.
+        world = self.engine.feed(
+            packet(
+                Kind.RECV,
+                "in 3 333 3039 21 151 2 100 100 0 0 0 -1 0 0 -1 - 0 -1 "
+                "0 0 0 0 0 0 0 0 0 0 0 1 0",
+            )
+        )
+        world = self.engine.feed(
+            packet(Kind.RECV, "st 3 3039 1 0 1 100 20 10 100 10 0")
+        )
+        entity = world.entities[3039]
+        self.assertEqual((entity.hp, entity.hp_max), (20, 100))
+        world = self.engine.feed(
+            packet(Kind.RECV, "st 3 3039 1 0 1 100 0 10 100 10 0")
+        )
+        self.assertNotIn(3039, world.entities)
+
+    def test_pet_slots_and_system_messages(self):
+        # sc_p <slot> <vnum> <entityId> ... and p_clear (the server
+        # repopulates the pet panel after a tame).
+        world = self.engine.feed(packet(Kind.RECV, "p_clear"))
+        world = self.engine.feed(
+            packet(Kind.RECV, "sc_p 4 333 1452945 1 3000 0 0 0 32")
+        )
+        world = self.engine.feed(
+            packet(Kind.RECV, "sc_p 5 333 1452978 1 3000 0 0 0 32")
+        )
+        self.assertEqual(world.pets, {4: 333, 5: 333})
+
+        # msgi <type> <id>: the Game18N key a feature reacts to.
+        world = self.engine.feed(packet(Kind.RECV, "msgi 0 2614 0 0 0 0 0"))
+        self.assertEqual(world.last_message_id, 2614)
+        seq = world.message_seq
+        world = self.engine.feed(packet(Kind.RECV, "msgi 0 1887 0 0 0 0 0"))
+        self.assertEqual(world.last_message_id, 1887)
+        self.assertEqual(world.message_seq, seq + 1)
+
+        world = self.engine.feed(packet(Kind.RECV, "p_clear"))
+        self.assertEqual(world.pets, {})
+
     def test_player_spawn_reads_family(self):
         # Live map 20 line: family id 70.918 and family name at the end.
         world = self.engine.feed(

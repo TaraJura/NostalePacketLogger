@@ -222,8 +222,8 @@ DLL version.
 
 ```bash
 sudo apt install g++-mingw-w64-i686 xvfb          # once
-make -C linux all test-host                       # DLL + injector + 386 unit tests
-make -C linux gui-test bot-test                   # 6 GTK4 smokes, 47 fake-server smokes
+make -C linux all test-host                       # DLL + injector + 389 unit tests
+make -C linux gui-test bot-test                   # 6 GTK4 smokes, 48 fake-server smokes
 
 linux/scripts/inject.sh        # optional: the GUI picker can inject too
 linux/scripts/gui.sh           # one window per client; run again for another
@@ -247,7 +247,8 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 - [docs/bot-config.md](docs/bot-config.md) — target filters, spell rules
 - [docs/bazar.md](docs/bazar.md) — the NosBazar tab end to end
 - [docs/family.md](docs/family.md) · [docs/minigame.md](docs/minigame.md) ·
-  [docs/stats.md](docs/stats.md) — the other tabs
+  [docs/stats.md](docs/stats.md) · [docs/taming.md](docs/taming.md) — the
+  other tabs and the Pet Trainer tamer
 - [docs/database.md](docs/database.md) — the SQLite game/packet database and
   the NosMall catalog
 - [docs/autonomous-play.md](docs/autonomous-play.md) — observe → decide → act
@@ -261,8 +262,8 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-Host **0.9.11** (Linux), DLL **0.3.2**: 386 unit tests, 6 GTK4 window smokes
-and 47 fake-server bot smokes pass, and the real injector has been run against
+Host **0.9.12** (Linux), DLL **0.3.2**: 389 unit tests, 6 GTK4 window smokes
+and 48 fake-server bot smokes pass, and the real injector has been run against
 the live NosTale client under Wine 11 — both hooks `ACTIVE`, movement through
 the client's own MoveTo, auto-attack confirmed by the server's `su`, and the
 bazaar open/relist/registration verified live (2026-11-23); the DPS meter
@@ -271,9 +272,11 @@ live on 2026-11-26: the natural start/play/claim flow, the automated claim
 (a reward without playing) and the Play loop with its 40 s reward cooldown,
 the Stop between runs and the points-exhaustion stop. Speed + keeps the
 requested value through respawn/mount/resync position corrections (live
-2026-11-26; only a correction burst settles it), and leaving a raid team
-unblocks the Minigame Play immediately (the server's `raid 1 0` state). The
-original Windows tree is unchanged.
+2026-11-26; only a correction burst settles it), leaving a raid team
+unblocks the Minigame Play immediately (the server's `raid 1 0` state), and
+the new **Pet tamer** (Map/Bot) automates the Pet Trainer card: it whips a
+Chicken down and Tames it, waits out the 15 s cooldown and repeats until the
+server's pet slots are full. The original Windows tree is unchanged.
 
 Gameforge's terms of service prohibit automation and client manipulation.
 This is a tool for the account owner's own client; using it on a live account

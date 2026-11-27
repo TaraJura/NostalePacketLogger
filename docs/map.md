@@ -235,6 +235,11 @@ grouped by function:
   equipped SP card; the server reports its vnum for `u_s 0`). There are no
   Skill / Search / Min delay / template controls: the bot always uses slot 0,
   the skill's own range and cooldown, and acquires targets within 15 cells.
+- **Pet tamer** — the Pet Trainer card's loop instead of normal combat:
+  **Tame monsters** toggle, **Monster vnum** (333 = Chicken), **Tame slot**
+  (1) and **Hit until HP ≤** (25%), with a live line showing the occupied
+  pet slots and the run's tame count. It whips the target down, Tames it,
+  waits for the server's result and repeats; see [taming.md](taming.md).
 - **Targets** — monster filter: all monsters, only the selected templates, or
   all except the selected ones. Search the client's monster table by name or
   vnum, or add a vnum manually. **Also attack monsters with unknown vnum**
@@ -527,9 +532,9 @@ never sees the `at` packet.
 ## Tests
 
 ```bash
-make -C linux host-test   # 385 cases incl. synthetic NOS, 8-way A*, checksum, config
+make -C linux host-test   # 389 cases incl. synthetic NOS, 8-way A*, checksum, config
 make -C linux gui-test    # GUI + map surface + tooltips + unknown-position guard
-make -C linux bot-test    # 41 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, follow nameless/char id, portal blocking, speed boost control, cast speed control, cast assist, cast-ready pacing, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, follow mirror, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosBazar inventory scan/price-all, NosMall import filters
+make -C linux bot-test    # 48 fake-server smokes: combat, rules, spell order, out-of-range, rejection, HP/MP + finish-kill recovery, stale-target recovery, recovery priority, recovery threshold, loot approach, loot under attack, player follow, follow-attack, follow loot, follow nameless/char id, portal blocking, speed boost control, cast speed control, cast assist, cast-ready pacing, retaliate-only defence, far-goal leg chopping, death/revive dialog, target focus, focus+retaliate, cancel pairing, refusal keep, defend first, start while sitting, route resume, in-range hold/resume, follow mirror, NosBazar monitor, NosBazar relist, NosBazar item-name copy, NosBazar inventory scan/price-all, NosMall import filters, pet tamer (Whip → Tame → pet slots), Great Quarry sequence
 ```
 
 The bot test sends a fake player at (25,117) on map 20, a monster at

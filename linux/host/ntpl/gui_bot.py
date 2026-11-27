@@ -50,6 +50,21 @@ import math
 import os
 import time
 
+#: Pet Trainer tamer. Tame (1787) has range 2, cast 1.0 s and a 15 s
+#: cooldown; Whip (1786, skill slot 0) is the card's basic attack. The server
+#: only tames a weakened monster, so the tamer hits it down first.
+TAME_SKILL_VNUM = 1787
+TAME_RANGE_CELLS = 2
+TAME_COOLDOWN_S = 15.0
+TAME_SEARCH_CELLS = 15
+TAME_RESULT_TIMEOUT_S = 4.0
+TAME_MAX_TRIES = 3
+#: Game18N keys the server answers a Tame attempt with (live 2026-11-27).
+TAME_MSG_SUCCESS = 2614    # "Taming successful."
+TAME_MSG_NO_SLOTS = 1887   # "You have reached the maximum number of pet slots."
+TAME_MSG_FAILED = 2631     # "Taming failed."
+TAME_MSG_CANNOT = 2623     # "Monsters cannot be tamed with this skill."
+
 class BotPageMixin:
     def _mirror_writer_path(self) -> Path:
         """This host's publisher file, unique per client/port."""
@@ -458,6 +473,8 @@ class BotPageMixin:
                         and self.recover_toggle.get_active())
                     or (self.recover_mp_toggle is not None
                         and self.recover_mp_toggle.get_active())
+                    or (self.tame_toggle is not None
+                        and self.tame_toggle.get_active())
                 ):
                     self._set_status("add waypoints or enable combat/pickup")
                     return
@@ -507,6 +524,16 @@ class BotPageMixin:
         self.dead_warned = False
         self.unknown_warn_at = 0.0
         self.out_of_range_warn_at = 0.0
+        # A tame run starts counting from zero; the Tame cooldown from the
+        # previous run is kept (the server enforces it anyway).
+        self.tame_done = 0
+        self.tame_target_id = None
+        self.tame_cast_target = None
+        self.tame_attempts = 0
+        self.tame_hit_at = 0.0
+        self.tame_step_at = 0.0
+        self.tame_warn_at = 0.0
+        self.tame_seen_message = self.engine.world.message_seq
         if self.bot_timer is None:
             self.bot_timer = GLib.timeout_add(BOT_INTERVAL_MS, self._bot_tick)
         self._set_status("bot started")
@@ -530,6 +557,9 @@ class BotPageMixin:
         self.recover_need_hp = False
         self.recover_need_mp = False
         self.fight_target_id = None
+        self.tame_target_id = None
+        self.tame_cast_target = None
+        self.tame_attempts = 0
         self.pending_casts.clear()
         self.assist_packet = None
         self.assist_slot = None
@@ -1413,6 +1443,353 @@ class BotPageMixin:
         except (KeyError, ValueError):
             return template
 
+    # -- Pet Trainer tamer ------------------------------------------------
+
+    def _tame_setting(self) -> tuple[int, int, float]:
+        vnum = (
+            int(self.tame_vnum_spin.get_value())
+            if self.tame_vnum_spin is not None
+            else 333
+        )
+        slot = (
+            int(self.tame_slot_spin.get_value())
+            if self.tame_slot_spin is not None
+            else 1
+        )
+        hp_pct = (
+            float(self.tame_hp_spin.get_value())
+            if self.tame_hp_spin is not None
+            else 25.0
+        )
+        return vnum, max(1, min(9, slot)), hp_pct
+
+    def _tame_skill_vnum(self, slot: int) -> int:
+        """The skill vnum on the configured slot, Tame by default."""
+        world = self.engine.world
+        vnum = self.log_skill_slots.get(slot)
+        if vnum is None:
+            vnum = world.skill_learned.get(slot)
+        return int(vnum) if vnum else TAME_SKILL_VNUM
+
+    def _tame_skill_info(self, slot: int):
+        return self.spells.get(self._tame_skill_vnum(slot))
+
+    def _tame_range(self, slot: int) -> int:
+        info = self._tame_skill_info(slot)
+        if info is not None and info.range > 0:
+            return int(info.range)
+        return TAME_RANGE_CELLS
+
+    def _tame_cooldown(self, slot: int) -> float:
+        info = self._tame_skill_info(slot)
+        if info is not None and info.cooldown > 0:
+            return float(info.cooldown)
+        return TAME_COOLDOWN_S
+
+    def _tame_info_update(self, world, detail: str = "") -> None:
+        """The Pet tamer frame's live line (no Bot-log spam)."""
+        if self.tame_info is None:
+            return
+        used = len(world.pets)
+        text = f"pet slots: {used if used else '—'} · tamed: {self.tame_done}"
+        if detail:
+            text = f"{text} · {detail}"
+        self.tame_info.set_text(text)
+
+    def _tame_label(self, vnum: int, entity) -> str:
+        name = self.monster_names.get(vnum, f"vnum {vnum}")
+        return f"{name} {entity.entity_id}"
+
+    @staticmethod
+    def _tame_hp_percent(entity) -> float | None:
+        if entity.hp is None or entity.hp < 0 or entity.hp_max <= 0:
+            return None
+        return max(0.0, min(100.0, 100.0 * entity.hp / entity.hp_max))
+
+    def _tame_target(self, world, vnum: int):
+        """The current or nearest monster of `vnum` in the search radius."""
+        position = self._player_cell()
+        if position is None:
+            return None
+        px, py = position
+        current = (
+            world.entities.get(self.tame_target_id)
+            if self.tame_target_id is not None
+            else None
+        )
+        if (
+            current is not None
+            and current.kind == 3
+            and current.vnum == vnum
+            and not self._target_blocked(current.entity_id)
+            and max(abs(current.x - px), abs(current.y - py))
+            <= TAME_SEARCH_CELLS
+        ):
+            return current
+        best = None
+        best_distance = TAME_SEARCH_CELLS + 1
+        for entity in world.entities.values():
+            if entity.kind != 3 or entity.vnum != vnum:
+                continue
+            if self._target_blocked(entity.entity_id):
+                continue
+            distance = max(abs(entity.x - px), abs(entity.y - py))
+            if distance < best_distance or (
+                distance == best_distance
+                and best is not None
+                and entity.entity_id < best.entity_id
+            ):
+                best, best_distance = entity, distance
+        return best
+
+    def _tame_hit(self, target, now: float) -> None:
+        """One basic attack (slot 0, the Pet Trainer's Whip) on the target."""
+        if now < self.tame_hit_at:
+            return
+        if not self._ensure_target(target.entity_id, now):
+            return
+        if not self._send(self._skill_packet(target.entity_id, skill=0)):
+            return
+        info = self.spells.get(self._basic_skill_vnum() or 0)
+        pace = 1.2
+        if info is not None:
+            pace = max(0.8, info.cooldown, info.cast_time)
+        self.tame_hit_at = now + pace
+
+    def _tame_walk(self, target, slot: int, now: float) -> bool:
+        """One walk leg toward the target.
+
+        The map grid's A* is used when the map data is loaded (the normal
+        hunting ground); on a map without it (Miniland) the client's own
+        MoveTo gets a three-cell leg instead.
+        """
+        if self.map_grid is not None:
+            return self._chase_step(
+                target, float(self._tame_range(slot)), now
+            )
+        position = self._player_cell()
+        if position is None:
+            return False
+        dx = max(-3, min(3, target.x - position[0]))
+        dy = max(-3, min(3, target.y - position[1]))
+        if dx == 0 and dy == 0:
+            return False
+        goal = (position[0] + dx, position[1] + dy)
+        if not self._ensure_target(target.entity_id, now):
+            return False
+        if not self._client_move(goal[0], goal[1]):
+            return False
+        self.pending_target = goal
+        self.pending_is_path = False
+        self.pending_loot_id = None
+        self.pending_since = now
+        self.pending_distance = max(abs(dx), abs(dy))
+        self.pending_until = now + max(3.0, self.pending_distance * 1.5)
+        return True
+
+    def _tame_result(self, world, message_id: int) -> bool:
+        """Handle the server's answer to a Tame cast; False = unrelated."""
+        if message_id not in (
+            TAME_MSG_SUCCESS,
+            TAME_MSG_NO_SLOTS,
+            TAME_MSG_CANNOT,
+            TAME_MSG_FAILED,
+        ):
+            return False
+        target = self.tame_cast_target
+        self.tame_cast_target = None
+        if target is not None:
+            # A tamed monster despawns a moment later; do not re-pick it.
+            self.target_blocked[target] = time.monotonic() + 3.0
+        entity = world.entities.get(target) if target is not None else None
+        label = (
+            self._tame_label(entity.vnum, entity)
+            if entity is not None
+            else (f"monster {target}" if target is not None else "the monster")
+        )
+        if message_id == TAME_MSG_SUCCESS:
+            self.tame_done += 1
+            self.tame_attempts = 0
+            self.tame_target_id = None
+            self._tame_info_update(world)
+            remaining = max(
+                0, int(self.tame_ready_at - time.monotonic() + 0.999)
+            )
+            self._set_status(
+                f"tamed {label} · pet slots {len(world.pets) or '—'} · "
+                f"next Tame in {remaining} s"
+            )
+            self._log_line(
+                f"tamer: tamed {label} (pet slots {len(world.pets)})"
+            )
+            return True
+        if message_id == TAME_MSG_NO_SLOTS:
+            self._stop_bot()
+            self._set_status(
+                "pet slots are full — release a pet or expand the slots, "
+                "then Start"
+            )
+            self._log_line(
+                "tamer: stopped, the server says the pet slots are full"
+            )
+            return True
+        if message_id == TAME_MSG_CANNOT:
+            self._stop_bot()
+            self._set_status(
+                "this skill cannot tame that monster — check the vnum and "
+                "the Tame slot"
+            )
+            self._log_line(
+                "tamer: stopped, this skill cannot tame the monster"
+            )
+            return True
+        # TAME_MSG_FAILED
+        if self.tame_attempts >= TAME_MAX_TRIES:
+            self._stop_bot()
+            self._set_status(
+                f"taming failed {self.tame_attempts} times — stopped"
+            )
+            self._log_line("tamer: stopped after repeated taming failures")
+        else:
+            self.tame_target_id = None
+            self._set_status(
+                f"taming failed ({self.tame_attempts}/{TAME_MAX_TRIES}); "
+                "trying another monster"
+            )
+        return True
+
+    def _tame_tick(self, now: float, world) -> bool:
+        """The Pet Trainer loop: find, hit down, Tame, repeat."""
+        vnum, slot, hp_pct = self._tame_setting()
+        self._tame_info_update(world)
+        if self.client is None or not self.client.connected:
+            return False
+        if world.dead:
+            return True
+        char_id = self._char_id()
+        if (
+            world.resting is True
+            and char_id is not None
+            and now >= self.stand_sent_until
+        ):
+            self._send(f"rest 1 1 {char_id}")
+            self.stand_sent_until = now + REST_RETRY_S
+            self._set_status("sitting; standing up to tame")
+            return True
+
+        # The server answers a Tame cast with a Game18N message (2614 taming
+        # successful, 1887 max pet slots, 2631 taming failed, 2623 this skill
+        # cannot tame the monster). Nothing else is a result.
+        if self.tame_cast_target is not None:
+            if (
+                world.message_seq != self.tame_seen_message
+                and now - self.tame_cast_at <= TAME_RESULT_TIMEOUT_S
+            ):
+                self.tame_seen_message = world.message_seq
+                if self._tame_result(world, world.last_message_id):
+                    return True
+            if now - self.tame_cast_at > TAME_RESULT_TIMEOUT_S:
+                self.tame_cast_target = None
+                self.tame_target_id = None
+                if self.tame_attempts >= TAME_MAX_TRIES:
+                    self._stop_bot()
+                    self._set_status(
+                        "Tame got no answer — is it on the chosen slot and "
+                        "the Pet Trainer card equipped? Stopped"
+                    )
+                    self._log_line(
+                        "tamer: stopped, Tame got no answer from the server"
+                    )
+                    return False
+                self._set_status(
+                    "Tame got no answer — is it on the chosen slot? "
+                    "Trying again"
+                )
+            return True
+
+        # A walk leg is still running: wait for its position update.
+        if self.pending_target is not None:
+            position = self._player_cell()
+            confirmed = world.position == self.pending_target or (
+                self.last_move_time >= self.pending_since
+                and self.last_move is not None
+                and self.last_move[0] == 1
+                and (self.last_move[2], self.last_move[3])
+                == self.pending_target
+            )
+            if (
+                confirmed
+                or position == self.pending_target
+                or now > self.pending_until
+            ):
+                self.pending_target = None
+            return True
+
+        target = self._tame_target(world, vnum)
+        if target is None:
+            self.tame_target_id = None
+            self._tame_info_update(world, "waiting for a target")
+            if now >= self.tame_warn_at:
+                self.tame_warn_at = now + 15.0
+                name = self.monster_names.get(vnum, f"vnum {vnum}")
+                self._set_status(
+                    f"no {name} within {TAME_SEARCH_CELLS} cells — waiting"
+                )
+            return True
+        if self.tame_target_id != target.entity_id:
+            self.tame_target_id = target.entity_id
+            self._set_status(f"taming target {self._tame_label(vnum, target)}")
+        position = self._player_cell()
+        if position is None:
+            self._request_position()
+            return True
+        distance = max(
+            abs(target.x - position[0]), abs(target.y - position[1])
+        )
+        hp = self._tame_hp_percent(target)
+        label = self._tame_label(vnum, target)
+        if distance > self._tame_range(slot):
+            if now >= self.tame_step_at:
+                self.tame_step_at = now + 0.5
+                self._tame_walk(target, slot, now)
+            self._tame_info_update(world, f"walking to {label}")
+            return True
+        if self.tame_ready_at > now:
+            remaining = max(0, int(self.tame_ready_at - now + 0.999))
+            if hp is None or hp > hp_pct:
+                self._tame_hit(target, now)
+                self._tame_info_update(
+                    world, f"hitting {label} · Tame in {remaining} s"
+                )
+            else:
+                self._tame_info_update(
+                    world,
+                    f"{label} at {hp:.0f}% HP · Tame in {remaining} s",
+                )
+            return True
+        if hp is None or hp > hp_pct:
+            self._tame_hit(target, now)
+            self._tame_info_update(
+                world,
+                f"hitting {label} ({hp:.0f}% HP)"
+                if hp is not None
+                else f"hitting {label}",
+            )
+            return True
+        # HP low enough: Tame.
+        if not self._ensure_target(target.entity_id, now):
+            return True
+        if not self._send(self._skill_packet(target.entity_id, skill=slot)):
+            return False
+        self.tame_cast_at = now
+        self.tame_cast_target = target.entity_id
+        self.tame_seen_message = world.message_seq
+        self.tame_ready_at = now + self._tame_cooldown(slot)
+        self.tame_attempts += 1
+        self._tame_info_update(world, f"taming {label} (slot {slot})")
+        self._set_status(f"Taming {label} at {hp:.0f}% HP (slot {slot})…")
+        return True
+
     def _bot_tick(self) -> bool:
         if not self.bot_running:
             self.bot_timer = None
@@ -1487,6 +1864,11 @@ class BotPageMixin:
             return True
         self.dead_warned = False
         self.revive_sent_at = 0.0
+
+        # Pet Trainer tamer owns the tick: it hunts the chosen monster, hits
+        # it down and Tames it instead of the normal combat/path logic.
+        if self.tame_toggle is not None and self.tame_toggle.get_active():
+            return self._tame_tick(now, world)
 
         # Mirror mode keeps reading the followed character's publisher file
         # even while a walk is pending, so the next action is never stale.

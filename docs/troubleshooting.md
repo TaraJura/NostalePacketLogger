@@ -59,6 +59,16 @@
 | Client crashes after injecting a DLL | a second live logger was injected (two send/recv hooks) | restart the game client; never `--force` while the old logger is still listening. The injector now refuses if the old port file exists |
 | Bot cannot reach a target near a map edge | the only route crosses a warp tile and blocking is on | that is the protection working; walk there manually with blocking off, or fight from range |
 
+## Pet tamer
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `Tame got no answer` and the bot stops | Tame is not on the chosen skill-bar slot, or the Pet Trainer specialist card is not equipped | equip the card and put Tame on slot 1 (the default), then Start; the Bot log says when the server sent no taming result |
+| `pet slots are full — release a pet…` | the server answered `msgi 0 1887` (maximum pet slots); the live panel has 8 slots (`sc_p` 0–7) | release a pet in game or expand the slots with the server's slot item, then Start again |
+| `taming failed 3 times` | the server kept refusing the tame (`msgi 0 2631`), usually the target HP was still too high for the server | raise **Hit until HP ≤** (the live server accepted 1 HP; 25% is the default) or pick a lower-level monster |
+| `this skill cannot tame that monster` | the vnum or the Tame slot is wrong (the server answered `msgi 0 2623`) | set the right **Monster vnum** (Chicken = 333) and the slot with Tame |
+| The bot hits the monster but never tames | the monster is not on the configured vnum, the target is out of the 2-cell Tame range, or the Tame cooldown is still running | the frame line shows the target, its HP and the cooldown; check the vnum and the live line |
+
 ## Minigame
 
 | Symptom | Likely cause | Fix |

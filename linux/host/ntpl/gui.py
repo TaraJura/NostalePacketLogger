@@ -396,6 +396,24 @@ class Application(
         self.bot_running = False
         self.start_when_located = False
         self.bot_timer = None
+        # Pet Trainer tamer mode (Map/Bot "Pet tamer"): the current target,
+        # the Tame cooldown/cast and the pet-slot counter. The widgets are
+        # built with the map page; None before that.
+        self.tame_toggle = None
+        self.tame_vnum_spin = None
+        self.tame_slot_spin = None
+        self.tame_hp_spin = None
+        self.tame_info = None
+        self.tame_target_id: int | None = None
+        self.tame_ready_at = 0.0
+        self.tame_cast_at = 0.0
+        self.tame_cast_target: int | None = None
+        self.tame_seen_message = 0
+        self.tame_attempts = 0
+        self.tame_done = 0
+        self.tame_hit_at = 0.0
+        self.tame_step_at = 0.0
+        self.tame_warn_at = 0.0
         self._closing = False
         # Top-level "Bot log" tab: every action the status bar shows, with
         # timestamps, so a fight can be debugged after the fact.
