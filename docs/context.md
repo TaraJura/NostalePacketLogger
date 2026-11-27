@@ -52,7 +52,7 @@ the data layer in [database.md](database.md).
   and Relist shows only the relist set by default.
   The Character frame shows the detected name above HP/MP. The active user
   config is a 25-item relist list for char `root1` (see the handoff).
-- **Minigame — Great Quarry (2026-11-26, host 0.9.14)**: the Minigame tab's
+- **Minigame — Great Quarry (2026-11-26, host 0.10.0)**: the Minigame tab's
   **Miniland production** frame plays a production minigame (Great Quarry
   3125 first). **Play until** picks the reward box 1x–5x, default 5x whose
   minimum score is 16,000; the production-points label comes from
@@ -74,9 +74,9 @@ the data layer in [database.md](database.md).
   Minigame tick (a one-shot GLib timer stalled live). Packet shortcut, high
   ban risk; the natural flow, the automated claim and the 40 s Play loop
   are live-verified.
-- **Linux host**: 390 unittest cases, 6 GTK4 smokes, 48 fake-server bot
+- **Linux host**: 395 unittest cases, 6 GTK4 smokes, 48 fake-server bot
   smokes, and the native `speed-test` and `key-test` pass. Build: `make -C
-  linux all test-host`, tests above. The host is **0.9.14**; the GTK4 window
+  linux all test-host`, tests above. The host is **0.10.0**; the GTK4 window
   is split into `gui.py` (core) plus one mixin per page (`gui_bazar.py`,
   `gui_map.py`, `gui_bot.py`, `gui_family.py`, `gui_minigame.py`,
   `gui_stats.py`, `guicommon.py`), and a handler exception is logged and
@@ -132,19 +132,22 @@ the data layer in [database.md](database.md).
   hack, high ban risk; reverts when the GUI disconnects. Needs DLL 0.2.9+
   (a game-client restart/injection), not just a GUI restart — the raised cap
   is DLL-side too.
-- **Pet tamer (2026-11-27, host 0.9.14)**: the Map/Bot **Pet tamer** frame
-  runs the Pet Trainer specialist card's loop instead of normal combat:
-  nearest monster of the chosen vnum (default **333 Chicken**) within 15
-  cells, walk into range, hit it with the card's basic attack (**Whip**,
-  `u_s 0`) until its `st` HP is at or below the limit (default 25%), then
-  **Tame** on the configured skill-bar slot (default 1, skill 1787, 15 s
-  cooldown padded to 16 s; a press the client refuses sends no `ct` and is
-  retried quickly). The server answers with a Game18N `msgi` (2614 success, 1887
-  max pet slots, 2631 failed, 2623 cannot tame); it stops on a full pet list
-  or repeated failures. The engine now tracks `Entity.hp`/`hp_max` from
-  `st`, `WorldState.pets` from `sc_p`/`p_clear` and the `msgi` key. Live
-  protocol captured from PID 836 (four chickens tamed at 1 HP); the mode
-  itself awaits its first live run. See [taming.md](taming.md).
+- **Pet Trainer tab (2026-11-27, host 0.10.0)**: the ninth GUI page, its own
+  50 ms timer and per-client settings (`~/.config/ntpl/tamer-<winpid>.json`).
+  **Tame**: nearest monster of the chosen vnum (default 333 Chicken) within
+  15 cells, Whip (`u_s 0`) to the HP limit (default 25%), Tame on the chosen
+  slot (default 1, 1787, 15 s + 1 s). **End to end**: after the server's
+  `msgi 0 1887` (pet slots full) it walks to the Miniland portal (map 1 at
+  49,133), casts the summon (slot 2, skill 1788; the sparring monster is
+  vnum 1497), sends every tamed pet at it with `suctl <map> <count> <petId>
+  3 <monster> ...` every 1.5 s for the training time (default 8 min), then
+  casts Extract Essence (slot 3, 1789, target type 2) on each pet; `msgi 0
+  2627` releases it and frees the slot, and the loop tames again. The engine
+  tracks `Entity.hp`/`hp_max` (`st`), `WorldState.pets`/`pet_entities`
+  (`sc_p`/`p_clear`), the `msgi` key and the `ct` cast log; the state machine
+  lives in `tamer.py` + `gui_tamer.py`. Live protocol captured from PID 836
+  (taming, summon at 02:36, `suctl` training, extraction at 02:45); the full
+  loop awaits its first live end-to-end run. See [taming.md](taming.md).
 - **Cast speed** (**Malicious** tab, plain on/off switch, default off):
   host-side, works with or without the bot; cooldowns stay visible
   (`CAST|0` on attach undoes DLL 0.2.8's zeroing). Manual: pressing a

@@ -198,6 +198,19 @@ live **next claim in N s** countdown; **Stop** ends the loop. Open the Great
 Quarry window in the game first. It is a packet shortcut, not a visual
 play-through: high ban risk. See [docs/minigame.md](docs/minigame.md).
 
+### Pet Trainer
+
+The **Pet Trainer** tab automates the Pet Trainer specialist card end to end:
+it **tames** the chosen monster (Chicken = 333) with Whip + Tame until the
+server reports the pet slots full, then (with **End to end** on) walks to the
+Miniland portal, **summons** the sparring monster and **sends every tamed
+pet at it** with `suctl` for the configured training time. Afterwards it
+**extracts the essence** from each pet (this releases the pet and frees its
+slot) and starts taming again. The full state machine, packet shapes and the
+live values (summon slot 2, sparring vnum 1497, extract slot 3, portal map 1
+at 49,133, about 8 minutes of training) are in
+[docs/taming.md](docs/taming.md).
+
 ### Stats
 
 ![Stats tab: player DPS meter](docs/assets/gui-stats.png)
@@ -222,7 +235,7 @@ DLL version.
 
 ```bash
 sudo apt install g++-mingw-w64-i686 xvfb          # once
-make -C linux all test-host                       # DLL + injector + 390 unit tests
+make -C linux all test-host                       # DLL + injector + 395 unit tests
 make -C linux gui-test bot-test                   # 6 GTK4 smokes, 48 fake-server smokes
 
 linux/scripts/inject.sh        # optional: the GUI picker can inject too
@@ -248,7 +261,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 - [docs/bazar.md](docs/bazar.md) — the NosBazar tab end to end
 - [docs/family.md](docs/family.md) · [docs/minigame.md](docs/minigame.md) ·
   [docs/stats.md](docs/stats.md) · [docs/taming.md](docs/taming.md) — the
-  other tabs and the Pet Trainer tamer
+  other tabs and the Pet Trainer automation
 - [docs/database.md](docs/database.md) — the SQLite game/packet database and
   the NosMall catalog
 - [docs/autonomous-play.md](docs/autonomous-play.md) — observe → decide → act
@@ -262,7 +275,7 @@ Start with [docs/architecture.md](docs/architecture.md), then:
 
 ## Status
 
-Host **0.9.14** (Linux), DLL **0.3.3**: 390 unit tests, 6 GTK4 window smokes
+Host **0.10.0** (Linux), DLL **0.3.3**: 395 unit tests, 6 GTK4 window smokes
 and 48 fake-server bot smokes pass, and the real injector has been run against
 the live NosTale client under Wine 11 — both hooks `ACTIVE`, movement through
 the client's own MoveTo, auto-attack confirmed by the server's `su`, and the
@@ -274,9 +287,10 @@ the Stop between runs and the points-exhaustion stop. Speed + keeps the
 requested value through respawn/mount/resync position corrections (live
 2026-11-26; only a correction burst settles it), leaving a raid team
 unblocks the Minigame Play immediately (the server's `raid 1 0` state), and
-the new **Pet tamer** (Map/Bot) automates the Pet Trainer card: it whips a
-Chicken down and Tames it, waits out the 15 s cooldown and repeats until the
-server's pet slots are full. The original Windows tree is unchanged.
+the new **Pet Trainer** tab runs the full end-to-end loop: tame chickens
+until the pet slots fill, train the tamed pets on the Miniland sparring
+monster (`suctl`), extract their essence (which releases them and frees the
+slots) and tame again. The original Windows tree is unchanged.
 
 Gameforge's terms of service prohibit automation and client manipulation.
 This is a tool for the account owner's own client; using it on a live account

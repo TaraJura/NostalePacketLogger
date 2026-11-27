@@ -235,11 +235,6 @@ grouped by function:
   equipped SP card; the server reports its vnum for `u_s 0`). There are no
   Skill / Search / Min delay / template controls: the bot always uses slot 0,
   the skill's own range and cooldown, and acquires targets within 15 cells.
-- **Pet tamer** — the Pet Trainer card's loop instead of normal combat:
-  **Tame monsters** toggle, **Monster vnum** (333 = Chicken), **Tame slot**
-  (1) and **Hit until HP ≤** (25%), with a live line showing the occupied
-  pet slots and the run's tame count. It whips the target down, Tames it,
-  waits for the server's result and repeats; see [taming.md](taming.md).
 - **Targets** — monster filter: all monsters, only the selected templates, or
   all except the selected ones. Search the client's monster table by name or
   vnum, or add a vnum manually. **Also attack monsters with unknown vnum**

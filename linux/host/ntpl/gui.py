@@ -68,6 +68,7 @@ from .gui_family import FamilyPageMixin
 from .gui_map import MapPageMixin
 from .gui_minigame import MinigamePageMixin
 from .gui_stats import StatsPageMixin
+from .gui_tamer import TamerPageMixin
 
 from .guicommon import (
     MAX_ROWS,
@@ -114,6 +115,7 @@ class Application(
     MapPageMixin,
     FamilyPageMixin,
     MinigamePageMixin,
+    TamerPageMixin,
     BotPageMixin,
     Gtk.Application,
 ):
@@ -396,26 +398,49 @@ class Application(
         self.bot_running = False
         self.start_when_located = False
         self.bot_timer = None
-        # Pet Trainer tamer mode (Map/Bot "Pet tamer"): the current target,
-        # the Tame cooldown/cast and the pet-slot counter. The widgets are
-        # built with the map page; None before that.
-        self.tame_toggle = None
-        self.tame_vnum_spin = None
-        self.tame_slot_spin = None
-        self.tame_hp_spin = None
-        self.tame_info = None
-        self.tame_target_id: int | None = None
-        self.tame_ready_at = 0.0
-        self.tame_cast_at = 0.0
-        self.tame_cast_target: int | None = None
-        self.tame_cast_started = False
-        self.tame_cast_seq = 0
-        self.tame_seen_message = 0
-        self.tame_attempts = 0
-        self.tame_done = 0
-        self.tame_hit_at = 0.0
-        self.tame_step_at = 0.0
-        self.tame_warn_at = 0.0
+        # Pet Trainer tab: its own 50 ms state machine (tame -> train ->
+        # extract), widgets, per-client settings and the last cast state.
+        self.tamer_running = False
+        self.tamer_timer = None
+        self.tamer_phase = "tame"
+        self._tamer_config = None
+        self.tamer_status = None
+        self.tamer_info = None
+        self.tamer_vnum_spin = None
+        self.tamer_vnum_name = None
+        self.tamer_slot_spin = None
+        self.tamer_hp_spin = None
+        self.tamer_e2e_toggle = None
+        self.tamer_miniland_spin = None
+        self.tamer_portal_map_spin = None
+        self.tamer_portal_x_spin = None
+        self.tamer_portal_y_spin = None
+        self.tamer_summon_spin = None
+        self.tamer_sparring_spin = None
+        self.tamer_extract_spin = None
+        self.tamer_train_spin = None
+        self.tamer_extract_toggle = None
+        self.tamer_target_id = None
+        self.tamer_cast_at = 0.0
+        self.tamer_cast_target = None
+        self.tamer_cast_started = False
+        self.tamer_cast_seq = 0
+        self.tamer_seen_message = 0
+        self.tamer_attempts = 0
+        self.tamer_tamed = 0
+        self.tamer_extracted = 0
+        self.tamer_hit_at = 0.0
+        self.tamer_step_at = 0.0
+        self.tamer_warn_at = 0.0
+        self.tamer_ready_at = 0.0
+        self.tamer_train_until = 0.0
+        self.tamer_summon_at = 0.0
+        self.tamer_suctl_at = 0.0
+        self.tamer_extract_at = 0.0
+        self.tamer_extract_target = None
+        self.tamer_extract_cast_at = 0.0
+        self.tamer_train_round = 0
+        self.tamer_portal_step_at = 0.0
         self._closing = False
         # Top-level "Bot log" tab: every action the status bar shows, with
         # timestamps, so a fight can be debugged after the fact.
@@ -768,6 +793,7 @@ class Application(
         malicious_page = self._build_malicious_page()
         minigame_page = self._build_minigame_page()
         stats_page = self._build_stats_page()
+        tamer_page = self._build_tamer_page()
 
         self.notebook = Gtk.Notebook()
         self.notebook.append_page(packet_page, Gtk.Label(label="Packets"))
@@ -784,6 +810,9 @@ class Application(
         # Stats follows the same rule: appended last, so existing page
         # numbers (smokes, README shots) keep their meaning.
         self.notebook.append_page(stats_page, Gtk.Label(label="Stats"))
+        # Appended after Stats: the tamer tab has its own timer and keeps
+        # every existing page index (smokes, README shots) unchanged.
+        self.notebook.append_page(tamer_page, Gtk.Label(label="Pet Trainer"))
         self.notebook.set_vexpand(True)
         self.notebook.connect("switch-page", self._on_page_switch)
 
@@ -2449,6 +2478,7 @@ class Application(
         self._bazar_seed_from_log()
         self._family_reset_for_attach(client.winpid)
         self._minigame_reset_for_attach(client.winpid)
+        self._tamer_reset_for_attach(client.winpid)
         # The minigame window is often open before this host attaches (or
         # before a GUI restart); seed its object and points from the log.
         self._minigame_seed_from_log()
@@ -2936,6 +2966,9 @@ class Application(
         self._sync_portal_block()
         self._sync_speed_boost(quiet=True)
         self._restore_client_cooldowns(quiet=True)
+        if getattr(self, "_tamer_config", None) is None:
+            # Direct --port mode has no picker attach: load the settings once.
+            self._tamer_load_config()
         # The direct --port path has no attach-time reset, so seed the
         # production minigame object here too; the picker path already did,
         # and the method returns immediately when the state is known.

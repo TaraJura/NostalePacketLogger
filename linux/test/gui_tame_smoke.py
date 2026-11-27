@@ -1,12 +1,15 @@
-"""Headless smoke test for the Pet Trainer tamer bot mode.
+"""Headless smoke test for the Pet Trainer tab (tame → train → extract).
 
-The fake server spawns two Chickens (vnum 333) next to the character. The
-tamer must target one, hit it with the card's basic attack (slot 0) until its
-HP is at or below the configured limit, then use Tame from the chosen slot
-(1), and repeat for the second chicken. The first cast is answered with the
-server's `msgi 0 2614` (Taming successful) plus `ctl`/`sc_p` (the new pet),
-the second with `msgi 0 1887` (max pet slots), which must stop the bot with a
-clear message.
+The fake server starts the character in the Miniland (map 20001, so no portal
+walk). The tamer must:
+
+1. Whip and Tame three Chickens; the third Tame answers
+   ``msgi 0 1887`` (maximum pet slots), which switches to training.
+2. Cast Summon Weak Sparring Monster (slot 2), see the sparring monster
+   spawn (vnum 1497) and send the two tamed pets at it with ``suctl``.
+3. After the (shortened) training time, cast Extract Essence (slot 3,
+   target type 2) on each pet; ``msgi 0 2627`` releases it and the panel
+   shrinks; with no pets left the tamer goes back to taming.
 
 Run through scripts/dev-test-bot.sh (Xvfb).
 """
@@ -29,10 +32,13 @@ from ntpl.gui import Application
 CHAR_ID = 14881134
 CHICKEN_A = 3039
 CHICKEN_B = 3040
+CHICKEN_C = 3041
 PET_A = 1452945
+PET_B = 1452978
+SPARRING = 1506236
 
 
-class TameServer:
+class TamerServer:
     def __init__(self) -> None:
         self.listener = socket.socket()
         self.listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -42,8 +48,10 @@ class TameServer:
         self.received: list[str] = []
         self.connection = None
         self.stop = threading.Event()
-        # Which chicken the next tame answer belongs to.
-        self.tamed: set[int] = set()
+        self.tames = 0
+        self.suctl: list[str] = []
+        self.pets: dict[int, tuple[int, int]] = {}
+        self.extracted: set[int] = set()
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self) -> None:
@@ -52,14 +60,17 @@ class TameServer:
             self.connection.sendall(
                 (
                     "STATUS|ready\n"
-                    f"RECV|at {CHAR_ID} 85 25 117 2 0 0 0 0 0 0\n"
+                    f"RECV|at {CHAR_ID} 20001 5 8 2 0 0 0 0 0 0\n"
                     "RECV|stat 1000 1000 500 500 0 0\n"
-                    f"RECV|in 3 333 {CHICKEN_A} 26 117 2 100 100 0 0 0 "
+                    f"RECV|in 3 333 {CHICKEN_A} 6 8 2 100 100 0 0 0 "
                     "-1 0 0 -1 - 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
                     f"RECV|st 3 {CHICKEN_A} 1 0 100 100 100 10 100 10 0\n"
-                    f"RECV|in 3 333 {CHICKEN_B} 27 118 2 100 100 0 0 0 "
+                    f"RECV|in 3 333 {CHICKEN_B} 7 9 2 100 100 0 0 0 "
                     "-1 0 0 -1 - 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
                     f"RECV|st 3 {CHICKEN_B} 1 0 100 100 100 10 100 10 0\n"
+                    f"RECV|in 3 333 {CHICKEN_C} 6 9 2 100 100 0 0 0 "
+                    "-1 0 0 -1 - 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+                    f"RECV|st 3 {CHICKEN_C} 1 0 100 100 100 10 100 10 0\n"
                     "RECV|p_clear\n"
                     "RECV|sc_p 0 806 822161 1 3000 2 0 0 80 158 60 24 110 "
                     "0 20 43 24 43 20 2 60 80 50 50 477 481\n"
@@ -82,10 +93,16 @@ class TameServer:
                 self.received.append(text)
                 self._answer(text)
 
+    def _scp(self) -> str:
+        return (
+            "RECV|p_clear\n"
+            + "".join(
+                f"RECV|sc_p {slot} 333 {entity} 1 3000 0 0 0 32 40\n"
+                for slot, (_vnum, entity) in sorted(self.pets.items())
+            )
+        )
+
     def _answer(self, text: str) -> None:
-        # TARGET|id is the DLL command, not a packet; the client would send
-        # the `st` itself. The smoke answers the target selection directly so
-        # the HP is known before the first Whip.
         if text.startswith("TARGET|"):
             try:
                 entity_id = int(text.split("|", 1)[1])
@@ -95,38 +112,58 @@ class TameServer:
                 f"RECV|st 3 {entity_id} 1 0 100 100 100 10 100 10 0\n"
             )
             return
-        if not text.startswith("SEND|u_s "):
+        if not text.startswith("SEND|"):
             return
-        parts = text.split()
+        line = text[len("SEND|"):]
+        parts = line.split()
+        if not parts:
+            return
+        if parts[0] == "u_s":
+            self._answer_skill(parts)
+        elif parts[0] == "suctl":
+            self.suctl.append(line)
+
+    def _answer_skill(self, parts: list[str]) -> None:
         try:
             slot = int(parts[1])
-            entity_id = int(parts[3])
+            target_type = int(parts[2])
+            target_id = int(parts[3])
         except (IndexError, ValueError):
             return
         if slot == 0:
-            # Whip: leave 20% HP — at or below the default 25% limit.
             self.send(
-                f"RECV|st 3 {entity_id} 1 0 1 100 20 10 100 10 0\n"
+                f"RECV|st 3 {target_id} 1 0 1 100 20 10 100 10 0\n"
             )
-        elif slot == 1 and entity_id not in self.tamed:
-            self.tamed.add(entity_id)
-            # The live client answers a started Tame press with `ct`; the
-            # tamer requires it before waiting for the result.
-            self.send(
-                f"RECV|ct 1 {CHAR_ID} 3 {entity_id} 20 8153 1787\n"
-            )
-            if entity_id == CHICKEN_A:
+        elif slot == 1 and target_type == 3:
+            self.tames += 1
+            self.send(f"RECV|ct 1 {CHAR_ID} 3 {target_id} 20 8153 1787\n")
+            if self.tames <= 2:
+                pet = PET_A if self.tames == 1 else PET_B
+                slot_index = 3 + self.tames
+                self.pets[slot_index] = (333, pet)
                 self.send(
-                    f"RECV|ctl 2 {PET_A} 3 0\n"
                     "RECV|msgi 0 2614 0 0 0 0 0\n"
-                    f"RECV|out 3 {entity_id}\n"
-                    "RECV|p_clear\n"
-                    f"RECV|sc_p 4 333 {PET_A} 1 3000 0 0 0 32 40 27 4\n"
+                    f"RECV|out 3 {target_id}\n" + self._scp()
                 )
             else:
-                self.send(
-                    "RECV|msgi 0 1887 0 0 0 0 0\n"
-                )
+                self.send("RECV|msgi 0 1887 0 0 0 0 0\n")
+        elif slot == 2 and target_type == 1:
+            self.send(f"RECV|ct 1 {CHAR_ID} 1 {CHAR_ID} 14 8153 1788\n")
+            self.send(
+                f"RECV|in 3 1497 {SPARRING} 12 8 2 100 100 0 0 0 "
+                "-1 0 0 -1 - 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+            )
+        elif slot == 3 and target_type == 2:
+            self.send(f"RECV|ct 1 {CHAR_ID} 2 {target_id} 21 8156 1789\n")
+            if target_id in self.extracted:
+                return
+            self.extracted.add(target_id)
+            for slot_index, (_vnum, entity) in list(self.pets.items()):
+                if entity == target_id:
+                    del self.pets[slot_index]
+            self.send(
+                "RECV|msgi 0 2627 0 0 0 0 0\n" + self._scp()
+            )
 
     def send(self, text: str) -> None:
         try:
@@ -155,16 +192,23 @@ def main() -> int:
     )
     log.write("")  # never seed from the running client's own log
     log.close()
-    server = TameServer()
+    tamer_config = tempfile.NamedTemporaryFile(
+        "w", suffix=".json", delete=False, encoding="utf-8"
+    )
+    tamer_config.write("{}")
+    tamer_config.close()
+    os.environ["NTPL_TAMER_CONFIG"] = tamer_config.name
+    server = TamerServer()
     app = Application(
         "127.0.0.1", server.port, unique=False, log_file=log.name
     )
     result: dict[str, object] = {"ok": False, "detail": "not checked"}
     state = {"budget": 60}
 
-    def u_s_packets() -> list[str]:
+    def sent_skills() -> list[str]:
         return [
-            line for line in server.received
+            line[len("SEND|"):]
+            for line in server.received
             if line.startswith("SEND|u_s ")
         ]
 
@@ -178,65 +222,82 @@ def main() -> int:
             return True
         if app.client is None or not app.client.connected:
             return True
-        if app.tame_toggle is None:
-            result["detail"] = "the Pet tamer frame was not built"
+        if app.tamer_vnum_spin is None:
+            result["detail"] = "the Pet Trainer tab was not built"
             app.quit()
             return False
-        if len(app.engine.world.entities) < 2:
+        if len(app.engine.world.entities) < 3:
             if state["budget"] <= 0:
                 result["detail"] = "the chickens never spawned"
                 app.quit()
                 return False
             return True
-        app.notebook.set_current_page(1)  # Map / Bot
-        app.tame_toggle.set_active(True)
-        # Test-only shortcut: the real Tame cooldown is 15 s.
-        app._tame_cooldown = lambda slot: 1.0
-        app._start_bot()
-        GLib.timeout_add(1600, check_first)
-        GLib.timeout_add(7000, check_final)
+        app.notebook.set_current_page(8)  # Pet Trainer
+        app.tamer_e2e_toggle.set_active(True)
+        app._tamer_start()
+        # Test-only shortcuts: a 1 s Tame cooldown and a 1 s training.
+        app._tamer_cooldown = lambda slot, default: 1.0
+        if app._tamer_config is not None:
+            app._tamer_config.train_seconds = 1
+        GLib.timeout_add(9000, check_train)
+        GLib.timeout_add(20000, check_final)
         return False
 
-    def check_first() -> bool:
+    def check_train() -> bool:
         try:
-            packets = u_s_packets()
-            result["first_packets"] = packets
-            result["first"] = (
-                "SEND|u_s 0 3 3039" in packets
-                and "SEND|u_s 1 3 3039" in packets
-                and app.tame_done >= 1
-                and app.engine.world.pets.get(4) == 333
-            )
+            result["suctl"] = list(server.suctl)
+            result["train"] = string_has_suctl()
         except Exception as exc:  # noqa: BLE001
-            result["first"] = False
-            result["detail"] = f"first exception: {exc!r}"
+            result["train"] = False
+            result["detail"] = f"train exception: {exc!r}"
         return False
+
+    def string_has_suctl() -> bool:
+        if not server.suctl:
+            return False
+        line = server.suctl[0]
+        return (
+            line.startswith("suctl 20001 2 ")
+            and str(PET_A) in line
+            and str(PET_B) in line
+            and f"3 {SPARRING}" in line
+        )
 
     def check_final() -> bool:
         try:
-            packets = u_s_packets()
+            skills = sent_skills()
             status = app.status.get_text() if app.status is not None else ""
-            result["packets"] = packets
-            result["status"] = status
-            result["pets"] = dict(app.engine.world.pets)
-            result["done"] = app.tame_done
-            result["running"] = app.bot_running
-            result["final"] = (
-                "SEND|u_s 0 3 3040" in packets
-                and "SEND|u_s 1 3 3040" in packets
-                and app.tame_done == 1
-                and app.bot_running is False
-                and "pet slots are full" in status
+            tamer_status = (
+                app.tamer_status.get_text()
+                if app.tamer_status is not None
+                else ""
             )
-            result["ok"] = bool(result.get("first") and result["final"])
+            result["skills"] = skills
+            result["status"] = status
+            result["tamer_status"] = tamer_status
+            result["phase"] = app.tamer_phase
+            result["pets"] = dict(app.engine.world.pets)
+            result["tamed"] = app.tamer_tamed
+            result["extracted"] = app.tamer_extracted
+            extract_a = f"u_s 3 2 {PET_A}" in skills
+            extract_b = f"u_s 3 2 {PET_B}" in skills
+            result["extract"] = extract_a and extract_b
+            result["back_to_tame"] = app.tamer_phase == "tame"
+            result["ok"] = bool(
+                result.get("train")
+                and result["extract"]
+                and result["extracted"] == 2
+                and app.tamer_tamed == 2
+            )
             result["detail"] = (
-                f"first={result.get('first')} "
-                f"final={result['final']} "
-                f"packets={packets} "
-                f"pets={result['pets']} "
-                f"done={result['done']} "
-                f"running={result['running']} "
-                f"status={status!r}"
+                f"train={result.get('train')} "
+                f"extract={result['extract']} "
+                f"extracted={result['extracted']} "
+                f"tamed={result['tamed']} "
+                f"phase={result['phase']} "
+                f"skills={skills} "
+                f"suctl={server.suctl} "
+                f"pets={result['pets']}"
             )
         except Exception as exc:  # noqa: BLE001
             result["ok"] = False
@@ -247,12 +308,13 @@ def main() -> int:
     GLib.timeout_add(200, wait_ready)
     app.run([])
     server.close()
-    try:
-        os.unlink(log.name)
-    except OSError:
-        pass
+    for path in (log.name, tamer_config.name):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
     print(
-        "TAME SMOKE:",
+        "TAMER SMOKE:",
         "PASS" if result["ok"] else "FAIL",
         result["detail"],
     )

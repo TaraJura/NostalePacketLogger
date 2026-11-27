@@ -21,8 +21,9 @@ BOTLOG="$(mktemp)"
 BAZAR="$(mktemp)"
 FAMILY_STATE="$(mktemp)"
 MINIGAME_STATE="$(mktemp)"
+TAMER_STATE="$(mktemp)"
 MIRROR="$(mktemp -d)"
-trap 'rm -f "$PORTALS" "$BOTLOG" "$BAZAR" "$FAMILY_STATE" "$MINIGAME_STATE"; rm -rf "$MIRROR"' EXIT
+trap 'rm -f "$PORTALS" "$BOTLOG" "$BAZAR" "$FAMILY_STATE" "$MINIGAME_STATE" "$TAMER_STATE"; rm -rf "$MIRROR"' EXIT
 
 run_smoke() {
     xvfb-run -a env GDK_BACKEND=x11 \
@@ -32,6 +33,7 @@ run_smoke() {
         NTPL_BAZAR_CONFIG="$BAZAR" \
         NTPL_FAMILY_STATE="$FAMILY_STATE" \
         NTPL_MINIGAME_CONFIG="$MINIGAME_STATE" \
+        NTPL_TAMER_CONFIG="$TAMER_STATE" \
         NTPL_MIRROR_DIR="$MIRROR" \
         python3 "$ROOT/test/$1"
 }

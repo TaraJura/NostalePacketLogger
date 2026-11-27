@@ -49,7 +49,7 @@ The MinGW compiler is `i686-w64-mingw32-g++`. Override with
 ## Tests
 
 ```bash
-make -C linux host-test        # 390 stdlib unittest cases
+make -C linux host-test        # 395 stdlib unittest cases
 make -C linux speed-test       # native DLL speed-boost/walk-clamp test
 make -C linux key-test         # native DLL KEY| key-name parser test
 make -C linux gui-test         # six headless GTK4 smokes, needs xvfb

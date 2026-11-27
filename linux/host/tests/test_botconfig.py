@@ -65,40 +65,6 @@ class BotConfigTests(unittest.TestCase):
             BotConfig.from_dict(config.to_dict()).speed_boost, 35
         )
 
-    def test_tame_settings_default_to_chicken_and_are_clamped(self):
-        config = BotConfig()
-        self.assertFalse(config.tame)
-        self.assertEqual(config.tame_vnum, 333)
-        self.assertEqual(config.tame_slot, 1)
-        self.assertEqual(config.tame_hp_pct, 25.0)
-        loaded = BotConfig.from_dict(
-            {
-                "tame": True,
-                "tame_vnum": 333,
-                "tame_slot": 2,
-                "tame_hp_pct": 40,
-            }
-        )
-        self.assertTrue(loaded.tame)
-        self.assertEqual(loaded.tame_slot, 2)
-        self.assertEqual(loaded.tame_hp_pct, 40.0)
-        self.assertEqual(
-            BotConfig.from_dict({"tame_slot": 0}).tame_slot, 1
-        )
-        self.assertEqual(
-            BotConfig.from_dict({"tame_slot": 99}).tame_slot, 9
-        )
-        self.assertEqual(
-            BotConfig.from_dict({"tame_hp_pct": 99}).tame_hp_pct, 50.0
-        )
-        self.assertEqual(
-            BotConfig.from_dict({"tame_vnum": 0}).tame_vnum, 1
-        )
-        self.assertEqual(
-            BotConfig.from_dict(loaded.to_dict()).to_dict(),
-            loaded.to_dict(),
-        )
-
     def test_cast_boost_defaults_off_and_migrates_the_percentage(self):
         self.assertFalse(BotConfig().cast_boost)
         self.assertTrue(

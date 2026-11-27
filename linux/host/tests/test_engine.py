@@ -202,6 +202,9 @@ class EngineTests(unittest.TestCase):
             packet(Kind.RECV, "sc_p 5 333 1452978 1 3000 0 0 0 32")
         )
         self.assertEqual(world.pets, {4: 333, 5: 333})
+        self.assertEqual(
+            world.pet_entities, {4: 1452945, 5: 1452978}
+        )
 
         # msgi <type> <id>: the Game18N key a feature reacts to.
         world = self.engine.feed(packet(Kind.RECV, "msgi 0 2614 0 0 0 0 0"))
@@ -213,6 +216,7 @@ class EngineTests(unittest.TestCase):
 
         world = self.engine.feed(packet(Kind.RECV, "p_clear"))
         self.assertEqual(world.pets, {})
+        self.assertEqual(world.pet_entities, {})
 
     def test_cast_start_is_recorded(self):
         # ct <casterType> <casterId> <targetType> <targetId> <x> <y> <skill>

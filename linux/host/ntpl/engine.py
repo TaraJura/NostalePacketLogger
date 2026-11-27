@@ -310,6 +310,9 @@ class WorldState:
     #: empties it before the server repopulates the list. The tamer shows the
     #: occupancy and stops on the server's max-pet-slots message.
     pets: dict[int, int] = field(default_factory=dict)
+    #: The entity id of each pet slot (slot -> entity id), used by `suctl`
+    #: to send the tamed monsters at the sparring monster.
+    pet_entities: dict[int, int] = field(default_factory=dict)
     #: `ct <casterType> <casterId> <targetType> <targetId> <x> <y> <skill>`:
     #: a cast start. The Pet tamer confirms its `u_s` actually started a cast
     #: (a refused press, usually the client cooldown, sends no `ct`). The log
@@ -1125,11 +1128,20 @@ def _on_pet(world: WorldState, packet: Packet) -> None:
     if slot < 0:
         return
     world.pets[slot] = vnum
+    try:
+        entity_id = int(args[2])
+    except (IndexError, ValueError):
+        entity_id = 0
+    if entity_id > 0:
+        world.pet_entities[slot] = entity_id
+    else:
+        world.pet_entities.pop(slot, None)
 
 
 def _on_pet_clear(world: WorldState, packet: Packet) -> None:
     # p_clear -- the server sends it before repopulating the pet panel.
     world.pets.clear()
+    world.pet_entities.clear()
 
 
 def _on_teleport(world: WorldState, packet: Packet) -> None:

@@ -58,17 +58,21 @@
 | `Injector` says a logger is already loaded after `QUIT` | the old module stays mapped, and the guard refuses a second injection | reload with a new DLL filename and `Injector.exe --pid <pid> --dll <name>.dll --force` (only after that logger's QUIT and its `C:\ntpl-<pid>.port` file has disappeared; `--force` refuses while the port file exists), or restart the game client |
 | Client crashes after injecting a DLL | a second live logger was injected (two send/recv hooks) | restart the game client; never `--force` while the old logger is still listening. The injector now refuses if the old port file exists |
 | Bot cannot reach a target near a map edge | the only route crosses a warp tile and blocking is on | that is the protection working; walk there manually with blocking off, or fight from range |
-| `TARGET … ERR client build mismatch` in the Bot log | the running DLL's hardcoded selector is for another client build; 0.9.3.3262 needs **DLL 0.3.3** | restart the game client to load 0.3.3. Until then the host disables DLL TARGET and falls back to injected `ncif`, which does not set the client's own selection, so attacks may be refused and the Pet tamer cannot work |
+| `TARGET … ERR client build mismatch` in the Bot log | the running DLL's hardcoded selector is for another client build; 0.9.3.3262 needs **DLL 0.3.3** | restart the game client to load 0.3.3. Until then the host disables DLL TARGET and falls back to injected `ncif`, which does not set the client's own selection, so attacks may be refused; the Pet Trainer tab still worked live through ncif |
 
-## Pet tamer
+## Pet Trainer tab
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `Tame got no answer` and the bot stops | the cast started (the client sent `ct`) but the server sent no taming result — usually Tame is not on the chosen skill-bar slot or the Pet Trainer specialist card is not equipped | equip the card and put Tame on slot 1 (the default), then Start; a press the client itself refuses (its own cooldown) sends no `ct` and the tamer now retries in about a second instead of counting a failure |
-| `pet slots are full — release a pet…` | the server answered `msgi 0 1887` (maximum pet slots); the live panel has 8 slots (`sc_p` 0–7) | release a pet in game or expand the slots with the server's slot item, then Start again |
+| `Tame got no answer` and the tab stops | the cast started (the client sent `ct`) but the server sent no taming result — usually Tame is not on the chosen skill-bar slot or the Pet Trainer specialist card is not equipped | equip the card and put Tame on slot 1 (the default), then Start; a press the client itself refuses (its own cooldown) sends no `ct` and the tamer now retries in about a second instead of counting a failure |
+| `pet slots full — release or extract a pet…` (End to end off) | the server answered `msgi 0 1887` (maximum pet slots); the panel is full (the live slots are expandable past 7) | turn **End to end** on to train and extract, or release a pet in game / expand the slots, then Start again |
 | `taming failed 3 times` | the server kept refusing the tame (`msgi 0 2631`); Tame needs the monster **below 50% HP** and the character **higher level** than it (Tame = 1-star pets, Advanced Tame 1791 + Lure = 2-star) | the default 25% HP limit is already below the threshold, so check the character level and the monster's star rating; with the requirements met nosapki lists Tame at 100% |
 | `this skill cannot tame that monster` | the vnum or the Tame slot is wrong (the server answered `msgi 0 2623`) | set the right **Monster vnum** (Chicken = 333) and the slot with Tame |
-| The bot hits the monster but never tames | the monster is not on the configured vnum, the target is out of the 2-cell Tame range, or the Tame cooldown is still running | the frame line shows the target, its HP and the cooldown; check the vnum and the live line |
+| The tab hits the monster but never tames | the monster is not on the configured vnum, the target is out of the 2-cell Tame range, or the Tame cooldown is still running | the tab's live line shows the target, its HP and the cooldown; check the vnum |
+| `waiting in the Miniland … go to map 1 near (49,133)` | End to end is on but the character is neither in the Miniland nor on the portal map | travel to the configured portal map; the tab walks the last cells and steps on the portal itself |
+| `the pet is not at the maximum training level; train longer` | the Extract Essence cast got `msgi 0 2625` / `2639` (three training rounds tried) | raise **Train minutes** (the live extraction was after about 8 minutes) and Start again |
+| The training summons nothing | the summon needs the Miniland; or the summon slot is wrong | check **Summon slot** (live 2) and that the character is in the Miniland (map 20001) |
+| The pets never attack the sparring monster | `suctl` needs the pet entity ids from `sc_p` and the target vnum 1497 | check the tab's live line and the Bot log for `suctl`; the pets must be the configured vnum (Chicken 333) |
 
 ## Minigame
 
