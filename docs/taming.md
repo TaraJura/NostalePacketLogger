@@ -19,8 +19,12 @@ is no client hack, but it is automation and the game rules prohibit that.
 
 ## Live flow (2026-11-27, client PID 836, char root1 7001)
 
-The server only tames a weakened monster. The live session tamed chickens at
-**1/156 HP**; the tamer stops hitting at its HP limit and then casts Tame:
+The server only tames a monster that is **below 50% HP**, with the character
+**higher level** than the monster; **Tame** handles 1-star pets (100% once
+eligible per nosapki), **Advanced Tame** (1791, with a Lure) 2-star pets.
+The live session tamed chickens at **1/156 HP**; the tamer stops hitting at
+its HP limit (default 25%, already below the server's 50%) and then casts
+Tame:
 
 ```text
 SEND u_s 0 3 3039            basic attack / Whip (slot 0)
@@ -93,7 +97,9 @@ server says.
   otherwise the server sends no taming result and the tamer stops with
   "Tame got no answer".
 - The HP limit only decides when the tamer stops hitting. The server decides
-  whether the tame is allowed (the live server accepted 1 HP).
+  whether the tame is allowed: the monster must be below 50% HP and the
+  character a higher level (Tame = 1-star pets; Advanced Tame 1791 with a
+  Lure = 2-star).
 - Automation violates the game rules. The account risk belongs to the owner.
 
 ## Tests

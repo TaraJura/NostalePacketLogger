@@ -370,7 +370,9 @@ class MapPageMixin:
                     "(slot 0) until its HP is at or below the limit, then uses "
                     "Tame from the chosen skill-bar slot. It keeps going until "
                     "Stop, the server's max pet slots message, or three failed "
-                    "tames. Equip the Pet Trainer card first. Taming is normal "
+                    "tames. Equip the Pet Trainer card first; Tame needs the "
+                    "monster below 50% HP and a higher character level (Tame "
+                    "is for 1-star pets). Taming is normal "
                     "gameplay, but automation violates the game rules."
                 ),
             )

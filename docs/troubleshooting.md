@@ -65,7 +65,7 @@
 |---|---|---|
 | `Tame got no answer` and the bot stops | Tame is not on the chosen skill-bar slot, or the Pet Trainer specialist card is not equipped | equip the card and put Tame on slot 1 (the default), then Start; the Bot log says when the server sent no taming result |
 | `pet slots are full — release a pet…` | the server answered `msgi 0 1887` (maximum pet slots); the live panel has 8 slots (`sc_p` 0–7) | release a pet in game or expand the slots with the server's slot item, then Start again |
-| `taming failed 3 times` | the server kept refusing the tame (`msgi 0 2631`), usually the target HP was still too high for the server | raise **Hit until HP ≤** (the live server accepted 1 HP; 25% is the default) or pick a lower-level monster |
+| `taming failed 3 times` | the server kept refusing the tame (`msgi 0 2631`); Tame needs the monster **below 50% HP** and the character **higher level** than it (Tame = 1-star pets, Advanced Tame 1791 + Lure = 2-star) | the default 25% HP limit is already below the threshold, so check the character level and the monster's star rating; with the requirements met nosapki lists Tame at 100% |
 | `this skill cannot tame that monster` | the vnum or the Tame slot is wrong (the server answered `msgi 0 2623`) | set the right **Monster vnum** (Chicken = 333) and the slot with Tame |
 | The bot hits the monster but never tames | the monster is not on the configured vnum, the target is out of the 2-cell Tame range, or the Tame cooldown is still running | the frame line shows the target, its HP and the cooldown; check the vnum and the live line |
 
